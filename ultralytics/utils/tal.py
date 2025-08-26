@@ -126,7 +126,7 @@ class TaskAlignedAssigner(nn.Module):
 
         return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
 
-    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
+    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anchor_points, mask_gt):
         """
         Get positive mask for each ground truth box.
 
@@ -135,7 +135,7 @@ class TaskAlignedAssigner(nn.Module):
             pd_bboxes (torch.Tensor): Predicted bounding boxes with shape (bs, num_total_anchors, 4).
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
-            anc_points (torch.Tensor): Anchor points with shape (num_total_anchors, 2).
+            anchor_points (torch.Tensor): Anchor points with shape (num_total_anchors, 2).
             mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (bs, n_max_boxes, 1).
 
         Returns:
@@ -143,11 +143,13 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric with shape (bs, max_num_obj, h*w).
             overlaps (torch.Tensor): Overlaps between predicted and ground truth boxes with shape (bs, max_num_obj, h*w).
         """
-        mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
+        mask_in_gts = self.select_candidates_in_gts(anchor_points, gt_bboxes)
+        save2debug( 'mask_in_gts.txt', mask_in_gts, True)
         # Get anchor_align metric, (b, max_num_obj, h*w)
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
+        save2debug( 'mask_topk.txt', mask_topk, True)
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         mask_pos = mask_topk * mask_in_gts * mask_gt
 
@@ -168,7 +170,7 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric combining classification and localization.
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
-        na = pd_bboxes.shape[-2]
+        na = pd_bboxes.shape[-2] # number of anchor points h*w
         mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
         overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
         bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
@@ -236,9 +238,14 @@ class TaskAlignedAssigner(nn.Module):
         """
         Compute target labels, target bounding boxes, and target scores for the positive anchor points.
 
+        TODO: h * w is not the size of dimension 2 of the tensors. The value is extracted from the gt parameters.  
+
         Args:
             gt_labels (torch.Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
                                 batch size and max_num_obj is the maximum number of objects.
+            TODO : replace single label by vector of boolean labels of size number classes (0 : is not in class / 1 : is in class)
+            TODO : this could event be probability of being in that class
+            TODO : shape should be ( b, max_num_obj, num_classes) 
             gt_bboxes (torch.Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 4).
             target_gt_idx (torch.Tensor): Indices of the assigned ground truth objects for positive
                                     anchor points, with shape (b, h*w), where h*w is the total
@@ -248,31 +255,46 @@ class TaskAlignedAssigner(nn.Module):
 
         Returns:
             target_labels (torch.Tensor): Target labels for positive anchor points with shape (b, h*w).
+            TODO : What's the use as target_scores contains the information ?
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
             target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
         """
+        save2debug( 'gt_labels.txt', gt_labels)
+        save2debug( 'gt_bboxes.txt', gt_bboxes)
+        save2debug( 'target_gt_idx.txt', target_gt_idx, True)
+        save2debug( 'fg_mask.txt', fg_mask, True)
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
         target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
-        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
 
-        # Assigned target scores
+        # Assigned target scores, minimum is 0, maximum is positive
+        # TODO: is the clamp_ needed ?
+        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         target_labels.clamp_(0)
 
+        # TODO: Load scores from ground truth files.
         # 10x faster than F.one_hot()
+        # Create an int64 zero tensor of dimension batch size * anchor point number * class number
         target_scores = torch.zeros(
             (target_labels.shape[0], target_labels.shape[1], self.num_classes),
             dtype=torch.int64,
             device=target_labels.device,
         )  # (b, h*w, 80)
-        target_scores.scatter_(2, target_labels.unsqueeze(-1), 1)
-
+        # 
+        target_labels_unsqueezed = target_labels.unsqueeze(-1)
+        target_scores.scatter_(2, target_labels_unsqueezed, 1)
+        # Duplicate fg_mask class number times along the 3rd dimension
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
+        # Set to zero 
         target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
-
+        
+        torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
+        save2debug( 'target_labels.txt', target_labels)
+        save2debug( 'target_bboxes.txt', target_bboxes)
+        save2debug( 'target_scores.txt', target_scores)
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
@@ -295,8 +317,11 @@ class TaskAlignedAssigner(nn.Module):
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
-        bbox_deltas = torch.cat((xy_centers[None] - lt, rb - xy_centers[None]), dim=2).view(bs, n_boxes, n_anchors, -1)
-        return bbox_deltas.amin(3).gt_(eps)
+        anchors_lt = xy_centers[None] - lt
+        rb_anchors = rb - xy_centers[None]
+        bbox_deltas = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
+        bbox_deltas = bbox_deltas.amin(3)
+        return bbox_deltas.gt_(eps)
 
     @staticmethod
     def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
@@ -365,7 +390,7 @@ class RotatedTaskAlignedAssigner(TaskAlignedAssigner):
 
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-    """Generate anchors from features."""
+    """Generate anchor points and stride tensors using the size feature tensors."""
     anchor_points, stride_tensor = [], []
     assert feats is not None
     dtype, device = feats[0].dtype, feats[0].device
@@ -379,9 +404,12 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     return torch.cat(anchor_points), torch.cat(stride_tensor)
 
 
-def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
-    """Transform distance(ltrb) to box(xywh or xyxy)."""
-    lt, rb = distance.chunk(2, dim)
+def dist2bbox(relative_points, anchor_points, xywh=True, dim=-1):
+    """Transform coordinates relative to anchor_points distance(ltrb) to absolute for box (xywh or xyxy)."""
+    # left-top and right-bottom
+    lt, rb = relative_points.chunk(2, dim)
+    # the bounding box is relative to the anchor points
+    # x1y1 and x2y2 are the absolute position
     x1y1 = anchor_points - lt
     x2y2 = anchor_points + rb
     if xywh:
@@ -392,7 +420,7 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
 
 
 def bbox2dist(anchor_points, bbox, reg_max):
-    """Transform bbox(xyxy) to dist(ltrb)."""
+    """Transform the absolute coordinates of the bbox(xyxy) to relative ones (ltrb)."""
     x1y1, x2y2 = bbox.chunk(2, -1)
     return torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1).clamp_(0, reg_max - 0.01)  # dist (lt, rb)
 
@@ -417,3 +445,20 @@ def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):
     x, y = xf * cos - yf * sin, xf * sin + yf * cos
     xy = torch.cat([x, y], dim=dim) + anchor_points
     return torch.cat([xy, lt + rb], dim=dim)
+
+def save2debug(filename,tensor,nonzero=False):
+    def aux(file,tensor,index,nonzero):
+        if tensor.numel() == 1:
+            if (tensor.item() != 0):
+                print( index + "] = " + str())
+        else:
+            for position in range(tensor.size(dim=0)):
+                aux(file, element, index + ", " + str(position), nonzero)
+            
+    with open( filename, 'w') as f:
+        if nonzero:
+            nonzeros = tensor.nonzero().tolist()
+            print(len(nonzeros), file=f)
+            print(nonzeros, file=f)
+        print(tensor.shape, file=f)
+        print(tensor.tolist(), file=f)

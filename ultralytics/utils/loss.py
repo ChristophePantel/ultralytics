@@ -99,9 +99,12 @@ class DFLoss(nn.Module):
         tr = tl + 1  # target right
         wl = tr - target  # weight left
         wr = 1 - wl  # weight right
+        cel = F.cross_entropy(pred_dist, tl.view(-1), reduction="none").view(tl.shape)
+        cer = F.cross_entropy(pred_dist, tr.view(-1), reduction="none").view(tl.shape)
+        r = (F.cross_entropy(pred_dist, tl.view(-1), reduction="none").view(tl.shape) * wl
+            + F.cross_entropy(pred_dist, tr.view(-1), reduction="none").view(tl.shape) * wr)
         return (
-            F.cross_entropy(pred_dist, tl.view(-1), reduction="none").view(tl.shape) * wl
-            + F.cross_entropy(pred_dist, tr.view(-1), reduction="none").view(tl.shape) * wr
+            r
         ).mean(-1, keepdim=True)
 
 
@@ -190,6 +193,24 @@ class KeypointLoss(nn.Module):
         e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
+class KnowledgeBasedLoss(nn.Module):
+    """Criterion class for computing losses based on relations between classes in a knowledge model."""
+    
+    def __init__(self, model, c_weight, d_weight, e_weight):
+        """Initialize the KnowledgeModelLoss class."""
+        super().__init__()
+        self.model = model
+        self.c_weight = c_weight
+        self.d_weight = d_weight
+        self.e_weight = e_weight
+
+    def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
+        """Compute knowledge based loss for class predication score."""
+        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
+        kpt_loss_factor = kpt_mask.shape[1] / (torch.sum(kpt_mask != 0, dim=1) + 1e-9)
+        # e = d / (2 * (area * self.sigmas) ** 2 + 1e-9)  # from formula
+        e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
+        return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
@@ -232,46 +253,82 @@ class v8DetectionLoss:
         return out
 
     def bbox_decode(self, anchor_points: torch.Tensor, pred_dist: torch.Tensor) -> torch.Tensor:
-        """Decode predicted object bounding box coordinates from anchor points and distribution."""
+        """Decode predicted object bounding box coordinates from anchor points and distribution.
+        
+        Args:
+            anchor_points (Tensor[]):
+            pred_dist (Tensor[]):
+        
+        Returns:
+        """
         if self.use_dfl:
+            # Distributed Focal Loss
             b, a, c = pred_dist.shape  # batch, anchors, channels
-            pred_dist = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.type(pred_dist.dtype))
+            assert c % 4 == 0 # must be a multiple of 4 for the following split
+            # Split the channels between two dimensions, compute a softmax on the 4 size 3rd dimension, 
+            pred_dist = pred_dist.view(b, a, 4, c // 4)
+            pred_dist = pred_dist.softmax(3)
+            pred_dist = pred_dist.matmul(self.proj.type(pred_dist.dtype))
             # pred_dist = pred_dist.view(b, a, c // 4, 4).transpose(2,3).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
-        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size.
+        Args:
+            preds (Union[ Tuple( Tensor, ...), Tensor]) : prediction computed by the trainee network to compute the loss with respect to the ground truth
+            batch (Dict[str, torch.Tensor]): ground truth data
+        
+        Returns:
+            scaled loss items (torch.Tensor[Float]):
+            loss items (torch.Tensor[Float]):
+        """
+        loss = torch.zeros(3, device=self.device)  # 3 loss items: box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
-        )
+        # merge all the prediction levels along dimension 2
+        pred_merged = torch.cat( [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
+        # split between bounding box and class score features
+        pred_distri, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
 
+        # reorganize dimensions for future operations
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
         imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
+        # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
         # Targets
-        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+        # Merge ground truth tensors (indexes, classes, bounding boxes) in a single tensor
+        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"])
+        targets = torch.cat(batch_merge, 1)
+        # Generate the ground truth data in a single tensor
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        # Split between label and bounding box ground truth data
         gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
-        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+        # Identify future positive anchor points
+        # Sum the components of each bounding boxe
+        gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
+        # TODO: make it boolean
+        mask_gt = gt_bboxes_sum.gt_(0.0)
 
         # Pboxes
+        # Compute predicted bounding boxes according to anchor points
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
         # dfl_conf = pred_distri.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
         # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
 
+        smoothed_pred_scores = pred_scores.detach().sigmoid()
+        scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
+        scaled_anchor_points = anchor_points * stride_tensor
+
         _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
             # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
-            pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-            anchor_points * stride_tensor,
+            smoothed_pred_scores,
+            scaled_pred_boxes,
+            scaled_anchor_points,
             gt_labels,
             gt_bboxes,
             mask_gt,

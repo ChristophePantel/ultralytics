@@ -756,7 +756,7 @@ class Model(torch.nn.Module):
                 epochs (int): Number of training epochs.
                 batch (int): Batch size for training.
                 imgsz (int): Input image size.
-                device (str): Device to run training on (e.g., 'cuda', 'cpu').
+                device (str): Device to run training on (e.g., 'cuda', 'cpu', 'mps').
                 workers (int): Number of worker threads for data loading.
                 optimizer (str): Optimizer to use for training.
                 lr0 (float): Initial learning rate.
