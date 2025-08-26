@@ -193,6 +193,231 @@ class KeypointLoss(nn.Module):
         e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
+# TODO (CP/IRIT): LogicSeg derived loss to enforce consistency between the knowledge model and the prediction.
+# Code extracted from LogicSeg pascal_part module:
+
+    # Prépare les matrices utilisées pour exploiter la relation de composition dans les fonctions de loss
+    # targets : tenseur qui associe à chaque point (h,w) d'une image b un numéro de classe
+    # targets_high : tenseur de même taille que targets qui associe à chaque point (h,w) d'une image 
+    # def prepare_targets(targets):
+    #     # b : batch / sample number
+    #     # h : height of the pixel in the sample
+    #     # w : width of the pixel in the sample
+    #     b, h, w = targets.shape
+    #     # initialisation à 0 du tenseur targets_high de même taille que le tenseur targets
+    #     targets_high = torch.zeros((b, h, w), dtype=targets.dtype, device=targets.device)
+    #     # séquence des numéros des classes composites
+    #     indices_high = []
+    #     # parcours la liste des classes composites
+    #     # index sera le numéro de la classe de 0 à nombre de classes composites - 1
+    #     # high sera le nom de la classe composite
+    #     for index, high in enumerate(hiera["hiera_high"].keys()):
+    #         # intervalles des numéros des classes composantes qui composent la classe composite de numéro index et de nom high
+    #         indices = hiera["hiera_high"][high]
+    #         # pour chaque numéro de classe composante qui composent la classe composition
+    #         for ii in range(indices[0], indices[1]):
+    #             # les éléments de targets_high pour lesquels targets à la valeur ii prennent la valeur index
+    #             # targets_high contient donc le numéro de la classe composite alors que targets contient le numéro du composant
+    #             targets_high[targets==ii] = index
+    #         # ajout de l'intervalle de numéro de classes composantes à l'indice de la classe composite
+    #         indices_high.append(indices)
+    #
+    #     return targets, targets_high, indices_high
+
+
+    # # Fonction de perte de type Binary Cross Entropy
+    # # predictions : données prédites
+    # # targets : données terrain
+    # def loss_bce(predictions, targets):
+    #     bce = F.binary_cross_entropy_with_logits(predictions, targets.float())
+    #     loss = bce*10
+    #
+    #     return loss
+    #
+    # # Fonction de perte de type Binary Cross Entropy Focalisée
+    # # predictions : données prédites
+    # # targets : données terrain
+    # def losses_bce_focal(predictions, targets, valid_indices, eps=1e-8, alpha=0.5, gamma=2):
+    #     predictions = torch.sigmoid(predictions.float())
+    #     loss = ((-alpha*targets*torch.pow((1.0-predictions),gamma)*torch.log(predictions+eps)
+    #              -(1-alpha)*(1.0-targets)*torch.pow(predictions, gamma)*torch.log(1.0-predictions+eps))
+    #              *valid_indices).sum()/valid_indices.sum()
+    #
+    #     return loss
+
+    # # predictions : tenseur des données prédites pour chaque point de l'image
+    # # num_classes : 
+    # def loss_e(predictions, num_classes, p=3.0):
+    #     # Dimensions : b(atch) / sample number x channel x h(eight) x w(idth)
+    #     b, _, h, w = predictions.shape
+    #     # Application d'une sigmoide pour lisser entre -1 et 1
+    #     predictions = torch.sigmoid(predictions.float())
+    #
+    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+    #     # extraction de la partie correspondant aux numéros des 21 premières classes supérieures (les composites)
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     # applatissement pour faciliter la vectorisation
+    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
+    #
+    #     # extraction de la partie correspondant aux numéros des dernières classes (après 21) (les composantes)
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
+    #
+    #     # filter high confidence pixels
+    #    # Compte le nombre de classes avec une forte prédiction pour chaque pixel de chaque image
+    #     easy_A_pos = (MCMA>0.7).sum(-1)
+    #    # Compte le nombre de classes avec une faible prédiction pour chaque pixel de chaque image
+    #     easy_A_neg = (MCMA<0.3).sum(-1)
+    #    # détermine les pixels difficiles
+    #     hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_classes-1).float()
+    #     new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
+    #
+    #     easy_B_pos = (MCMB>0.7).sum(-1)
+    #     easy_B_neg = (MCMB<0.3).sum(-1)
+    #     hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
+    #     new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
+    #
+    #     mask_A = (1 - torch.eye(num_classes))[None, :, :].cuda()
+    #     mask_B = (1 - torch.eye(21))[None, :, :].cuda()
+    #     # predicates: not (x and y)
+    #     predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
+    #     predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
+    #
+    #     # 1. for all pixels: use pmeanError to aggregate
+    #     all_A = torch.pow(torch.pow(predicate_A, p).mean(), 1.0/p)
+    #     all_B = torch.pow(torch.pow(predicate_B, p).mean(), 1.0/p)
+    #     # 2. average the clauses
+    #     factor_A = num_classes*num_classes/(num_classes*num_classes + 21*21)
+    #     factor_B = 21*21/(num_classes*num_classes + 21*21)
+    #     loss_ex = all_A*factor_A + all_B*factor_B
+    #
+    #     return loss_ex
+
+
+    # def loss_c(predictions, num_classes, indices_high, eps=1e-8, p=5):
+    #     b, _, h, w = predictions.shape
+    #     predictions = torch.sigmoid(predictions.float())
+    #
+    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+    #
+    #     # v : classe composante, sous classe
+    #     # extraction de la partie correspondant aux numéros ???
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     # applatissement pour faciliter la vectorisation
+    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
+    #
+    #     # p_v : parent of v, i.e. classe composite, super classe
+    #     # extraction de la partie correspondant aux numéros ???
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
+    #
+    #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
+    #     predicate = MCMA.clone()
+    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+    #     # Pour chaque numéro de classe composite
+    #     for ii in range(21):
+    #         # Intervalle des numéros des classes composantes
+    #         indices = indices_high[ii]
+    #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
+    #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
+    #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
+    #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
+    #
+    #     # for all clause: use pmeanError to aggregate
+    # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
+    #     loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
+    #
+    #     return loss_c
+
+    # # predictions : tenseur qui associe à chaque point de chaque image la probabilité pour chaque classe
+    # # num_classes : inutilisé
+    # # indices_high :
+    # # eps :
+    # # p :
+    # def loss_d(predictions, num_classes, indices_high, eps=1e-8, p=5):
+    #     b, _, h, w = predictions.shape
+    #     predictions = torch.sigmoid(predictions.float())
+    #
+    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+    #
+    #     # c_n^v : n-ème sous-classes de v ou classes composantes ?
+    #     # extraction de la partie correspondant aux numéros des ???
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     # applatissement pour faciliter la vectorisation
+    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
+    #
+    #     # v : classe composites
+    #     # extraction de la partie correspondant aux numéros des ???
+    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
+    #
+    #     # predicate:  1-p+p*q, with aggregater, simplified to p-p*q
+    #     predicate = MCMB.clone()
+    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+    #     # Pour chaque numéro de classe composite
+    #     for ii in range(21):
+    #         # Intervalle des numéros des classes composantes
+    #         indices = indices_high[ii]
+    #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
+    #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
+    #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
+    #         predicate[:,ii:ii+1] = MCMB[:,ii:ii+1] - MCMB[:,ii:ii+1] * MCMA[:,indices[0]:indices[1]].max(dim=1, keepdim=True)[0]
+    #
+    #      # for all clause: use pmeanError to aggregate
+    # #     loss_d = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/21
+    #     loss_d = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
+    #
+    #     return loss_d
+
+    # class HieraLossPascalPart(nn.Module):
+    #
+    #     def __init__(self,
+    #                  num_classes,
+    #                  use_sigmoid=False,
+    #                  loss_weight=1.0,
+    #                  loss_name='hieralosspascalpart'):
+    #         super(HieraLossPascalPart, self).__init__()
+    #         self.num_classes = num_classes
+    #         self.loss_weight = loss_weight
+    #         self._loss_name = loss_name
+    #
+    #     # label : tenseur qui associe à chaque point de l'image sa classe
+    #     # cls_score : tenseur qui associe à chaque point de l'image un vecteur classe/probabilité
+    #     # cls_score_ori : tenseur qui associe à chaque point de l'image un vecteur classe/probabilité
+    #     def forward(self,
+    #                 cls_score,
+    #                 label,
+    #                 cls_score_ori,
+    #                 step,
+    #                 weight=None,
+    #                 **kwargs):
+    #         """Forward function."""
+    #
+    #         targets, targets_top, indices_top = prepare_targets(label)
+    #
+    #         # build hierarchy GT
+    #         void_indices = (targets==255)
+    #         targets[void_indices]=0
+    #         targets = F.one_hot(targets, self.num_classes).permute(0,3,1,2)
+    #         targets_top = F.one_hot(targets_top, 21).permute(0,3,1,2)
+    #         targets = torch.cat([targets, targets_top], dim=1)
+    #         valid_indices = (~void_indices).unsqueeze(1)
+    #
+    #         hiera_loss = losses_bce_focal(cls_score, targets, valid_indices)
+    #         e_rule = loss_e(cls_score_ori, self.num_classes)
+    #         c_rule = loss_c(cls_score_ori, self.num_classes, indices_top)
+    #         d_rule = loss_d(cls_score_ori, self.num_classes, indices_top)
+    #
+    #         # n'accorde de l'importance aux pertes liées au modèle de données qu'à partir d'un certain nombre d'étapes
+    #         if step<20000:
+    #             factor=0
+    #         elif step<50000:
+    #             factor = float(step-20000)/30000.0
+    #         else:
+    #             factor = 1.0
+    #
+    #         return 0.5*hiera_loss + 0.3*factor*(c_rule+d_rule+e_rule*2/3)
+    
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
@@ -203,6 +428,15 @@ class KnowledgeBasedLoss(nn.Module):
         self.c_weight = c_weight
         self.d_weight = d_weight
         self.e_weight = e_weight
+        
+    def loss_c(self):
+        pass
+    
+    def loss_d(self):
+        pass
+    
+    def loss_e(self):
+        pass
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""

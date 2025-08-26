@@ -174,7 +174,7 @@ def verify_image(args: Tuple) -> Tuple:
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
     return (im_file, cls), nf, nc, msg
 
-
+# TODO (CP/IRIT): Load multiple class scores (needed for hierarchical knowledge model integration.
 def verify_image_label(args: Tuple) -> List:
     """Load and verify all image / label pairs."""
     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args

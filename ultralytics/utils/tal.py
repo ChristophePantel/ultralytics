@@ -275,7 +275,7 @@ class TaskAlignedAssigner(nn.Module):
         target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         target_labels.clamp_(0)
 
-        # TODO: Load scores from ground truth files.
+        # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
         # 10x faster than F.one_hot()
         # Create an int64 zero tensor of dimension batch size * anchor point number * class number
         target_scores = torch.zeros(
