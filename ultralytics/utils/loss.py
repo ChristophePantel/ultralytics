@@ -268,7 +268,7 @@ class KeypointLoss(nn.Module):
     #     easy_A_pos = (MCMA>0.7).sum(-1)
     #    # Compte le nombre de classes avec une faible prédiction pour chaque pixel de chaque image
     #     easy_A_neg = (MCMA<0.3).sum(-1)
-    #    # détermine les pixels difficiles
+    #    # détermine les pixels difficiles (plusieurs classes forte prédiction ou intermédiaire
     #     hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_classes-1).float()
     #     new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
     #
@@ -483,7 +483,7 @@ class v8DetectionLoss:
                 matches = i == j
                 if n := matches.sum():
                     out[j, :n] = targets[matches, 1:]
-            out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+            out[..., -4:] = xywh2xyxy(out[..., -4:].mul_(scale_tensor))
         return out
 
     def bbox_decode(self, anchor_points: torch.Tensor, pred_dist: torch.Tensor) -> torch.Tensor:
@@ -536,12 +536,15 @@ class v8DetectionLoss:
 
         # Targets
         # Merge ground truth tensors (indexes, classes, bounding boxes) in a single tensor
-        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"])
+        # batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"])
+        num_class = batch["cls"].shape[1]
+        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["bboxes"])
         targets = torch.cat(batch_merge, 1)
         # Generate the ground truth data in a single tensor
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
-        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+        # TODO (CP/IRIT): adapt to the size of the parameters not to a constant
+        gt_labels, gt_bboxes = targets.split((num_class, 4), 2)  # cls, xyxy
         # Identify future positive anchor points
         # Sum the components of each bounding boxe
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)

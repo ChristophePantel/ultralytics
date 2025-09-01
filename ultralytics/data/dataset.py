@@ -84,7 +84,7 @@ class YOLODataset(BaseDataset):
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
         self.data = data
-        assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
+        assert not (self.use_segments and self.use_keypoints), "Cannot use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> Dict:
@@ -122,7 +122,8 @@ class YOLODataset(BaseDataset):
                 ),
             )
             pbar = TQDM(results, desc=desc, total=total)
-            for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+            # for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+            for im_file, classes, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                 nm += nm_f
                 nf += nf_f
                 ne += ne_f
@@ -132,8 +133,14 @@ class YOLODataset(BaseDataset):
                         {
                             "im_file": im_file,
                             "shape": shape,
-                            "cls": lb[:, 0:1],  # n, 1
-                            "bboxes": lb[:, 1:],  # n, 4
+                            # TODO (CP/IRIT): lb should not be an array mixing class and bounding boxes
+                            # or the bounding boxes should be the last 4 and the classes the previous ones
+                            # Classes are the first values before the bounding boxes
+                            # "cls": lb[:, 0:-4],  # n, 1
+                            "cls": classes,
+                            # Bounding boxes are the last four values
+                            # "bboxes": lb[:, -4:],  # n, 4
+                            "bboxes": bboxes,
                             "segments": segments,
                             "keypoints": keypoint,
                             "normalized": True,

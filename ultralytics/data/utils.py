@@ -175,6 +175,10 @@ def verify_image(args: Tuple) -> Tuple:
     return (im_file, cls), nf, nc, msg
 
 # TODO (CP/IRIT): Load multiple class scores (needed for hierarchical knowledge model integration.
+# Simplest is to create the scores here to avoid irregular data (number of positive classes is different for each element.
+# Or to exchange sequences of classes
+# Should separate classes and boxes as segments and keypoints are already separated.
+# File structure depends on the task (classification, detection, obb, segmentation, pose)
 def verify_image_label(args: Tuple) -> List:
     """Load and verify all image / label pairs."""
     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
@@ -199,24 +203,40 @@ def verify_image_label(args: Tuple) -> List:
         if os.path.isfile(lb_file):
             nf = 1  # label found
             with open(lb_file, encoding="utf-8") as f:
+                # Extract the various data items from each line
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                # TODO (CP/IRIT): why not 5 (cls, x, y, w, h)
                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
-                lb = np.array(lb, dtype=np.float32)
+                    # TODO (CP/IRIT): create a bounding box around segments
+                    boxes = segments2boxes(segments)
+                    lb = np.concatenate((classes.reshape(-1, 1), boxes), 1)  # (cls, xywh)
+                lb = np.array(lb, dtype=np.float32) # lb contains 5 elements
+            # Check if knowledge model is available and load additional classes
+            km_file = lb_file.rsplit('.',1)[0]+'.km'
+            if os.path.isfile(km_file):
+                with open(km_file, encoding="utf-8") as km_f:
+                # Extract the various data items from each line
+                    km_lb = np.array([x.split() for x in km_f.read().strip().splitlines() if len(x)],dtype=np.float32)
+            else:
+                km_lb = np.zeros((len(lb),0))
             if nl := len(lb):
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
+                    classes = np.array([x[0:1] for x in lb], dtype=np.float32)
+                    boxes = np.array([x[1:5] for x in lb], dtype=np.float32)
                 else:
                     assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
+                    # Case of a bounding box, these are not keypoints
                     points = lb[:, 1:]
                 # Coordinate points check with 1% tolerance
                 assert points.max() <= 1.01, f"non-normalized or out of bounds coordinates {points[points > 1.01]}"
                 assert lb.min() >= -0.01, f"negative class labels {lb[lb < -0.01]}"
 
                 # All labels
+                # TODO (CP/IRIT): Extract all classes (not only the first)
                 max_cls = 0 if single_cls else lb[:, 0].max()  # max label count
                 assert max_cls < num_cls, (
                     f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
@@ -239,12 +259,22 @@ def verify_image_label(args: Tuple) -> List:
             if ndim == 2:
                 kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
+        # TODO (CP/IRIT): 
         lb = lb[:, :5]
-        return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
+        classes = np.zeros((nl,num_cls),dtype=np.float32)
+        for i in range(nl):
+                for cls in lb[i,0:-4]:
+                    classes[i,int(cls)]=1.0
+        classes = lb[:,0:-4]
+        bboxes = lb[:,-4:]
+        # returns a Tuple
+        # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
+        return im_file, classes, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
-        return [None, None, None, None, None, nm, nf, ne, nc, msg]
+        # returns a List 
+        return [None, None, None, None, None, None, nm, nf, ne, nc, msg]
 
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: Dict[int, str]):

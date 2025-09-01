@@ -162,6 +162,7 @@ class TaskAlignedAssigner(nn.Module):
         Args:
             pd_scores (torch.Tensor): Predicted classification scores with shape (bs, num_total_anchors, num_classes).
             pd_bboxes (torch.Tensor): Predicted bounding boxes with shape (bs, num_total_anchors, 4).
+            # Why are the labels used if it relates to the boxes ?
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
             mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (bs, n_max_boxes, h*w).
@@ -177,8 +178,13 @@ class TaskAlignedAssigner(nn.Module):
 
         ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
         ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
-        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
+        # TODO (CP/IRIT): Purpose of ind[1]
+        gt_labels_squeeze = gt_labels.squeeze(-1)
+        ind[1] =  gt_labels_squeeze # b, max_num_obj
         # Get the scores of each grid for each gt cls
+        ind_0 = ind[0]
+        ind_1 = ind[1]
+        pd_scores_ind = pd_scores[ind_0, :, ind_1]
         bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w
 
         # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)

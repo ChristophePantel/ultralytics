@@ -2200,6 +2200,7 @@ class Format:
                 )
             labels["masks"] = masks
         labels["img"] = self._format_img(img)
+        # Switch from numpy arrays to torch Tensors
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
