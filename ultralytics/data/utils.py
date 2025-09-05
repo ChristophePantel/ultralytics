@@ -235,7 +235,7 @@ def verify_image_label(args: tuple) -> list:
                     points = lb[:, 1:]
                 # Coordinate points check with 1% tolerance
                 assert points.max() <= 1.01, f"non-normalized or out of bounds coordinates {points[points > 1.01]}"
-                assert lb.min() >= -0.01, f"negative class labels {lb[lb < -0.01]}"
+                assert lb.min() >= -0.01, f"negative class labels or coordinate {lb[lb < -0.01]}"
 
                 # All labels
                 # TODO (CP/IRIT): Extract all classes (not only the first)
