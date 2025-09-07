@@ -713,6 +713,7 @@ def plot_images(
         This function supports both tensor and numpy array inputs. It will automatically
         convert tensor inputs to numpy arrays for processing.
     """
+    # TODO (CP/IRIT): should "scores" be managed in the same way ?
     for k in {"cls", "bboxes", "conf", "masks", "keypoints", "batch_idx", "images"}:
         if k not in labels:
             continue

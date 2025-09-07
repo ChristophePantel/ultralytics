@@ -508,6 +508,7 @@ class v8DetectionLoss:
 
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size.
+        TODO (CP/IRIT): Should all tensors be on the same device there ?
         Args:
             preds (Union[ Tuple( Tensor, ...), Tensor]) : prediction computed by the trainee network to compute the loss with respect to the ground truth
             batch (Dict[str, torch.Tensor]): ground truth data
@@ -536,14 +537,20 @@ class v8DetectionLoss:
         # Targets
         # Merge ground truth tensors (indexes, classes, bounding boxes) in a single tensor
         # batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"])
-        num_class = batch["cls"].shape[1]
-        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["bboxes"])
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
+        # TODO (CP/IRIT): need to ensure that all tensors are on the same device.
+        num_class = batch["scores"].shape[1]
+        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["scores"], batch["bboxes"])
         targets = torch.cat(batch_merge, 1)
         # Generate the ground truth data in a single tensor
+        # TODO (CP/IRIT): Why is the preprocess done on a single tensor as it is limited to bounding boxes ?
+        # TODO (CP/IRIT): Should the scores be added to the tensor in the same way as the core label ?
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT): adapt to the size of the parameters not to a constant
-        gt_labels, gt_bboxes = targets.split((num_class, 4), 2)  # cls, xyxy
+        gt_labels, gt_scores, gt_bboxes = targets.split((1, num_class, 4), 2)  # cls, scores, xyxy
+        # TODO (CP/IRIT): get the scores
+        # gt_scores = TODO
         # Identify future positive anchor points
         # Sum the components of each bounding boxe
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
@@ -566,6 +573,7 @@ class v8DetectionLoss:
             scaled_pred_boxes,
             scaled_anchor_points,
             gt_labels,
+            gt_scores,
             gt_bboxes,
             mask_gt,
         )
@@ -619,6 +627,7 @@ class v8SegmentationLoss(v8DetectionLoss):
         # Targets
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
             targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
             gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
@@ -806,6 +815,7 @@ class v8PoseLoss(v8DetectionLoss):
         # Targets
         batch_size = pred_scores.shape[0]
         batch_idx = batch["batch_idx"].view(-1, 1)
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
@@ -941,6 +951,7 @@ class v8ClassificationLoss:
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the classification loss between predictions and true labels."""
         preds = preds[1] if isinstance(preds, (list, tuple)) else preds
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         loss = F.cross_entropy(preds, batch["cls"], reduction="mean")
         return loss, loss.detach()
 
@@ -992,6 +1003,7 @@ class v8OBBLoss(v8DetectionLoss):
         # targets
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"].view(-1, 5)), 1)
             rw, rh = targets[:, 4] * imgsz[0].item(), targets[:, 5] * imgsz[1].item()
             targets = targets[(rw >= 2) & (rh >= 2)]  # filter rboxes of tiny size to stabilize training

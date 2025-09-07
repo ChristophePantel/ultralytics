@@ -636,6 +636,7 @@ def yolo_bbox2segment(im_dir: str | Path, save_dir: str | Path | None = None, sa
         texts = []
         lb_name = Path(label["im_file"]).with_suffix(".txt").name
         txt_file = save_dir / lb_name
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = label["cls"]
         for i, s in enumerate(label["segments"]):
             if len(s) == 0:

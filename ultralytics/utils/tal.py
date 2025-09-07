@@ -45,7 +45,7 @@ class TaskAlignedAssigner(nn.Module):
         self.eps = eps
 
     @torch.no_grad()
-    def forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt):
+    def forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt):
         """
         Compute the task-aligned assignment.
 
@@ -81,15 +81,15 @@ class TaskAlignedAssigner(nn.Module):
             )
 
         try:
-            return self._forward(pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt)
+            return self._forward(pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt)
         except torch.cuda.OutOfMemoryError:
             # Move tensors to CPU, compute, then move back to original device
             LOGGER.warning("CUDA OutOfMemoryError in TaskAlignedAssigner, using CPU")
-            cpu_tensors = [t.cpu() for t in (pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt)]
+            cpu_tensors = [t.cpu() for t in (pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt)]
             result = self._forward(*cpu_tensors)
             return tuple(t.to(device) for t in result)
 
-    def _forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt):
+    def _forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt):
         """
         Compute the task-aligned assignment.
 
@@ -115,7 +115,7 @@ class TaskAlignedAssigner(nn.Module):
         target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
 
         # Assigned target
-        target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_bboxes, target_gt_idx, fg_mask)
+        target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
 
         # Normalize
         align_metric *= mask_pos
@@ -240,7 +240,7 @@ class TaskAlignedAssigner(nn.Module):
 
         return count_tensor.to(metrics.dtype)
 
-    def get_targets(self, gt_labels, gt_bboxes, target_gt_idx, fg_mask):
+    def get_targets(self, gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask):
         """
         Compute target labels, target bounding boxes, and target scores for the positive anchor points.
 
@@ -265,7 +265,8 @@ class TaskAlignedAssigner(nn.Module):
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
             target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
         """
-        save2debug( 'gt_labels.txt', gt_labels)
+        save2debug( 'gt_labels.txt', gt_labels, True)
+        save2debug( 'gt_scores.txt', gt_scores, True)
         save2debug( 'gt_bboxes.txt', gt_bboxes)
         save2debug( 'target_gt_idx.txt', target_gt_idx, True)
         save2debug( 'fg_mask.txt', fg_mask, True)
@@ -274,19 +275,25 @@ class TaskAlignedAssigner(nn.Module):
         target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
+        # Select the boxes associated to the indices
         target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
 
         # Assigned target scores, minimum is 0, maximum is positive
-        # TODO: is the clamp_ needed ?
+        # Convert to integers (TODO (CP/IRIT): Should it be done much earlier ?)
+        # TODO (CP/IRIT): is the clamp_ needed ?
+        # Select the labels associated to the indices
         target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         target_labels.clamp_(0)
 
+        # TODO (CP/IRIT): Do the same for scores
+        target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
+        
         # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
         # 10x faster than F.one_hot()
         # Create an int64 zero tensor of dimension batch size * anchor point number * class number
         target_scores = torch.zeros(
             (target_labels.shape[0], target_labels.shape[1], self.num_classes),
-            dtype=torch.int64,
+            dtype=torch.float32,
             device=target_labels.device,
         )  # (b, h*w, 80)
         # 
@@ -300,7 +307,8 @@ class TaskAlignedAssigner(nn.Module):
         torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
         save2debug( 'target_labels.txt', target_labels)
         save2debug( 'target_bboxes.txt', target_bboxes)
-        save2debug( 'target_scores.txt', target_scores)
+        save2debug( 'target_scores.txt', target_scores, True)
+        save2debug( 'target_scores_km.txt', target_scores_km)
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
@@ -456,13 +464,14 @@ def save2debug(filename,tensor,nonzero=False):
     def aux(file,tensor,index,nonzero):
         if tensor.numel() == 1:
             if (tensor.item() != 0):
-                print( index + "] = " + str())
+                print( index + "] = " + str(tensor.item()), file=f)
         else:
             for position in range(tensor.size(dim=0)):
-                aux(file, element, index + ", " + str(position), nonzero)
+                aux(file, tensor[position], index + ", " + str(position), nonzero)
             
     with open( filename, 'w') as f:
         if nonzero:
+            aux( f, tensor, "[ ", False)
             nonzeros = tensor.nonzero().tolist()
             print(len(nonzeros), file=f)
             print(nonzeros, file=f)

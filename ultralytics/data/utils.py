@@ -209,11 +209,11 @@ def verify_image_label(args: tuple) -> list:
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
                 # TODO (CP/IRIT): why not 5 (cls, x, y, w, h)
                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
-                    classes = np.array([x[0] for x in lb], dtype=np.float32)
+                    core_class = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
                     # TODO (CP/IRIT): create a bounding box around segments
                     boxes = segments2boxes(segments)
-                    lb = np.concatenate((classes.reshape(-1, 1), boxes), 1)  # (cls, xywh)
+                    lb = np.concatenate((core_class.reshape(-1, 1), boxes), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32) # lb contains 5 elements
             # Check if knowledge model is available and load additional classes
             km_file = lb_file.rsplit('.',1)[0]+'.km'
@@ -227,7 +227,7 @@ def verify_image_label(args: tuple) -> list:
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
-                    classes = np.array([x[0:1] for x in lb], dtype=np.float32)
+                    core_class = np.array([x[0:1] for x in lb], dtype=np.float32)
                     boxes = np.array([x[1:5] for x in lb], dtype=np.float32)
                 else:
                     assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
@@ -263,20 +263,20 @@ def verify_image_label(args: tuple) -> list:
                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
         # TODO (CP/IRIT): 
         lb = lb[:, :5]
-        classes = np.zeros((nl,num_cls),dtype=np.float32)
+        class_scores = np.zeros((nl,num_cls),dtype=np.float32)
         for i in range(nl):
                 for cls in lb[i,0:-4]:
-                    classes[i,int(cls)]=1.0
-        classes = lb[:,0:-4]
+                    class_scores[i,int(cls)]=1.0
+        core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]
         # returns a Tuple
         # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
-        return im_file, classes, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
+        return im_file, core_class, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
         # returns a List 
-        return [None, None, None, None, None, None, nm, nf, ne, nc, msg]
+        return [None, None, None, None, None, None, None, nm, nf, ne, nc, msg]
 
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[int, str]):
@@ -696,6 +696,7 @@ class HUBDatasetStats:
                 coordinates = np.concatenate((labels["bboxes"], labels["keypoints"].reshape(n, nk * nd)), 1)
             else:
                 raise ValueError(f"Undefined dataset task={self.task}.")
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             zipped = zip(labels["cls"], coordinates)
             return [[int(c[0]), *(round(float(x), 4) for x in points)] for c, points in zipped]
 
@@ -731,6 +732,7 @@ class HUBDatasetStats:
                 dataset = YOLODataset(img_path=self.data[split], data=self.data, task=self.task)
                 x = np.array(
                     [
+                        # TODO (CP/IRIT): should "scores" be managed in the same way ?
                         np.bincount(label["cls"].astype(int).flatten(), minlength=self.data["nc"])
                         for label in TQDM(dataset.labels, total=len(dataset), desc="Statistics")
                     ]

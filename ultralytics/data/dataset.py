@@ -52,6 +52,8 @@ class YOLODataset(BaseDataset):
 
     This class supports loading data for object detection, segmentation, pose estimation, and oriented bounding box
     (OBB) tasks using the YOLO format.
+    
+    # TODO (CP/IRIT): Should the tensors be built on CPU or GPU ?
 
     Attributes:
         use_segments (bool): Indicates if segmentation masks should be used.
@@ -125,7 +127,7 @@ class YOLODataset(BaseDataset):
             )
             pbar = TQDM(results, desc=desc, total=total)
             # for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
-            for im_file, classes, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+            for im_file, core_class, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                 nm += nm_f
                 nf += nf_f
                 ne += ne_f
@@ -139,7 +141,8 @@ class YOLODataset(BaseDataset):
                             # or the bounding boxes should be the last 4 and the classes the previous ones
                             # Classes are the first values before the bounding boxes
                             # "cls": lb[:, 0:-4],  # n, 1
-                            "cls": classes,
+                            "cls": core_class,
+                            "scores" : class_scores,
                             # Bounding boxes are the last four values
                             # "bboxes": lb[:, -4:],  # n, 4
                             "bboxes": bboxes,
@@ -313,7 +316,7 @@ class YOLODataset(BaseDataset):
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "segments", "obb"}:
+            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb"}:
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
@@ -410,6 +413,8 @@ class YOLOMultiModalDataset(YOLODataset):
         texts = [v.split("/") for v in self.data["names"].values()]
         category_freq = defaultdict(int)
         for label in self.labels:
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
+            # It would be more efficient to sum along class rows in scores
             for c in label["cls"].squeeze(-1):  # to check
                 text = texts[int(c)]
                 for t in text:
@@ -586,8 +591,9 @@ class GroundingDataset(YOLODataset):
                 {
                     "im_file": im_file,
                     "shape": (h, w),
+                    # TODO (CP/IRIT): should "scores" be managed in the same way ?
                     "cls": lb[:, 0:1],  # n, 1
-                    "bboxes": lb[:, 1:],  # n, 4
+                    "bboxes": lb[:, -4:],  # n, 4
                     "segments": segments,
                     "normalized": True,
                     "bbox_format": "xywh",
@@ -816,6 +822,7 @@ class ClassificationDataset:
         # Convert NumPy array to PIL image
         im = Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
         sample = self.torch_transforms(im)
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         return {"img": sample, "cls": j}
 
     def __len__(self) -> int:

@@ -357,6 +357,7 @@ class ConfusionMatrix(DataExportMixin):
         if self.matches is None:
             return
         for k, v in batch.items():
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             if k in {"bboxes", "cls", "conf", "keypoints"}:
                 self.matches[mtype][k] += v[[idx]]
             elif k == "masks":
@@ -394,6 +395,7 @@ class ConfusionMatrix(DataExportMixin):
             conf (float, optional): Confidence threshold for detections.
             iou_thres (float, optional): IoU threshold for matching detections to ground truth.
         """
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         gt_cls, gt_bboxes = batch["cls"], batch["bboxes"]
         if self.matches is not None:  # only if visualization is enabled
             self.matches = {k: defaultdict(list) for k in {"TP", "FP", "FN", "GT"}}

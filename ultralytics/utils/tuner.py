@@ -65,6 +65,7 @@ def run_ray_tune(
         "warmup_epochs": tune.uniform(0.0, 5.0),  # warmup epochs (fractions ok)
         "warmup_momentum": tune.uniform(0.0, 0.95),  # warmup initial momentum
         "box": tune.uniform(0.02, 0.2),  # box loss gain
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         "cls": tune.uniform(0.2, 4.0),  # cls loss gain (scale with pixels)
         "hsv_h": tune.uniform(0.0, 0.1),  # image HSV-Hue augmentation (fraction)
         "hsv_s": tune.uniform(0.0, 0.9),  # image HSV-Saturation augmentation (fraction)

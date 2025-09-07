@@ -94,6 +94,7 @@ class DetectionTrainer(BaseTrainer):
     def preprocess_batch(self, batch: dict) -> dict:
         """
         Preprocess a batch of images by scaling and converting to float.
+        # TODO (CP/IRIT): Should we move the other tensors to the selected device (CPU/GPU) here as the images ?
 
         Args:
             batch (Dict): Dictionary containing batch data with 'img' tensor.

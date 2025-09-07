@@ -73,7 +73,8 @@ class DetectionValidator(BaseValidator):
         """
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
-        for k in {"batch_idx", "cls", "bboxes"}:
+        # TODO(CP/IRIT): manage "scores" in the same way
+        for k in {"batch_idx", "cls", "scores", "bboxes"}:
             batch[k] = batch[k].to(self.device, non_blocking=True)
 
         return batch

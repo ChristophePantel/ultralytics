@@ -482,6 +482,7 @@ class BaseMixTransform:
         text2id = {text: i for i, text in enumerate(mix_texts)}
 
         for label in [labels] + labels["mix_labels"]:
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             for i, cls in enumerate(label["cls"].squeeze(-1).tolist()):
                 text = label["texts"][int(cls)]
                 label["cls"][i] = text2id[tuple(text)]
@@ -827,6 +828,7 @@ class Mosaic(BaseMixTransform):
                 - ori_shape (Tuple[int, int]): Original shape of the first image.
                 - resized_shape (Tuple[int, int]): Shape of the mosaic image (imgsz * 2, imgsz * 2).
                 - cls (np.ndarray): Concatenated class labels.
+                - scores (np.ndarray): Concatenated class scores.
                 - instances (Instances): Concatenated instance annotations.
                 - mosaic_border (Tuple[int, int]): Mosaic border size.
                 - texts (List[str], optional): Text labels if present in the original labels.
@@ -841,10 +843,12 @@ class Mosaic(BaseMixTransform):
         if not mosaic_labels:
             return {}
         cls = []
+        scores = []
         instances = []
         imgsz = self.imgsz * 2  # mosaic imgsz
         for labels in mosaic_labels:
             cls.append(labels["cls"])
+            scores.append(labels["scores"])
             instances.append(labels["instances"])
         # Final labels
         final_labels = {
@@ -852,12 +856,14 @@ class Mosaic(BaseMixTransform):
             "ori_shape": mosaic_labels[0]["ori_shape"],
             "resized_shape": (imgsz, imgsz),
             "cls": np.concatenate(cls, 0),
+            "scores": np.concatenate(scores,0),
             "instances": Instances.concatenate(instances, axis=0),
             "mosaic_border": self.border,
         }
         final_labels["instances"].clip(imgsz, imgsz)
         good = final_labels["instances"].remove_zero_area_boxes()
         final_labels["cls"] = final_labels["cls"][good]
+        final_labels["scores"] = final_labels["scores"][good]
         if "texts" in mosaic_labels[0]:
             final_labels["texts"] = mosaic_labels[0]["texts"]
         return final_labels
@@ -925,7 +931,9 @@ class MixUp(BaseMixTransform):
         labels2 = labels["mix_labels"][0]
         labels["img"] = (labels["img"] * r + labels2["img"] * (1 - r)).astype(np.uint8)
         labels["instances"] = Instances.concatenate([labels["instances"], labels2["instances"]], axis=0)
+         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
+        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"]], 0)
         return labels
 
 
@@ -1042,7 +1050,9 @@ class CutMix(BaseMixTransform):
         instances2.clip(x2 - x1, y2 - y1)
         instances2.add_padding(x1, y1)
 
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"][indexes2]], axis=0)
+        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"][indexes2]], axis=0)
         labels["instances"] = Instances.concatenate([labels["instances"], instances2], axis=0)
         return labels
 
@@ -1327,7 +1337,9 @@ class RandomPerspective:
         labels.pop("ratio_pad", None)  # do not need ratio pad
 
         img = labels["img"]
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels["cls"]
+        scores =  labels["scores"]
         instances = labels.pop("instances")
         # Make sure the coord formats are right
         instances.convert_bbox(format="xyxy")
@@ -1361,6 +1373,7 @@ class RandomPerspective:
         )
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
+        labels["scores"] = scores[i]
         labels["img"] = img
         labels["resized_shape"] = img.shape[:2]
         return labels
@@ -1840,6 +1853,8 @@ class CopyPaste(BaseMixTransform):
         im = labels1["img"]
         if "mosaic_border" not in labels1:
             im = im.copy()  # avoid modifying original non-mosaic image
+
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels1["cls"]
         h, w = im.shape[:2]
         instances = labels1.pop("instances")
@@ -1868,6 +1883,7 @@ class CopyPaste(BaseMixTransform):
         im[i] = result[i]
 
         labels1["img"] = im
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels1["cls"] = cls
         labels1["instances"] = instances
         return labels1
@@ -2052,6 +2068,7 @@ class Albumentations:
             return labels
 
         if self.contains_spatial:
+            # TODO (CP/IRIT): should "scores" be managed in the same way ?
             cls = labels["cls"]
             if len(cls):
                 labels["instances"].convert_bbox("xywh")
@@ -2186,7 +2203,9 @@ class Format:
         """
         img = labels.pop("img")
         h, w = img.shape[:2]
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels.pop("cls")
+        scores = labels.pop("scores")
         instances = labels.pop("instances")
         instances.convert_bbox(format=self.bbox_format)
         instances.denormalize(w, h)
@@ -2203,7 +2222,9 @@ class Format:
             labels["masks"] = masks
         labels["img"] = self._format_img(img)
         # Switch from numpy arrays to torch Tensors
+        # TODO (CP/IRIT): Should we build tensors on CPU or GPU ?
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl)
+        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
             labels["keypoints"] = (
@@ -2336,6 +2357,7 @@ class LoadVisualPrompt:
             bboxes = labels["bboxes"]
             bboxes = xywh2xyxy(bboxes) * torch.tensor(imgsz)[[1, 0, 1, 0]]  # denormalize boxes
 
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels["cls"].squeeze(-1).to(torch.int)
         visuals = self.get_visuals(cls, imgsz, bboxes=bboxes, masks=masks)
         labels["visuals"] = visuals
@@ -2484,6 +2506,7 @@ class RandomLoadText:
         assert "texts" in labels, "No texts found in labels."
         class_texts = labels["texts"]
         num_classes = len(class_texts)
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = np.asarray(labels.pop("cls"), dtype=int)
         pos_labels = np.unique(cls).tolist()
 
