@@ -244,14 +244,13 @@ class TaskAlignedAssigner(nn.Module):
         """
         Compute target labels, target bounding boxes, and target scores for the positive anchor points.
 
-        TODO: h * w is not the size of dimension 2 of the tensors. The value is extracted from the gt parameters.  
+        TODO (CP/IRIT): h * w is not the size of dimension 2 of the tensors. The value is extracted from the gt parameters.  
 
         Args:
             gt_labels (torch.Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
                                 batch size and max_num_obj is the maximum number of objects.
-            TODO : replace single label by vector of boolean labels of size number classes (0 : is not in class / 1 : is in class)
-            TODO : this could event be probability of being in that class
-            TODO : shape should be ( b, max_num_obj, num_classes) 
+            TODO (CP/IRIT): Make it optional
+            gt_scores (torch.Tensor): Ground probability of being in classes of shape (b, max_num_obj, num_class)
             gt_bboxes (torch.Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 4).
             target_gt_idx (torch.Tensor): Indices of the assigned ground truth objects for positive
                                     anchor points, with shape (b, h*w), where h*w is the total
@@ -267,12 +266,13 @@ class TaskAlignedAssigner(nn.Module):
         """
         save2debug( 'gt_labels.txt', gt_labels, True)
         save2debug( 'gt_scores.txt', gt_scores, True)
-        save2debug( 'gt_bboxes.txt', gt_bboxes)
-        save2debug( 'target_gt_idx.txt', target_gt_idx, True)
+        save2debug( 'gt_bboxes.txt', gt_bboxes, True)
+        save2debug( 'target_gt_idx_init.txt', target_gt_idx, True)
         save2debug( 'fg_mask.txt', fg_mask, True)
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
         target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
+        save2debug( 'target_gt_idx.txt', target_gt_idx, True)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         # Select the boxes associated to the indices
@@ -308,7 +308,7 @@ class TaskAlignedAssigner(nn.Module):
         save2debug( 'target_labels.txt', target_labels)
         save2debug( 'target_bboxes.txt', target_bboxes)
         save2debug( 'target_scores.txt', target_scores, True)
-        save2debug( 'target_scores_km.txt', target_scores_km)
+        save2debug( 'target_scores_km.txt', target_scores_km, True)
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
@@ -461,17 +461,25 @@ def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):
     return torch.cat([xy, lt + rb], dim=dim)
 
 def save2debug(filename,tensor,nonzero=False):
-    def aux(file,tensor,index,nonzero):
+    def aux2(file,tensor,index,nonzero):
         if tensor.numel() == 1:
             if (tensor.item() != 0):
                 print( index + "] = " + str(tensor.item()), file=f)
         else:
             for position in range(tensor.size(dim=0)):
-                aux(file, tensor[position], index + ", " + str(position), nonzero)
+                aux2(file, tensor[position], index + ", " + str(position), nonzero)
+                
+    def aux1(file, tensor, nonzero):
+        if tensor.numel() == 1:
+            if (tensor.item() != 0):
+                print( str(tensor.item()), file=f)
+        else:
+            for position in range(tensor.size(dim=0)):
+                aux2(file, tensor[position], '[ ' + str(position), nonzero)
             
     with open( filename, 'w') as f:
         if nonzero:
-            aux( f, tensor, "[ ", False)
+            aux1( f, tensor, False)
             nonzeros = tensor.nonzero().tolist()
             print(len(nonzeros), file=f)
             print(nonzeros, file=f)
