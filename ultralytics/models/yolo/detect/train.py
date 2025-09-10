@@ -8,6 +8,7 @@ from copy import copy
 from typing import Any
 
 import numpy as np
+import torch
 import torch.nn as nn
 
 from ultralytics.data import build_dataloader, build_yolo_dataset
@@ -29,7 +30,7 @@ class DetectionTrainer(BaseTrainer):
 
     Attributes:
         model (DetectionModel): The YOLO detection model being trained.
-        data (Dict): Dictionary containing dataset information including class names and number of classes.
+        data (dict): Dictionary containing dataset information including class names and number of classes.
         loss_names (tuple): Names of the loss components used in training (box_loss, cls_loss, dfl_loss).
 
     Methods:
@@ -97,12 +98,15 @@ class DetectionTrainer(BaseTrainer):
         # TODO (CP/IRIT): Should we move the other tensors to the selected device (CPU/GPU) here as the images ?
 
         Args:
-            batch (Dict): Dictionary containing batch data with 'img' tensor.
+            batch (dict): Dictionary containing batch data with 'img' tensor.
 
         Returns:
-            (Dict): Preprocessed batch with normalized images.
+            (dict): Preprocessed batch with normalized images.
         """
-        batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                batch[k] = v.to(self.device, non_blocking=True)
+        batch["img"] = batch["img"].float() / 255
         if self.args.multi_scale:
             imgs = batch["img"]
             sz = (
@@ -159,11 +163,11 @@ class DetectionTrainer(BaseTrainer):
         Return a loss dict with labeled training loss items tensor.
 
         Args:
-            loss_items (List[float], optional): List of loss values.
+            loss_items (list[float], optional): List of loss values.
             prefix (str): Prefix for keys in the returned dictionary.
 
         Returns:
-            (Dict | List): Dictionary of labeled loss items if loss_items is provided, otherwise list of keys.
+            (dict | list): Dictionary of labeled loss items if loss_items is provided, otherwise list of keys.
         """
         keys = [f"{prefix}/{x}" for x in self.loss_names]
         if loss_items is not None:
@@ -187,7 +191,7 @@ class DetectionTrainer(BaseTrainer):
         Plot training samples with their annotations.
 
         Args:
-            batch (Dict[str, Any]): Dictionary containing batch data.
+            batch (dict[str, Any]): Dictionary containing batch data.
             ni (int): Number of iterations.
         """
         plot_images(
