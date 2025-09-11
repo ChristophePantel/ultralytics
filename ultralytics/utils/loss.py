@@ -555,6 +555,7 @@ class v8DetectionLoss:
         # Identify future positive anchor points
         # Sum the components of each bounding boxe
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
+        # Indicates which image in a batch contains bounding boxes
         # TODO: make it boolean
         mask_gt = gt_bboxes_sum.gt_(0.0)
 
@@ -565,9 +566,11 @@ class v8DetectionLoss:
         # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
 
         smoothed_pred_scores = pred_scores.detach().sigmoid()
+        # Scale predicted bounding boxes along the pyramid (stride values)
         scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
         scaled_anchor_points = anchor_points * stride_tensor
 
+        # Computer the ground truth for the bounding boxes and class scores
         _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
             # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
             smoothed_pred_scores,
@@ -593,7 +596,7 @@ class v8DetectionLoss:
             )
 
         loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.cls  # cls gain
+        loss[1] *= self.hyp.cls  # cls gain, in fact the class score gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
