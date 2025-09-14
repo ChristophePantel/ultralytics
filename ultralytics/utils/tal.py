@@ -53,7 +53,9 @@ class TaskAlignedAssigner(nn.Module):
             pd_scores (torch.Tensor): Predicted classification scores with shape (bs, num_total_anchors, num_classes).
             pd_bboxes (torch.Tensor): Predicted bounding boxes with shape (bs, num_total_anchors, 4).
             anc_points (torch.Tensor): Anchor points with shape (num_total_anchors, 2).
+            # TODO (CP/IRIT): Are the ground truth labels used ?
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
+            # Adding the ground truth label scores to enable multi label prediction.
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
             mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (bs, n_max_boxes, 1).
 
@@ -81,10 +83,12 @@ class TaskAlignedAssigner(nn.Module):
             )
 
         try:
+            # TODO (CP/IRIT): Are the ground truth labels used ?
             return self._forward(pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt)
         except torch.cuda.OutOfMemoryError:
             # Move tensors to CPU, compute, then move back to original device
             LOGGER.warning("CUDA OutOfMemoryError in TaskAlignedAssigner, using CPU")
+            # TODO (CP/IRIT): Are the ground truth labels used ?
             cpu_tensors = [t.cpu() for t in (pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt)]
             result = self._forward(*cpu_tensors)
             return tuple(t.to(device) for t in result)
@@ -97,6 +101,7 @@ class TaskAlignedAssigner(nn.Module):
             pd_scores (torch.Tensor): Predicted classification scores with shape (bs, num_total_anchors, num_classes).
             pd_bboxes (torch.Tensor): Predicted bounding boxes with shape (bs, num_total_anchors, 4).
             anc_points (torch.Tensor): Anchor points with shape (num_total_anchors, 2).
+            # TODO (CP/IRIT): Are the ground truth labels used ?
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
             mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (bs, n_max_boxes, 1).
@@ -108,6 +113,7 @@ class TaskAlignedAssigner(nn.Module):
             fg_mask (torch.Tensor): Foreground mask with shape (bs, num_total_anchors).
             target_gt_idx (torch.Tensor): Target ground truth indices with shape (bs, num_total_anchors).
         """
+        # TODO (CP/IRIT): Are the ground truth labels used ?
         mask_pos, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
         )
@@ -115,6 +121,7 @@ class TaskAlignedAssigner(nn.Module):
         target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
 
         # Assigned target
+        # TODO (CP/IRIT): Are the ground truth labels used ?
         target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
 
         # Normalize
@@ -247,6 +254,7 @@ class TaskAlignedAssigner(nn.Module):
         TODO (CP/IRIT): h * w is not the size of dimension 2 of the tensors. The value is extracted from the gt parameters.  
 
         Args:
+            # TODO (CP/IRIT): Are the ground truth labels used ?
             gt_labels (torch.Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
                                 batch size and max_num_obj is the maximum number of objects.
             TODO (CP/IRIT): Make it optional
@@ -277,34 +285,43 @@ class TaskAlignedAssigner(nn.Module):
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         # Select the boxes associated to the indices
         target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
+        
+        # TODO (CP/IRIT): Do the same for scores
+        target_scores_km  = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
 
         # Assigned target scores, minimum is 0, maximum is positive
         # Convert to integers (TODO (CP/IRIT): Should it be done much earlier ?)
         # TODO (CP/IRIT): is the clamp_ needed ?
         # Select the labels associated to the indices
+        # TODO (CP/IRIT): Are the ground truth labels used ?
         target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         target_labels.clamp_(0)
 
-        # TODO (CP/IRIT): Do the same for scores
-        target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
+        # TODO (CP/IRIT): Do the same for scores (wrong)
+        # target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
         
         # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
         # 10x faster than F.one_hot()
         # Create an int64 zero tensor of dimension batch size * anchor point number * class number
+        # TODO (CP/IRIT): Are the ground truth labels used ?
+        # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
+        batch_size =  target_labels.shape[0]
+        pred_size = target_labels.shape[1]
         target_scores = torch.zeros(
-            (target_labels.shape[0], target_labels.shape[1], self.num_classes),
+            (batch_size, pred_size, self.num_classes),
             dtype=torch.float32,
             device=target_labels.device,
         )  # (b, h*w, 80)
-        # 
-        target_labels_unsqueezed = target_labels.unsqueeze(-1)
+        # Adds a dimension at the end of target labels
+        target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
+        # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
         target_scores.scatter_(2, target_labels_unsqueezed, 1)
         # Duplicate fg_mask class number times along the 3rd dimension
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
         # Set to zero 
         target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
         
-        torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
+        # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
         save2debug( 'target_labels.txt', target_labels)
         save2debug( 'target_bboxes.txt', target_bboxes)
         save2debug( 'target_scores.txt', target_scores, True)

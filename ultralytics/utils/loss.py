@@ -522,12 +522,12 @@ class v8DetectionLoss:
         # merge all the prediction levels along dimension 2
         pred_merged = torch.cat( [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
         # split between bounding box and class score features
-        pred_distri, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
+        pred_for_bboxes, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
 
         # reorganize dimensions for future operations
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         # TODO (CP/IRIT): Check that the class gt is indeed not used, and the class are not directly predicted...
-        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
+        pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
@@ -550,6 +550,7 @@ class v8DetectionLoss:
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT): adapt to the size of the parameters not to a constant
+        # TODO (CP/IRIT) : are the ground truth labels used ?
         gt_labels, gt_scores, gt_bboxes = targets.split((1, num_class, 4), 2)  # cls, scores, xyxy
         # TODO (CP/IRIT): get the scores
         # gt_scores = TODO
@@ -562,8 +563,8 @@ class v8DetectionLoss:
 
         # Pboxes
         # Compute predicted bounding boxes according to anchor points
-        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
-        # dfl_conf = pred_distri.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
+        pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
+        # dfl_conf = pred_for_bboxes.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
         # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
 
         smoothed_pred_scores = pred_scores.detach().sigmoid()
@@ -593,7 +594,7 @@ class v8DetectionLoss:
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[0], loss[2] = self.bbox_loss(
-                pred_distri,
+                pred_for_bboxes,
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,
