@@ -526,6 +526,7 @@ class v8DetectionLoss:
 
         # reorganize dimensions for future operations
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        # TODO (CP/IRIT): Check that the class gt is indeed not used, and the class are not directly predicted...
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
@@ -589,6 +590,7 @@ class v8DetectionLoss:
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
+        # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[0], loss[2] = self.bbox_loss(
                 pred_distri,
