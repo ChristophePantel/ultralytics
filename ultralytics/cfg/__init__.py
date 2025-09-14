@@ -200,8 +200,6 @@ CFG_INT_KEYS = frozenset(
         "line_width",
         "nbs",
         "save_period",
-        "cache_size",
-        "num_preload_workers",
     }
 )
 CFG_BOOL_KEYS = frozenset(
@@ -239,8 +237,7 @@ CFG_BOOL_KEYS = frozenset(
         "nms",
         "profile",
         "multi_scale",
-        "preload_clips",
-        "use_optimized_dataset",
+        "compile",
     }
 )
 
@@ -494,9 +491,7 @@ def check_dict_alignment(base: dict, custom: dict, e: Exception = None) -> None:
     """
     custom = _handle_deprecation(custom)
     base_keys, custom_keys = (frozenset(x.keys()) for x in (base, custom))
-    # Allow 'augmentations' as a valid custom parameter for custom Albumentations transforms
-    allowed_custom_keys = {"augmentations"}
-    if mismatched := [k for k in custom_keys if k not in base_keys and k not in allowed_custom_keys]:
+    if mismatched := [k for k in custom_keys if k not in base_keys]:
         from difflib import get_close_matches
 
         string = ""

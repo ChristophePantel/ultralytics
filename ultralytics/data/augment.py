@@ -2232,8 +2232,8 @@ class Format:
         labels["img"] = self._format_img(img)
         # Switch from numpy arrays to torch Tensors
         # TODO (CP/IRIT): Should we build tensors on CPU or GPU ?
-        labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl)
-        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl)
+        labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
+        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, num_class)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
             labels["keypoints"] = (
