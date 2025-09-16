@@ -150,10 +150,13 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric with shape (bs, max_num_obj, h*w).
             overlaps (torch.Tensor): Overlaps between predicted and ground truth boxes with shape (bs, max_num_obj, h*w).
         """
+        # Positive anchor points (included in bounding boxes) for all strides  
         mask_in_gts = self.select_candidates_in_gts(anchor_points, gt_bboxes)
         save2debug( 'mask_in_gts.txt', mask_in_gts, True)
         # Get anchor_align metric, (b, max_num_obj, h*w)
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
+        save2debug( 'align_metric.txt', align_metric, True)
+        save2debug( 'overlaps.txt', overlaps, True)
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
         save2debug( 'mask_topk.txt', mask_topk, True)
@@ -179,6 +182,7 @@ class TaskAlignedAssigner(nn.Module):
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
         na = pd_bboxes.shape[-2] # number of anchor points h*w
+        # TODO (CP/IRIT): Why not convert it earlier ?
         mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
         overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
         bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
@@ -258,7 +262,7 @@ class TaskAlignedAssigner(nn.Module):
             gt_labels (torch.Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
                                 batch size and max_num_obj is the maximum number of objects.
             TODO (CP/IRIT): Make it optional
-            gt_scores (torch.Tensor): Ground probability of being in classes of shape (b, max_num_obj, num_class)
+            gt_scores (torch.Tensor): Ground truth probability of being in classes of shape (b, max_num_obj, num_class)
             gt_bboxes (torch.Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 4).
             target_gt_idx (torch.Tensor): Indices of the assigned ground truth objects for positive
                                     anchor points, with shape (b, h*w), where h*w is the total
@@ -268,7 +272,7 @@ class TaskAlignedAssigner(nn.Module):
 
         Returns:
             target_labels (torch.Tensor): Target labels for positive anchor points with shape (b, h*w).
-            TODO : What's the use as target_scores contains the information ?
+            TODO (CP/IRIT): What's the use as target_scores contains the information ?
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
             target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
         """
@@ -286,7 +290,7 @@ class TaskAlignedAssigner(nn.Module):
         # Select the boxes associated to the indices
         target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
         
-        # TODO (CP/IRIT): Do the same for scores
+        # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
         target_scores_km  = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
 
         # Assigned target scores, minimum is 0, maximum is positive
@@ -307,7 +311,7 @@ class TaskAlignedAssigner(nn.Module):
         # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
         batch_size =  target_labels.shape[0]
         pred_size = target_labels.shape[1]
-        target_scores = torch.zeros(
+        target_scores_base = torch.zeros(
             (batch_size, pred_size, self.num_classes),
             dtype=torch.float32,
             device=target_labels.device,
@@ -315,15 +319,17 @@ class TaskAlignedAssigner(nn.Module):
         # Adds a dimension at the end of target labels
         target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
         # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
-        target_scores.scatter_(2, target_labels_unsqueezed, 1)
+        target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
         # Duplicate fg_mask class number times along the 3rd dimension
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
-        # Set to zero 
-        target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
+        # Set to zero when fg_scores_mask is zero
+        target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
         
         # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
+        save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
         save2debug( 'target_labels.txt', target_labels)
         save2debug( 'target_bboxes.txt', target_bboxes)
+        save2debug( 'target_scores_base.txt', target_scores_base, True)
         save2debug( 'target_scores.txt', target_scores, True)
         save2debug( 'target_scores_km.txt', target_scores_km, True)
         return target_labels, target_bboxes, target_scores

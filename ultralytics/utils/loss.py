@@ -455,10 +455,10 @@ class v8DetectionLoss:
 
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
-        self.hyp = h
+        self.hyp = h # hyperparameters
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
-        self.no = m.nc + m.reg_max * 4
+        self.no = m.nc + m.reg_max * 4 # number of predicted features
         self.reg_max = m.reg_max
         self.device = device
 
@@ -526,7 +526,7 @@ class v8DetectionLoss:
 
         # reorganize dimensions for future operations
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
-        # TODO (CP/IRIT): Check that the class gt is indeed not used, and the class are not directly predicted...
+        # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
         pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
@@ -537,31 +537,23 @@ class v8DetectionLoss:
 
         # Targets
         
-        # Merge ground truth tensors (indexes, classes, bounding boxes) in a single tensor
-        # batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"])
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
-        # TODO (CP/IRIT): need to ensure that all tensors are on the same device.
-        num_class = batch["scores"].shape[1]
+        # Merge ground truth tensors (indexes, classes, scores, bounding boxes) in a single tensor
         batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["scores"], batch["bboxes"])
         targets = torch.cat(batch_merge, 1)
         # Generate the ground truth data in a single tensor
         # TODO (CP/IRIT): Why is the preprocess done on a single tensor as it is limited to bounding boxes ?
-        # TODO (CP/IRIT): Should the scores be added to the tensor in the same way as the core label ?
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
-        # TODO (CP/IRIT): adapt to the size of the parameters not to a constant
         # TODO (CP/IRIT) : are the ground truth labels used ?
-        gt_labels, gt_scores, gt_bboxes = targets.split((1, num_class, 4), 2)  # cls, scores, xyxy
-        # TODO (CP/IRIT): get the scores
-        # gt_scores = TODO
+        gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
         # Identify future positive anchor points
-        # Sum the components of each bounding boxe
+        # Sum the components of each bounding boxes
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
         # Indicates which image in a batch contains bounding boxes
         # TODO: make it boolean
         mask_gt = gt_bboxes_sum.gt_(0.0)
 
-        # Pboxes
+        # Bounding boxes
         # Compute predicted bounding boxes according to anchor points
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
         # dfl_conf = pred_for_bboxes.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
