@@ -434,8 +434,59 @@ class KnowledgeBasedLoss(nn.Module):
     def loss_d(self):
         pass
     
-    def loss_e(self):
-        pass
+# A quoi correspond p
+    def loss_e(self, preds, num_composites_classes, p=3.0):
+        # Dimensions : b(atch) / sample number x channel x h(eight) x w(idth)
+        b, _, h, w = preds.shape
+
+        # Application of a sigmoid to smooth between -1 and 1
+        preds = torch.sigmoid(preds.float())
+
+        # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
+        preds_composites = predictions[:,:-num_composites_classes,:,:]
+        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
+        preds_composites_permutate = preds_composites.permute(0,2,3,1)
+        # Flattening to facilitate the vectorization 
+        MCMA = preds_composites_permutate.flatten(0,2)
+
+        # extraction of the part corresponding to the numbers of the last classes (after 21) (the components)
+        preds_components = predictions[:,-num_composites_classes:,:,:]
+        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
+        preds_components_permutate = preds_components.permute(0,2,3,1)
+        # Flattening to facilitate the vectorization 
+        MCMA = preds_components_permutate.flatten(0,2)      
+
+        # TODO : On ne travaille pas sur les pixels mais uniquement sur 
+        # filter high confidence pixels
+        # Count the number of classes with a strong prediction for each pixel of each image
+        easy_A_pos = (MCMA>0.7).sum(-1)
+        # Count the number of classes with low prediction for each pixel of each image
+        easy_A_neg = (MCMA<0.3).sum(-1)
+        # determines the difficult pixels (several strong prediction or intermediate classes)
+        hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_composites_classes-1).float()
+        new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
+
+        easy_B_pos = (MCMB>0.7).sum(-1)
+        easy_B_neg = (MCMB<0.3).sum(-1)
+        hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
+        new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
+
+        mask_A = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
+        mask_B = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
+        # predicates: not (x and y)
+        predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
+        predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
+
+        # 1. for all pixels: use pmeanError to aggregate
+        all_A = torch.pow(torch.pow(predicate_A, p).mean(), 1.0/p)
+        all_B = torch.pow(torch.pow(predicate_B, p).mean(), 1.0/p)
+        # 2. average the clauses
+        factor_A = num_classes*num_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
+        factor_B = 21*21/(num_classes*num_classes + 21*21)
+        loss_ex = all_A*factor_A + all_B*factor_B
+
+        return loss_ex
+
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
