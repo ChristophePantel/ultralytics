@@ -194,7 +194,7 @@ class TaskAlignedAssigner(nn.Module):
         ind_0 = ind[0]
         ind_1 = ind[1]
         pd_scores_ind = pd_scores[ind_0, :, ind_1]
-        bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w
+        bbox_scores[mask_gt] = pd_scores_ind[mask_gt]  # b, max_num_obj, h*w
 
         # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
         pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]

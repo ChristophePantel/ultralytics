@@ -420,6 +420,7 @@ class KeypointLoss(nn.Module):
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
+    # TODO (CP/IRIT): The model should carry all required data (inheritance and composition relations).
     def __init__(self, model, c_weight, d_weight, e_weight):
         """Initialize the KnowledgeModelLoss class."""
         super().__init__()
@@ -434,12 +435,13 @@ class KnowledgeBasedLoss(nn.Module):
     def loss_d(self):
         pass
     
-# A quoi correspond p
-    def loss_e(self, preds, num_composites_classes, p=3.0):
+    # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
+    def loss_e(self, pred_scores, num_composites_classes, power=3.0):
         # Dimensions : b(atch) / sample number x channel x h(eight) x w(idth)
-        b, _, h, w = preds.shape
+        batch_size, anchor_point_size, class_size = pred_scores.shape
 
         # Application of a sigmoid to smooth between -1 and 1
+        # TODO (CP/IRIT): Check that it has already been done.
         preds = torch.sigmoid(preds.float())
 
         # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
@@ -454,6 +456,7 @@ class KnowledgeBasedLoss(nn.Module):
         # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
         preds_components_permutate = preds_components.permute(0,2,3,1)
         # Flattening to facilitate the vectorization 
+        # TODO (CP/IRIT): Where is MCMB ?
         MCMA = preds_components_permutate.flatten(0,2)      
 
         # TODO : On ne travaille pas sur les pixels mais uniquement sur 
@@ -478,15 +481,14 @@ class KnowledgeBasedLoss(nn.Module):
         predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
 
         # 1. for all pixels: use pmeanError to aggregate
-        all_A = torch.pow(torch.pow(predicate_A, p).mean(), 1.0/p)
-        all_B = torch.pow(torch.pow(predicate_B, p).mean(), 1.0/p)
+        all_A = torch.pow(torch.pow(predicate_A, power).mean(), 1.0/power)
+        all_B = torch.pow(torch.pow(predicate_B, power).mean(), 1.0/power)
         # 2. average the clauses
         factor_A = num_classes*num_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
-        factor_B = 21*21/(num_classes*num_classes + 21*21)
+        factor_B = num_composites_classes*num_composites_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
         loss_ex = all_A*factor_A + all_B*factor_B
 
         return loss_ex
-
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
