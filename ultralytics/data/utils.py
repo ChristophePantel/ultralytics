@@ -220,7 +220,7 @@ def verify_image_label(args: tuple) -> list:
             if os.path.isfile(km_file):
                 with open(km_file, encoding="utf-8") as km_f:
                 # Extract the various data items from each line
-                    km_lb = np.array([x.split() for x in km_f.read().strip().splitlines() if len(x)],dtype=np.float32)
+                    km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
             else:
                 km_lb = np.zeros((len(lb),0))
             if nl := len(lb):
@@ -267,6 +267,9 @@ def verify_image_label(args: tuple) -> list:
         for i in range(nl):
                 for cls in lb[i,0:-4]:
                     class_scores[i,int(cls)]=1.0
+                for cls in km_lb[i]:
+                    class_scores[i,int(cls)]=1.0
+        # TODO (CP/IRIT): Add Knowledge Model classes
         core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]
         # returns a Tuple
