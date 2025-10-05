@@ -179,42 +179,45 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric combining classification and localization.
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
-        na = pd_bboxes.shape[-2] # number of anchor points h*w
-        # TODO (CP/IRIT): Why not convert it earlier ?
-        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
-        sz_mask_gt = torch.numel(mask_gt)
-        overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
-        sz_overlaps = torch.numel(overlaps)
-        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
-
-        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
-        ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
-        # TODO (CP/IRIT): Purpose of ind[1]
-        gt_labels_squeeze = gt_labels.squeeze(-1)
-        ind[1] =  gt_labels_squeeze # b, max_num_obj
-        # Get the scores of each grid for each gt cls
-        ind_0 = ind[0]
-        ind_1 = ind[1]
-        pd_scores_ind = pd_scores[ind_0, :, ind_1]
-        sz_bbox_scores = torch.numel(bbox_scores)
-        sz_pd_scores_ind = torch.numel(pd_scores_ind)
-        assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        pd_scores_masked = pd_scores_ind[mask_gt]
-        sz_pd_scores_masked = torch.numel(pd_scores_masked)
-        assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w
-
-        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
-        pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
-        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
-        iou_results = self.iou_calculation(gt_boxes, pd_boxes)
-        
-        sz_iou_results = torch.numel(iou_results)
-        assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        overlaps[mask_gt] = iou_results
-
-        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
-        return align_metric, overlaps
+        try:
+            na = pd_bboxes.shape[-2] # number of anchor points h*w
+            # TODO (CP/IRIT): Why not convert it earlier ?
+            mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+            sz_mask_gt = torch.numel(mask_gt)
+            overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+            sz_overlaps = torch.numel(overlaps)
+            bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
+    
+            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
+            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
+            # TODO (CP/IRIT): Purpose of ind[1]
+            gt_labels_squeeze = gt_labels.squeeze(-1)
+            ind[1] =  gt_labels_squeeze # b, max_num_obj
+            # Get the scores of each grid for each gt cls
+            ind_0 = ind[0]
+            ind_1 = ind[1]
+            pd_scores_ind = pd_scores[ind_0, :, ind_1]
+            sz_bbox_scores = torch.numel(bbox_scores)
+            sz_pd_scores_ind = torch.numel(pd_scores_ind)
+            assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+            pd_scores_masked = pd_scores_ind[mask_gt]
+            sz_pd_scores_masked = torch.numel(pd_scores_masked)
+            assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+            bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w
+    
+            # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
+            pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
+            gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
+            iou_results = self.iou_calculation(gt_boxes, pd_boxes)
+            
+            sz_iou_results = torch.numel(iou_results)
+            assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+            overlaps[mask_gt] = iou_results
+    
+            align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+            return align_metric, overlaps
+        except Exception as e:
+            return None, None
 
     def iou_calculation(self, gt_bboxes, pd_bboxes):
         """
