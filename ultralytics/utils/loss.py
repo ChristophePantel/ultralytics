@@ -444,37 +444,39 @@ class KnowledgeBasedLoss(nn.Module):
         #     # applatissement pour faciliter la vectorisation
         #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
         
-    #
-    #     # p_v : parent of v, i.e. classe composite, super classe
-    #     # extraction de la partie correspondant aux numéros ???
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-    #
-    #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
-    #     predicate = MCMA.clone()
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #     # Pour chaque numéro de classe composite
-    #     for ii in range(21):
-    #         # Intervalle des numéros des classes composantes
-    #         indices = indices_high[ii]
-    #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
-    #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
-    #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
-    #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
-    #
-    #     # for all clause: use pmeanError to aggregate
-    # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
-    #     loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
-    #
-    #     return loss_c
-        pass
+        MCMA = pred_scores.index_select( 3, model.component_indexes)
+        
+        #
+        #     # p_v : parent of v, i.e. classe composite, super classe
+        #     # extraction de la partie correspondant aux numéros ???
+        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+        #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
+        MCMB = pred_scores.index_select( 3, model.component_indexes)
+        #
+        #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
+        predicate = MCMA.clone()
+        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+        #     # Pour chaque numéro de classe composite
+        #     for ii in range(21):
+        #         # Intervalle des numéros des classes composantes
+        #         indices = indices_high[ii]
+        #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
+        #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
+        #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
+        #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
+        #
+        #     # for all clause: use pmeanError to aggregate
+        # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
+        loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
+        #
+        return loss_c
     
     def loss_d(self):
         pass
     
     # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
     def loss_e(self, pred_scores, num_composites_classes, power=3.0):
-        # Dimensions : b(atch) / sample number x channel x h(eight) x w(idth)
+        # Dimensions : b(atch) / anchor point / classe
         batch_size, anchor_point_size, class_size = pred_scores.shape
 
         # Application of a sigmoid to smooth between -1 and 1
@@ -482,14 +484,16 @@ class KnowledgeBasedLoss(nn.Module):
         preds = torch.sigmoid(preds.float())
 
         # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
-        preds_composites = predictions[:,:-num_composites_classes,:,:]
+        index_composites = ...
+        preds_composites = predictions.index_select( 3, index_composites)
         # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
         preds_composites_permutate = preds_composites.permute(0,2,3,1)
         # Flattening to facilitate the vectorization 
         MCMA = preds_composites_permutate.flatten(0,2)
 
         # extraction of the part corresponding to the numbers of the last classes (after 21) (the components)
-        preds_components = predictions[:,-num_composites_classes:,:,:]
+        index_components = ...
+        preds_components = predictions.index_select( 3, index_components)
         # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
         preds_components_permutate = preds_components.permute(0,2,3,1)
         # Flattening to facilitate the vectorization 

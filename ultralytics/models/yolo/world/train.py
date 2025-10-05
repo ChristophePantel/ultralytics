@@ -82,6 +82,7 @@ class WorldTrainer(DetectionTrainer):
         """
         # NOTE: This `nc` here is the max number of different text samples in one image, rather than the actual `nc`.
         # NOTE: Following the official config, nc hard-coded to 80 for now.
+        # TODO (CP/IRIT): Why is it hard-coded to 80 ?
         model = WorldModel(
             cfg["yaml_file"] if isinstance(cfg, dict) else cfg,
             ch=self.data["channels"],

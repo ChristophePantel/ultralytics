@@ -244,12 +244,14 @@ def verify_image_label(args: tuple) -> list:
                     f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
                     f"Possible class labels are 0-{num_cls - 1}"
                 )
-                _, i = np.unique(lb, axis=0, return_index=True)
-                if len(i) < nl:  # duplicate row check
-                    lb = lb[i]  # remove duplicates
+                _, cleaned_indices = np.unique(lb, axis=0, return_index=True)
+                if len(cleaned_indices) < nl:  # duplicate row check
+                    lb = lb[cleaned_indices]  # remove duplicates
+                    km_lb = [km_lb[i] for i in cleaned_indices] # remove duplicates
                     if segments:
-                        segments = [segments[x] for x in i]
-                    msg = f"{prefix}{im_file}: {nl - len(i)} duplicate labels removed"
+                        segments = [segments[i] for i in cleaned_indices]
+                    msg = f"{prefix}{im_file}: {nl - len(cleaned_indices)} duplicate labels removed"
+                    nl = len(lb)
             else:
                 ne = 1  # label empty
                 lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)

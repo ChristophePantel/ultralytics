@@ -150,14 +150,14 @@ class TaskAlignedAssigner(nn.Module):
         """
         # Positive anchor points (included in bounding boxes) for all strides  
         mask_in_gts = self.select_candidates_in_gts(anchor_points, gt_bboxes)
-        save2debug( 'mask_in_gts.txt', mask_in_gts, True)
+        # save2debug( 'mask_in_gts.txt', mask_in_gts, True)
         # Get anchor_align metric, (b, max_num_obj, h*w)
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
-        save2debug( 'align_metric.txt', align_metric, True)
-        save2debug( 'overlaps.txt', overlaps, True)
+        # save2debug( 'align_metric.txt', align_metric, True)
+        # save2debug( 'overlaps.txt', overlaps, True)
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
-        save2debug( 'mask_topk.txt', mask_topk, True)
+        # save2debug( 'mask_topk.txt', mask_topk, True)
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         mask_pos = mask_topk * mask_in_gts * mask_gt
 
@@ -182,7 +182,9 @@ class TaskAlignedAssigner(nn.Module):
         na = pd_bboxes.shape[-2] # number of anchor points h*w
         # TODO (CP/IRIT): Why not convert it earlier ?
         mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+        sz_mask_gt = torch.numel(mask_gt)
         overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+        sz_overlaps = torch.numel(overlaps)
         bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
 
         ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
@@ -194,12 +196,22 @@ class TaskAlignedAssigner(nn.Module):
         ind_0 = ind[0]
         ind_1 = ind[1]
         pd_scores_ind = pd_scores[ind_0, :, ind_1]
-        bbox_scores[mask_gt] = pd_scores_ind[mask_gt]  # b, max_num_obj, h*w
+        sz_bbox_scores = torch.numel(bbox_scores)
+        sz_pd_scores_ind = torch.numel(pd_scores_ind)
+        assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        pd_scores_masked = pd_scores_ind[mask_gt]
+        sz_pd_scores_masked = torch.numel(pd_scores_masked)
+        assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w
 
         # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
         pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
         gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
-        overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
+        iou_results = self.iou_calculation(gt_boxes, pd_boxes)
+        
+        sz_iou_results = torch.numel(iou_results)
+        assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        overlaps[mask_gt] = iou_results
 
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
         return align_metric, overlaps
@@ -274,15 +286,15 @@ class TaskAlignedAssigner(nn.Module):
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
             target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
         """
-        save2debug( 'gt_labels.txt', gt_labels, True)
-        save2debug( 'gt_scores.txt', gt_scores, True)
-        save2debug( 'gt_bboxes.txt', gt_bboxes, True)
-        save2debug( 'target_gt_idx_init.txt', target_gt_idx, True)
-        save2debug( 'fg_mask.txt', fg_mask, True)
+        # save2debug( 'gt_labels.txt', gt_labels, True)
+        # save2debug( 'gt_scores.txt', gt_scores, True)
+        # save2debug( 'gt_bboxes.txt', gt_bboxes, True)
+        # save2debug( 'target_gt_idx_init.txt', target_gt_idx, True)
+        # save2debug( 'fg_mask.txt', fg_mask, True)
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
         target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
-        save2debug( 'target_gt_idx.txt', target_gt_idx, True)
+        # save2debug( 'target_gt_idx.txt', target_gt_idx, True)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         # Select the boxes associated to the indices
@@ -324,12 +336,12 @@ class TaskAlignedAssigner(nn.Module):
         target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
         
         # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
-        save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
-        save2debug( 'target_labels.txt', target_labels)
-        save2debug( 'target_bboxes.txt', target_bboxes)
-        save2debug( 'target_scores_base.txt', target_scores_base, True)
-        save2debug( 'target_scores.txt', target_scores, True)
-        save2debug( 'target_scores_km.txt', target_scores_km, True)
+        # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
+        # save2debug( 'target_labels.txt', target_labels)
+        # save2debug( 'target_bboxes.txt', target_bboxes)
+        # save2debug( 'target_scores_base.txt', target_scores_base, True)
+        # save2debug( 'target_scores.txt', target_scores, True)
+        # save2debug( 'target_scores_km.txt', target_scores_km, True)
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
