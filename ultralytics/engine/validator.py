@@ -38,7 +38,7 @@ from ultralytics.utils.checks import check_imgsz
 from ultralytics.utils.ops import Profile
 from ultralytics.utils.torch_utils import attempt_compile, select_device, smart_inference_mode, unwrap_model
 
-
+# TODO (CP/IRIT): Adapt to multi class prediction
 class BaseValidator:
     """
     A base class for creating validators.

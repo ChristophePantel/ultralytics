@@ -108,6 +108,7 @@ class DetectionValidator(BaseValidator):
         """Return a formatted string summarizing class metrics of YOLO model."""
         return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
 
+    # TODO (CP/IRIT): Adapt to class prediction scores
     def postprocess(self, preds: torch.Tensor) -> list[dict[str, torch.Tensor]]:
         """
         Apply Non-maximum suppression to prediction outputs.
@@ -132,6 +133,7 @@ class DetectionValidator(BaseValidator):
         )
         return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "extra": x[:, 6:]} for x in outputs]
 
+    # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
         """
         Prepare a batch of images and annotations for validation.
@@ -160,6 +162,7 @@ class DetectionValidator(BaseValidator):
             "im_file": batch["im_file"][si],
         }
 
+    # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_pred(self, pred: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """
         Prepare predictions for evaluation against ground truth.
@@ -174,6 +177,7 @@ class DetectionValidator(BaseValidator):
             pred["cls"] *= 0
         return pred
 
+    # TODO (CP/IRIT): Adapt to class prediction scores
     def update_metrics(self, preds: list[dict[str, torch.Tensor]], batch: dict[str, Any]) -> None:
         """
         Update metrics with new predictions and ground truth.
