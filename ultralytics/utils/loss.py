@@ -612,6 +612,7 @@ class v8DetectionLoss:
             loss items (torch.Tensor[Float]):
         """
         loss = torch.zeros(3, device=self.device)  # 3 loss items: box, cls, dfl
+        # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
         feats = preds[1] if isinstance(preds, tuple) else preds
         # merge all the prediction levels along dimension 2
         pred_merged = torch.cat( [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)

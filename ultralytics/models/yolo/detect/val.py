@@ -131,7 +131,7 @@ class DetectionValidator(BaseValidator):
             end2end=self.end2end,
             rotated=self.args.task == "obb",
         )
-        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "extra": x[:, 6:]} for x in outputs]
+        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "extra": x[:, 6+self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
@@ -148,6 +148,7 @@ class DetectionValidator(BaseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
+        scores = batch["scores"]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
@@ -156,6 +157,7 @@ class DetectionValidator(BaseValidator):
         return {
             "cls": cls,
             "bboxes": bbox,
+            "scores": scores,
             "ori_shape": ori_shape,
             "imgsz": imgsz,
             "ratio_pad": ratio_pad,
