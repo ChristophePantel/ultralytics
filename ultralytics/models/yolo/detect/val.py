@@ -194,14 +194,17 @@ class DetectionValidator(BaseValidator):
             predn = self._prepare_pred(pred)
 
             cls = pbatch["cls"].cpu().numpy()
+            scores = pbatch["scores"].cpu().numpy()
             no_pred = predn["cls"].shape[0] == 0
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),
                     "target_cls": cls,
+                    "target_scores": scores,
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
+                    "pred_scores": predn["scores"].cpu().numpy()
                 }
             )
             # Evaluate
@@ -280,7 +283,8 @@ class DetectionValidator(BaseValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
+        bce = scores_bce(batch["scores"], preds["scores"])
+        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
         """
