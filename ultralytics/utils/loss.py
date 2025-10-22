@@ -675,7 +675,8 @@ class v8DetectionLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        bce_values = self.bce(pred_scores, target_scores.to(dtype))
+        loss[1] = bce_values.sum() / target_scores_sum  # BCE
 
         # Bbox loss
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?

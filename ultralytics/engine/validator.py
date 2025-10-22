@@ -253,7 +253,7 @@ class BaseValidator:
             return stats
 
     def match_predictions(
-        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
+        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False
     ) -> torch.Tensor:
         """
         Match predictions to ground truth objects using IoU.
@@ -262,6 +262,7 @@ class BaseValidator:
             pred_classes (torch.Tensor): Predicted class indices of shape (N,).
             true_classes (torch.Tensor): Target class indices of shape (M,).
             iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground truth.
+            bce (torch.Tensor): An NxM tensor containing  the pairwise bce values for predictions and ground truth.
             use_scipy (bool, optional): Whether to use scipy for matching (more precise).
 
         Returns:

@@ -70,6 +70,7 @@ def non_max_suppression(
         return output
 
     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
+    # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
     nc = nc or (prediction.shape[1] - 4)  # number of classes
     extra = prediction.shape[1] - nc - 4  # number of extra info
     mi = 4 + nc  # mask start index

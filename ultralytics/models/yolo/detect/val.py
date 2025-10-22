@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from ultralytics.data import build_dataloader, build_yolo_dataset, converter
 from ultralytics.engine.validator import BaseValidator
@@ -60,6 +62,7 @@ class DetectionValidator(BaseValidator):
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
         self.metrics = DetMetrics()
+        self.bce_calculator = nn.BCELoss(reduction="none")
 
     def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
         """
@@ -124,7 +127,9 @@ class DetectionValidator(BaseValidator):
             preds,
             self.args.conf,
             self.args.iou,
+            # TODO (CP/IRIT): Why is nc set to 0 for detection ?
             nc=0 if self.args.task == "detect" else self.nc,
+            # TODO (CP/IRIT): Why is multi_label always set to True ?
             multi_label=True,
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
@@ -148,7 +153,7 @@ class DetectionValidator(BaseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        scores = batch["scores"]
+        scores = batch["scores"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
@@ -204,7 +209,7 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": predn["scores"].cpu().numpy()
+                    "pred_scores": np.zeros(0) if no_pred else predn["scores"].cpu().numpy()
                 }
             )
             # Evaluate
@@ -283,8 +288,20 @@ class DetectionValidator(BaseValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        bce = scores_bce(batch["scores"], preds["scores"])
+        bce = self.scores_bce(batch["scores"], preds["scores"])
         return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
+
+    def scores_bce(self, batch_scores, prediction_scores):
+        batch_range = batch_scores.shape[0]
+        prediction_range = prediction_scores.shape[0]
+        batch_scores_sum = torch.sum(batch_scores,1)
+        aligned_batch_scores_sum = torch.unsqueeze(batch_scores_sum, 0).expand(prediction_range,-1)
+        aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
+        aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
+        bce_per_class = self.bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
+        bce = torch.sum(bce_per_class,2) / batch_scores_sum
+        detected = torch.where(bce < 1)
+        return bce
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
         """
