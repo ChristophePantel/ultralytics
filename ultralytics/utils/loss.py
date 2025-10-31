@@ -376,16 +376,18 @@ class BCEDiceLoss(nn.Module):
         super(BCEDiceLoss, self).__init__()
         self.weight_bce = weight_bce
         self.weight_dice = weight_dice
-        self.bce = nn.BCEWithLogitsLoss()
+        # self.bce = nn.BCEWithLogitsLoss()
+        self.fl = FocalLoss(gamma=2.0, alpha=0.25)
         self.dice = MultiChannelDiceLoss(smooth=1)
 
     def forward(self, pred, target):
-        _, __, mask_h, mask_w = pred.shape
+        b, _, mask_h, mask_w = pred.shape
         if tuple(target.shape[-2:]) != (mask_h, mask_w):  # downsample to the same size as pred
             target = F.interpolate(target, (mask_h, mask_w), mode="nearest")
-        bce_loss = self.bce(pred, target)
+        # bce_loss = self.bce(pred, target)
+        fl_loss = self.fl(pred, target) / (b * mask_h * mask_w)
         dice_loss = self.dice(pred, target)
-        return self.weight_bce * bce_loss + self.weight_dice * dice_loss
+        return self.weight_bce * fl_loss + self.weight_dice * dice_loss
 
 
 class OhemCELoss(nn.Module):
@@ -418,7 +420,7 @@ class v8SegmentationLoss(v8DetectionLoss):
         super().__init__(model)
         self.overlap = model.args.overlap_mask
         self.semseg_loss = model.args.semseg_loss
-        self.bcedice_loss = BCEDiceLoss(weight_bce=1, weight_dice=1)
+        self.bcedice_loss = BCEDiceLoss(weight_bce=20, weight_dice=1)
         # self.ohemce_loss = OhemCELoss(0.7, 128*128//2, 255)
 
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -503,7 +505,7 @@ class v8SegmentationLoss(v8DetectionLoss):
                 sem_masks = batch["sem_masks"].to(self.device).float()
                 loss[4] = self.bcedice_loss(pred_semseg, sem_masks)
                 # loss[4] = self.ohemce_loss(pred_semseg, sem_masks)
-                loss[4] *= self.hyp.box  # seg gain
+                loss[4] *= self.hyp.box * 0.5  # seg gain
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
