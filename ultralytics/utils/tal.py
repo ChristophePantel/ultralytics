@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from . import LOGGER
 from .metrics import bbox_iou, probiou
-from .ops import xywhr2xyxyxyxy
+from .ops import xywhr2xyxyxyxy, xyxy2xywh, xywh2xyxy
 from .torch_utils import TORCH_1_11
 
 
@@ -24,7 +24,15 @@ class TaskAlignedAssigner(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk: int = 13, num_classes: int = 80, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
+    def __init__(
+        self,
+        topk: int = 13,
+        num_classes: int = 80,
+        alpha: float = 1.0,
+        beta: float = 6.0,
+        stride: list = [8, 16, 32],
+        eps: float = 1e-9,
+    ):
         """
         Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
@@ -40,6 +48,7 @@ class TaskAlignedAssigner(nn.Module):
         self.num_classes = num_classes
         self.alpha = alpha
         self.beta = beta
+        self.stride = stride
         self.eps = eps
 
     @torch.no_grad()
@@ -355,6 +364,8 @@ class TaskAlignedAssigner(nn.Module):
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w, 2).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 4).
+            mask_gt (torch.Tensor): Mask for valid ground truth boxes, shape (b, n_boxes, 1).
+            stride (list[int]): List of stride values for each feature map level.
             eps (float, optional): Small value for numerical stability.
 
         Returns:
@@ -417,13 +428,15 @@ class RotatedTaskAlignedAssigner(TaskAlignedAssigner):
         return probiou(gt_bboxes, pd_bboxes).squeeze(-1).clamp_(0)
 
     @staticmethod
-    def select_candidates_in_gts(xy_centers, gt_bboxes):
+    def select_candidates_in_gts(xy_centers, gt_bboxes, mask_gt, stride):
         """
         Select the positive anchor center in gt for rotated bounding boxes.
 
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates with shape (h*w, 2).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes with shape (b, n_boxes, 5).
+            mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (b, n_boxes, 1).
+            stride (list[int]): List of stride values for each feature map level.
 
         Returns:
             (torch.Tensor): Boolean mask of positive anchors with shape (b, n_boxes, h*w).

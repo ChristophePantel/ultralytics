@@ -253,10 +253,16 @@ class DetectionValidator(BaseValidator):
             for stats_dict in gathered_stats:
                 for key in merged_stats.keys():
                     merged_stats[key].extend(stats_dict[key])
+            gathered_jdict = [None] * dist.get_world_size()
+            dist.gather_object(self.jdict, gathered_jdict, dst=0)
+            self.jdict = []
+            for jdict in gathered_jdict:
+                self.jdict.extend(jdict)
             self.metrics.stats = merged_stats
             self.seen = len(self.dataloader.dataset)  # total image count from dataset
         elif RANK > 0:
             dist.gather_object(self.metrics.stats, None, dst=0)
+            dist.gather_object(self.jdict, None, dst=0)
             self.metrics.clear_stats()
 
     def get_stats(self) -> dict[str, Any]:
@@ -534,6 +540,8 @@ class DetectionValidator(BaseValidator):
                     # update mAP50-95 and mAP50
                     stats[f"metrics/mAP50({suffix[i][0]})"] = val.stats_as_dict["AP_50"]
                     stats[f"metrics/mAP50-95({suffix[i][0]})"] = val.stats_as_dict["AP_all"]
+                    # update fitness
+                    stats["fitness"] = 0.9 * val.stats_as_dict["AP_all"] + 0.1 * val.stats_as_dict["AP_50"]
 
                     if self.is_lvis:
                         stats[f"metrics/APr({suffix[i][0]})"] = val.stats_as_dict["APr"]
