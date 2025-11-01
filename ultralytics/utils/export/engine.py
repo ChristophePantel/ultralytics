@@ -1,8 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from .engine import onnx2engine, torch2onnx
-from .imx import torch2imx
-from .tensorflow import keras2pb, onnx2saved_model, pb2tfjs, tflite2edgetpu
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -11,8 +9,6 @@ import torch
 
 from ultralytics.utils import IS_JETSON, LOGGER
 from ultralytics.utils.torch_utils import TORCH_2_4
-
-from .imx import torch2imx  # noqa
 
 
 def torch2onnx(
@@ -67,7 +63,6 @@ def onnx2engine(
     metadata: dict | None = None,
     verbose: bool = False,
     prefix: str = "",
-    trt_hardware_compatibility_level: str | None = None,
 ) -> None:
     """
     Export a YOLO model to TensorRT engine format.
@@ -85,7 +80,6 @@ def onnx2engine(
         metadata (dict, optional): Metadata to include in the engine file.
         verbose (bool, optional): Enable verbose logging.
         prefix (str, optional): Prefix for log messages.
-        trt_hardware_compatibility_level (str, optional): Engine (TensorRT) only; hardware compatibility level: 'ampere_plus', 'same_compute_capability', or 'none' (default).
 
     Raises:
         ValueError: If DLA is enabled on non-Jetson devices or required precision is not set.
@@ -107,26 +101,6 @@ def onnx2engine(
     # Engine builder
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-
-    # Hardware compatibility level is None by default
-    if trt_hardware_compatibility_level is None:
-        trt_hardware_compatibility_level = "none"
-
-    if trt_hardware_compatibility_level.lower() == "ampere_plus":
-        config.hardware_compatibility_level = trt.HardwareCompatibilityLevel.AMPERE_PLUS
-        LOGGER.info(f"{prefix} setting hardware compatibility level to AMPERE_PLUS")
-    elif trt_hardware_compatibility_level.lower() == "same_compute_capability":
-        config.hardware_compatibility_level = trt.HardwareCompatibilityLevel.SAME_COMPUTE_CAPABILITY
-        LOGGER.info(f"{prefix} setting hardware compatibility level to SAME_COMPUTE_CAPABILITY")
-    elif trt_hardware_compatibility_level.lower() == "none":
-        config.hardware_compatibility_level = trt.HardwareCompatibilityLevel.NONE
-        LOGGER.info(f"{prefix} setting hardware compatibility level to NONE")
-    else:
-        LOGGER.warning(
-            f"{prefix} invalid trt_hardware_compatibility_level '{trt_hardware_compatibility_level}'. "
-            f"Valid options: 'ampere_plus', 'same_compute_capability', 'none'. Using default 'none'."
-        )
-
     workspace_bytes = int((workspace or 0) * (1 << 30))
     is_trt10 = int(trt.__version__.split(".", 1)[0]) >= 10  # is TensorRT >= 10
     if is_trt10 and workspace_bytes > 0:
