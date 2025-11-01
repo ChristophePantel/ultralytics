@@ -69,7 +69,6 @@ class Detect(nn.Module):
     dynamic = False  # force grid reconstruction
     export = False  # export mode
     format = None  # export format
-    end2end = True  # end2end
     max_det = 300  # max_det
     shape = None
     anchors = torch.empty(0)  # init
@@ -293,7 +292,7 @@ class Segment(Detect):
 
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
-        if self.end2end:
+        if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
     @property
@@ -402,7 +401,7 @@ class OBB(Detect):
 
         c4 = max(ch[0] // 4, self.ne)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
-        if self.end2end:
+        if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
     @property
@@ -500,7 +499,7 @@ class Pose(Detect):
 
         c4 = max(ch[0] // 4, self.nk)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
-        if self.end2end:
+        if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
     @property
