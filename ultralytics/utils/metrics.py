@@ -1072,7 +1072,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
         self.box = Metric()
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
         self.task = "detect"
-        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
+        self.stats = dict(tp=[], conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
         self.nt_per_class = None
         self.nt_per_image = None
 
