@@ -84,10 +84,19 @@ from .head import (
     Pose,
     RTDETRDecoder,
     Segment,
+    Segmentv2,
+    Segmentv3,
+    Segmentv4,
+    Segmentv4_add,
+    Segmentv5,
+    Segmentv6,
+    Segmentv7,
+    Segmentv8,
+    Segmentv8_add,
     WorldDetect,
     YOLOEDetect,
     YOLOESegment,
-    v10Detect,
+    v10Detect
 )
 from .transformer import (
     AIFI,

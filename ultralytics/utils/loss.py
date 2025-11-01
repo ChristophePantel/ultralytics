@@ -726,6 +726,114 @@ class v8DetectionLoss:
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
 
+class MultiChannelDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-6, reduction='mean'):
+        super(MultiChannelDiceLoss, self).__init__()
+        self.smooth = smooth
+        self.reduction = reduction
+
+    def forward(self, pred, target):
+        assert pred.size() == target.size(), "the size of predict and target must be equal."
+
+        pred = torch.sigmoid(pred)
+
+        intersection = (pred * target).sum(dim=(2, 3))
+        union = pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3))
+
+        dice = (2. * intersection + self.smooth) / (union + self.smooth)
+
+        dice_loss = 1. - dice
+
+        dice_loss = dice_loss.mean(dim=1)
+
+        if self.reduction == 'mean':
+            return dice_loss.mean()
+        elif self.reduction == 'sum':
+            return dice_loss.sum()
+        else:
+            return dice_loss
+
+
+class MultiClassDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-6, reduction='mean', ignore_index=None):
+        super(MultiClassDiceLoss, self).__init__()
+        self.smooth = smooth
+        self.reduction = reduction
+        self.ignore_index = ignore_index
+
+    def forward(self, pred, target):
+        pred = F.softmax(pred, dim=1)
+
+        # conver to onehot
+        n, c, h, w = pred.shape
+        target_one_hot = torch.zeros(n, c, h, w, device=pred.device)
+        mask = target == self.ignore_index
+        target[mask] = 0
+        target_one_hot.scatter_(1, target.unsqueeze(1).long(), 1)
+
+        if self.ignore_index is not None:
+            tmask = ~mask
+            tmask = tmask.unsqueeze(1).expand_as(target_one_hot)
+            target_one_hot = target_one_hot * tmask
+            pred = pred * tmask
+
+        intersection = (pred * target_one_hot).sum(dim=(2, 3))
+        union = pred.sum(dim=(2, 3)) + target_one_hot.sum(dim=(2, 3))
+
+        dice = (2. * intersection + self.smooth) / (union + self.smooth)
+        dice_loss = 1. - dice
+
+        dice_loss = dice_loss.mean(dim=1)
+
+        if self.reduction == 'mean':
+            return dice_loss.mean()
+        elif self.reduction == 'sum':
+            return dice_loss.sum()
+        else:
+            return dice_loss
+
+
+class BCEDiceLoss(nn.Module):
+    def __init__(self, weight_bce=0.5, weight_dice=0.5):
+        super(BCEDiceLoss, self).__init__()
+        self.weight_bce = weight_bce
+        self.weight_dice = weight_dice
+        # self.bce = nn.BCEWithLogitsLoss()
+        self.fl = FocalLoss(gamma=2.0, alpha=0.25)
+        self.dice = MultiChannelDiceLoss(smooth=1)
+
+    def forward(self, pred, target):
+        b, _, mask_h, mask_w = pred.shape
+        if tuple(target.shape[-2:]) != (mask_h, mask_w):  # downsample to the same size as pred
+            target = F.interpolate(target, (mask_h, mask_w), mode="nearest")
+        # bce_loss = self.bce(pred, target)
+        fl_loss = self.fl(pred, target) / (b * mask_h * mask_w)
+        dice_loss = self.dice(pred, target)
+        return self.weight_bce * fl_loss + self.weight_dice * dice_loss
+
+
+class OhemCELoss(nn.Module):
+    def __init__(self, thresh, n_min, ignore_lb=255, use_weight=False, weight=None):
+        super(OhemCELoss, self).__init__()
+        self.thresh = -torch.log(torch.tensor(thresh, dtype=torch.float)).cuda()
+        self.n_min = n_min
+        self.ignore_lb = ignore_lb
+        if use_weight:
+            weight = weight.cuda()
+            self.criteria = nn.CrossEntropyLoss(ignore_index=ignore_lb, weight=weight, reduction='none')
+        else:
+            self.criteria = nn.CrossEntropyLoss(ignore_index=ignore_lb, reduction='none')
+
+    def forward(self, logits, labels):
+        loss = self.criteria(logits, labels.long()).view(-1)
+        loss, _ = torch.sort(loss, descending=True)
+        if loss[self.n_min] > self.thresh:
+            loss = loss[loss > self.thresh]
+        else:
+            loss = loss[:self.n_min]
+        return torch.mean(loss)
+
+
 class v8SegmentationLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 segmentation."""
 
@@ -733,11 +841,20 @@ class v8SegmentationLoss(v8DetectionLoss):
         """Initialize the v8SegmentationLoss class with model parameters and mask overlap setting."""
         super().__init__(model)
         self.overlap = model.args.overlap_mask
+        self.semseg_loss = model.args.semseg_loss
+        self.bcedice_loss = BCEDiceLoss(weight_bce=20, weight_dice=1)
+        # self.ohemce_loss = OhemCELoss(0.7, 128*128//2, 255)
 
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the combined loss for detection and segmentation."""
-        loss = torch.zeros(4, device=self.device)  # box, seg, cls, dfl
+        # loss = torch.zeros(4, device=self.device)  # box, seg, cls, dfl
+        loss = torch.zeros(5 if self.semseg_loss else 4, device=self.device)  # box, seg, cls, dfl
         feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
+        if self.semseg_loss and len(proto) == 2:
+            proto, pred_semseg = proto
+        else:
+            pred_semseg = None
+
         batch_size, _, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
         pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
             (self.reg_max * 4, self.nc), 1
@@ -862,9 +979,17 @@ class v8SegmentationLoss(v8DetectionLoss):
                 imgsz,
             )
 
+            if self.semseg_loss and pred_semseg is not None:
+                sem_masks = batch["sem_masks"].to(self.device).float()
+                loss[4] = self.bcedice_loss(pred_semseg, sem_masks)
+                # loss[4] = self.ohemce_loss(pred_semseg, sem_masks)
+                loss[4] *= self.hyp.box * 0.5  # seg gain
+
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
+            if self.semseg_loss:
+                loss[4] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
 
         loss[1] *= self.hyp.box  # seg gain
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
