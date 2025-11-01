@@ -542,6 +542,7 @@ class DetectionValidator(BaseValidator):
 
                 if self.is_lvis:
                     stats["fitness"] = stats["metrics/mAP50-95(B)"]  # always use box mAP50-95 for fitness
+
             except Exception as e:
                 LOGGER.warning(f"faster-coco-eval unable to run: {e}")
         return stats

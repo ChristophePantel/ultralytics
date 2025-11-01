@@ -69,7 +69,7 @@ class Detect(nn.Module):
     dynamic = False  # force grid reconstruction
     export = False  # export mode
     format = None  # export format
-    end2end = False  # end2end
+    end2end = True  # end2end
     max_det = 300  # max_det
     shape = None
     anchors = torch.empty(0)  # init
@@ -88,7 +88,7 @@ class Detect(nn.Module):
         super().__init__()
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
-        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+        self.reg_max = 1  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
@@ -116,7 +116,15 @@ class Detect(nn.Module):
     def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor] | tuple:
         """Concatenate and return predicted bounding boxes and class probabilities."""
         if self.end2end:
-            return self.forward_end2end(x)
+            x_detach = [xi.detach() for xi in x]
+            one2one = self.forward_head(x_detach, **self.one2one)
+            preds = {"one2many": preds, "one2one": one2one}
+        if self.training:
+            return preds
+        y = self._inference(preds["one2one"] if self.end2end else preds)
+        if self.end2end:
+            y = self.postprocess(y.permute(0, 2, 1))
+        return y if self.export else (y, preds)
 
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
@@ -166,12 +174,7 @@ class Detect(nn.Module):
             self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
             self.shape = shape
 
-        if self.export and self.format in {"saved_model", "pb", "tflite", "edgetpu", "tfjs"}:  # avoid TF FlexSplitV ops
-            box = x_cat[:, : self.reg_max * 4]
-            cls = x_cat[:, self.reg_max * 4 :]
-        else:
-            box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
-
+        box, cls = x["boxes"], x["scores"]
         if self.export and self.format in {"tflite", "edgetpu"}:
             # Precompute normalization factor to increase numerical stability
             # See https://github.com/ultralytics/ultralytics/issues/7371
@@ -186,16 +189,17 @@ class Detect(nn.Module):
 
     def bias_init(self):
         """Initialize Detect() biases, WARNING: requires stride availability."""
-        m = self  # self.model[-1]  # Detect() module
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
-        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
-        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
-            a[-1].bias.data[:] = 1.0  # box
-            b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+        for i, (a, b) in enumerate(zip(self.one2many["box_head"], self.one2many["cls_head"])):  # from
+            a[-1].bias.data[:] = 2.0  # box
+            b[-1].bias.data[: self.nc] = math.log(
+                5 / self.nc / (640 / self.stride[i]) ** 2
+            )  # cls (.01 objects, 80 classes, 640 img)
         if self.end2end:
-            for a, b, s in zip(m.one2one_cv2, m.one2one_cv3, m.stride):  # from
-                a[-1].bias.data[:] = 1.0  # box
-                b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+            for i, (a, b) in enumerate(zip(self.one2one["box_head"], self.one2one["cls_head"])):  # from
+                a[-1].bias.data[:] = 2.0  # box
+                b[-1].bias.data[: self.nc] = math.log(
+                    5 / self.nc / (640 / self.stride[i]) ** 2
+                )  # cls (.01 objects, 80 classes, 640 img)
 
     def decode_bboxes(self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True) -> torch.Tensor:
         """Decode bounding boxes from predictions."""
@@ -221,14 +225,34 @@ class Detect(nn.Module):
             (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6) and last
                 dimension format [x, y, w, h, max_class_prob, class_index].
         """
-        batch_size, anchors, _ = preds.shape  # i.e. shape(16,8400,84)
-        boxes, scores = preds.split([4, nc], dim=-1)
-        index = scores.amax(dim=-1).topk(min(max_det, anchors))[1].unsqueeze(-1)
-        boxes = boxes.gather(dim=1, index=index.repeat(1, 1, 4))
-        scores = scores.gather(dim=1, index=index.repeat(1, 1, nc))
+        boxes, scores = preds.split([4, self.nc], dim=-1)
+        scores, conf, idx = self.get_topk_index(scores, self.max_det)
+        boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
+        return torch.cat([boxes, scores, conf], dim=-1)
+
+    @staticmethod
+    def get_topk_index(scores, max_det: int):
+        """
+        Get top-k indices from scores.
+
+        Args:
+            scores (torch.Tensor): Scores tensor with shape (batch_size, num_anchors, num_classes).
+            max_det (int): Maximum detections per image.
+
+        Returns:
+            (torch.Tensor, torch.Tensor, torch.Tensor): Top scores, class indices, and filtered indices.
+
+        """
+        batch_size, anchors, nc = scores.shape  # i.e. shape(16,8400,84)
+        ori_index = scores.amax(dim=-1).topk(min(max_det, anchors))[1].unsqueeze(-1)
+        scores = scores.gather(dim=1, index=ori_index.repeat(1, 1, nc))
         scores, index = scores.flatten(1).topk(min(max_det, anchors))
-        i = torch.arange(batch_size)[..., None]  # batch indices
-        return torch.cat([boxes[i, index // nc], scores[..., None], (index % nc)[..., None].float()], dim=-1)
+        idx = ori_index[torch.arange(batch_size)[..., None], index // nc]  # original index
+        return scores[..., None], (index % nc)[..., None].float(), idx
+
+    def fuse(self):
+        """Remove the one2many head for inference optimization."""
+        self.cv2 = self.cv3 = None
 
 
 class Segment(Detect):
@@ -270,6 +294,18 @@ class Segment(Detect):
 
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
+        if self.end2end:
+            self.one2one_cv4 = copy.deepcopy(self.cv4)
+
+    @property
+    def one2many(self):
+        """Returns the one-to-many head components, here for backward compatibility."""
+        return dict(box_head=self.cv2, cls_head=self.cv3, mask_head=self.cv4)
+
+    @property
+    def one2one(self):
+        """Returns the one-to-one head components."""
+        return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3, mask_head=self.one2one_cv4)
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor]:
         """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
@@ -279,8 +315,42 @@ class Segment(Detect):
         mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
         x = Detect.forward(self, x)
         if self.training:
-            return x, mc, p
-        return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+            return preds
+        return (outputs, proto) if self.export else ((outputs[0], proto), preds)
+
+    def _inference(self, x):
+        """Decode predicted bounding boxes and class probabilities, concatenated with mask coefficients."""
+        preds = super()._inference(x)
+        return torch.cat([preds, x["mask_coefficient"]], dim=1)
+
+    def forward_head(self, x, box_head, cls_head, mask_head):
+        preds = super().forward_head(x, box_head, cls_head)
+        if mask_head is not None:
+            bs = x[0].shape[0]  # batch size
+            preds["mask_coefficient"] = torch.cat([mask_head[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)
+        return preds
+
+    def postprocess(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Post-process YOLO model predictions.
+
+        Args:
+            preds (torch.Tensor): Raw predictions with shape (batch_size, num_anchors, 4 + nc + nm) with last dimension
+                format [x, y, w, h, class_probs, mask_coefficient].
+
+        Returns:
+            (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6 + nm) and last
+                dimension format [x, y, w, h, max_class_prob, class_index, mask_coefficient].
+        """
+        boxes, scores, mask_coefficient = preds.split([4, self.nc, self.nm], dim=-1)
+        scores, conf, idx = self.get_topk_index(scores, self.max_det)
+        boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
+        mask_coefficient = mask_coefficient.gather(dim=1, index=idx.repeat(1, 1, self.nm))
+        return torch.cat([boxes, scores, conf, mask_coefficient], dim=-1)
+
+    def fuse(self):
+        """Remove the one2many head for inference optimization."""
+        self.cv2 = self.cv3 = self.cv4 = None
 
 
 class OBB(Detect):
@@ -319,6 +389,8 @@ class OBB(Detect):
 
         c4 = max(ch[0] // 4, self.ne)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
+        if self.end2end:
+            self.one2one_cv4 = copy.deepcopy(self.cv4)
 
     def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
         """Concatenate and return predicted bounding boxes and class probabilities."""
@@ -337,6 +409,28 @@ class OBB(Detect):
     def decode_bboxes(self, bboxes: torch.Tensor, anchors: torch.Tensor) -> torch.Tensor:
         """Decode rotated bounding boxes."""
         return dist2rbox(bboxes, self.angle, anchors, dim=1)
+
+    def postprocess(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Post-process YOLO model predictions.
+
+        Args:
+            preds (torch.Tensor): Raw predictions with shape (batch_size, num_anchors, 4 + nc + ne) with last dimension
+                format [x, y, w, h, class_probs, angle].
+
+        Returns:
+            (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 7) and last
+                dimension format [x, y, w, h, max_class_prob, class_index, angle].
+        """
+        boxes, scores, angle = preds.split([4, self.nc, self.ne], dim=-1)
+        scores, conf, idx = self.get_topk_index(scores, self.max_det)
+        boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
+        angle = angle.gather(dim=1, index=idx.repeat(1, 1, self.ne))
+        return torch.cat([boxes, scores, conf, angle], dim=-1)
+
+    def fuse(self):
+        """Remove the one2many head for inference optimization."""
+        self.cv2 = self.cv3 = self.cv4 = None
 
 
 class Pose(Detect):
@@ -376,6 +470,8 @@ class Pose(Detect):
 
         c4 = max(ch[0] // 4, self.nk)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
+        if self.end2end:
+            self.one2one_cv4 = copy.deepcopy(self.cv4)
 
     def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
         """Perform forward pass through YOLO model and return predictions."""
@@ -390,6 +486,7 @@ class Pose(Detect):
     def kpts_decode(self, bs: int, kpts: torch.Tensor) -> torch.Tensor:
         """Decode keypoints from predictions."""
         ndim = self.kpt_shape[1]
+        bs = kpts.shape[0]
         if self.export:
             if self.format in {
                 "tflite",
@@ -418,6 +515,42 @@ class Pose(Detect):
             y[:, 0::ndim] = (y[:, 0::ndim] * 2.0 + (self.anchors[0] - 0.5)) * self.strides
             y[:, 1::ndim] = (y[:, 1::ndim] * 2.0 + (self.anchors[1] - 0.5)) * self.strides
             return y
+
+    def _inference(self, x):
+        """Decode predicted bounding boxes and class probabilities, concatenated with mask coefficients."""
+        preds = super()._inference(x)
+        return torch.cat([preds, self.kpts_decode(x["kpt"])], dim=1)
+
+    def forward_head(self, x, box_head, cls_head, pose_head):
+        """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
+        preds = super().forward_head(x, box_head, cls_head)
+        if pose_head is not None:
+            bs = x[0].shape[0]  # batch size
+            preds = super().forward_head(x, box_head, cls_head)
+            preds["kpt"] = torch.cat([pose_head[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], 2)
+        return preds
+
+    def postprocess(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Post-process YOLO model predictions.
+
+        Args:
+            preds (torch.Tensor): Raw predictions with shape (batch_size, num_anchors, 4 + nc + nk) with last dimension
+                format [x, y, w, h, class_probs, keypoints].
+
+        Returns:
+            (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6 + self.nk) and last
+                dimension format [x, y, w, h, max_class_prob, class_index, keypoints].
+        """
+        boxes, scores, kpts = preds.split([4, self.nc, self.nk], dim=-1)
+        scores, conf, idx = self.get_topk_index(scores, self.max_det)
+        boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
+        kpts = kpts.gather(dim=1, index=idx.repeat(1, 1, self.nk))
+        return torch.cat([boxes, scores, conf, kpts], dim=-1)
+
+    def fuse(self):
+        """Remove the one2many head for inference optimization."""
+        self.cv2 = self.cv3 = self.cv4 = None
 
 
 class Classify(nn.Module):

@@ -348,7 +348,7 @@ class TaskAlignedAssigner(nn.Module):
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
-    def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):
+    def select_candidates_in_gts(xy_centers, gt_bboxes, mask_gt, eps=1e-9):
         """
         Select positive anchor centers within ground truth bounding boxes.
 
@@ -364,6 +364,14 @@ class TaskAlignedAssigner(nn.Module):
             b: batch size, n_boxes: number of ground truth boxes, h: height, w: width.
             Bounding box format: [x_min, y_min, x_max, y_max].
         """
+        # NOTE: this approach makes sure there's at least one anchor assigned to each gt
+        # but might be removed in next label assignment `mask_topk` as there's only a few of anchors
+        # TODO: use model stride
+        gt_bboxes_xywh = xyxy2xywh(gt_bboxes)
+        wh_mask = gt_bboxes_xywh[..., 2:] < 8
+        gt_bboxes_xywh[..., 2:] = torch.where((wh_mask * mask_gt).bool(), 16, gt_bboxes_xywh[..., 2:])
+        gt_bboxes = xywh2xyxy(gt_bboxes_xywh)
+
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
@@ -373,8 +381,7 @@ class TaskAlignedAssigner(nn.Module):
         bbox_deltas = bbox_deltas.amin(3)
         return bbox_deltas.gt_(eps)
 
-    @staticmethod
-    def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
+    def select_highest_overlaps(self, mask_pos, overlaps, n_max_boxes):
         """
         Select anchor boxes with highest IoU when assigned to multiple ground truths.
 
@@ -393,10 +400,8 @@ class TaskAlignedAssigner(nn.Module):
         if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes
             mask_multi_gts = (fg_mask.unsqueeze(1) > 1).expand(-1, n_max_boxes, -1)  # (b, n_max_boxes, h*w)
             max_overlaps_idx = overlaps.argmax(1)  # (b, h*w)
-
             is_max_overlaps = torch.zeros(mask_pos.shape, dtype=mask_pos.dtype, device=mask_pos.device)
             is_max_overlaps.scatter_(1, max_overlaps_idx.unsqueeze(1), 1)
-
             mask_pos = torch.where(mask_multi_gts, is_max_overlaps, mask_pos).float()  # (b, n_max_boxes, h*w)
             fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
@@ -468,11 +473,13 @@ def dist2bbox(relative_points, anchor_points, xywh=True, dim=-1):
         return torch.cat([c_xy, wh], dim)  # xywh bbox
     return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
-
 def bbox2dist(anchor_points, bbox, reg_max):
     """Transform the absolute coordinates of the bbox(xyxy) to relative ones (ltrb)."""
     x1y1, x2y2 = bbox.chunk(2, -1)
-    return torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1).clamp_(0, reg_max - 0.01)  # dist (lt, rb)
+    dist = torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1)
+    if reg_max is not None:
+        dist = dist.clamp_(0, reg_max - 0.01)  # dist (lt, rb)
+    return dist
 
 
 def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):

@@ -465,6 +465,8 @@ class BaseTrainer:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
+            if self.args.o2m != 1.0 and hasattr(de_parallel(self.model).criterion, "update"):
+                de_parallel(self.model).criterion.update()
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
 
@@ -919,7 +921,7 @@ class BaseTrainer:
         Returns:
             (torch.optim.Optimizer): The constructed optimizer.
         """
-        g = [], [], []  # optimizer parameter groups
+        g = [], [], [], []  # optimizer parameter groups
         bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
         if name == "auto":
             LOGGER.info(
@@ -932,10 +934,13 @@ class BaseTrainer:
             name, lr, momentum = ("SGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
             self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
 
-        for module_name, module in model.named_modules():
+        use_muon = name == "MuSGD"
+        for module_name, module in de_parallel(model).named_modules():
             for param_name, param in module.named_parameters(recurse=False):
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
-                if "bias" in fullname:  # bias (no decay)
+                if param.ndim >= 2 and use_muon:
+                    g[3].append(param)
+                elif "bias" in fullname:  # bias (no decay)
                     g[2].append(param)
                 elif isinstance(module, bn) or "logit_scale" in fullname:  # weight (no decay)
                     # ContrastiveHead and BNContrastiveHead included here with 'logit_scale'
@@ -943,7 +948,7 @@ class BaseTrainer:
                 else:  # weight (with decay)
                     g[0].append(param)
 
-        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "auto"}
+        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "MuSGD", "auto"}
         name = {x.lower(): x for x in optimizers}.get(name.lower())
         if name in {"Adam", "Adamax", "AdamW", "NAdam", "RAdam"}:
             optimizer = getattr(optim, name, optim.Adam)(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
@@ -951,16 +956,22 @@ class BaseTrainer:
             optimizer = optim.RMSprop(g[2], lr=lr, momentum=momentum)
         elif name == "SGD":
             optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
+        elif name == "MuSGD":
+            optimizer = MuSGD(g[2], lr=lr, momentum=momentum, nesterov=True)
         else:
             raise NotImplementedError(
                 f"Optimizer '{name}' not found in list of available optimizers {optimizers}. "
                 "Request support for addition optimizers at https://github.com/ultralytics/ultralytics."
+            )
+        if name == "MuSGD" and len(g[3]):
+            optimizer.add_param_group(
+                dict(params=g[3], lr=lr, weight_decay=decay, momentum=momentum, nesterov=True, use_muon=True),
             )
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
         LOGGER.info(
             f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}, momentum={momentum}) with parameter groups "
-            f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
+            f"{len(g[1])} weight(decay=0.0), {len(g[0]) if len(g[0]) else len(g[3])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
         )
         return optimizer

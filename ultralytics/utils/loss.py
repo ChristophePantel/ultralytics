@@ -7,6 +7,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Any
 
 from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
@@ -136,7 +137,17 @@ class BboxLoss(nn.Module):
             loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            target_ltrb = bbox2dist(anchor_points, target_bboxes)
+            target_ltrb = target_ltrb * stride
+            target_ltrb[..., 0::2] /= imgsz[1]
+            target_ltrb[..., 1::2] /= imgsz[0]
+            pred_dist = pred_dist * stride
+            pred_dist[..., 0::2] /= imgsz[1]
+            pred_dist[..., 1::2] /= imgsz[0]
+            loss_dfl = (
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none").mean(-1, keepdim=True) * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
 
@@ -169,7 +180,17 @@ class RotatedBboxLoss(BboxLoss):
             loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            target_ltrb = bbox2dist(anchor_points, xywh2xyxy(target_bboxes[..., :4]))
+            target_ltrb = target_ltrb * stride
+            target_ltrb[..., 0::2] /= imgsz[1]
+            target_ltrb[..., 1::2] /= imgsz[0]
+            pred_dist = pred_dist * stride
+            pred_dist[..., 0::2] /= imgsz[1]
+            pred_dist[..., 1::2] /= imgsz[0]
+            loss_dfl = (
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none").mean(-1, keepdim=True) * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
 
@@ -626,6 +647,7 @@ class v8DetectionLoss:
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
+
         imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
@@ -769,21 +791,76 @@ class v8SegmentationLoss(v8DetectionLoss):
                 target_scores,
                 target_scores_sum,
                 fg_mask,
+                imgsz,
+                stride_tensor,
             )
+
+        loss[0] *= self.hyp.box  # box gain
+        loss[1] *= self.hyp.cls  # cls gain
+        loss[2] *= self.hyp.dfl  # dfl gain
+        return (
+            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+            loss,
+            loss.detach(),
+        )  # loss(box, cls, dfl)
+
+    def parse_output(self, preds):
+        """Parse model predictions to extract features."""
+        return preds[1] if isinstance(preds, tuple) else preds
+
+    def __call__(self, preds, batch):
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        return self.loss(self.parse_output(preds), batch)
+
+    def loss(self, preds, batch):
+        """A wrapper for get_assigned_targets_and_loss and parse_output."""
+        batch_size = preds["boxes"].shape[0]
+        loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+        return loss * batch_size, loss_detach
+
+
+class v8SegmentationLoss(v8DetectionLoss):
+    """Criterion class for computing training losses for YOLOv8 segmentation."""
+
+    def __init__(self, model, tal_topk=10):  # model must be de-paralleled
+        """Initialize the v8SegmentationLoss class with model parameters and mask overlap setting."""
+        super().__init__(model, tal_topk)
+        self.overlap = model.args.overlap_mask
+
+    def loss(self, preds, batch):
+        """Calculate and return the combined loss for detection and segmentation."""
+        pred_masks, proto = preds["mask_coefficient"].permute(0, 2, 1).contiguous(), preds["proto"]
+        loss = torch.zeros(4, device=self.device)  # box, seg, cls, dfl
+        (fg_mask, target_gt_idx, target_bboxes, _, _), det_loss, _ = self.get_assigned_targets_and_loss(preds, batch)
+        # NOTE: re-assign index for consistency for now. Need to be removed in the future.
+        loss[0], loss[2], loss[3] = det_loss[0], det_loss[1], det_loss[2]
+
+        batch_size, _, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
+        if fg_mask.sum():
             # Masks loss
             masks = batch["masks"].to(self.device).float()
             if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
-                masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
+                # masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
+                proto = F.interpolate(proto, masks.shape[-2:], mode="bilinear", align_corners=False)
 
+            imgsz = torch.tensor(
+                batch["resized_shape"][0], device=self.device, dtype=pred_masks.dtype
+            )  # image size (h,w)
             loss[1] = self.calculate_segmentation_loss(
-                fg_mask, masks, target_gt_idx, target_bboxes, batch_idx, proto, pred_masks, imgsz, self.overlap
+                fg_mask,
+                masks,
+                target_gt_idx,
+                target_bboxes,
+                batch["batch_idx"].view(-1, 1),
+                proto,
+                pred_masks,
+                imgsz,
             )
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
 
-        loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.box  # seg gain
         loss[2] *= self.hyp.cls  # cls gain
         loss[3] *= self.hyp.dfl  # dfl gain
@@ -825,14 +902,12 @@ class v8SegmentationLoss(v8DetectionLoss):
         proto: torch.Tensor,
         pred_masks: torch.Tensor,
         imgsz: torch.Tensor,
-        overlap: bool,
     ) -> torch.Tensor:
         """
         Calculate the loss for instance segmentation.
 
         Args:
             fg_mask (torch.Tensor): A binary tensor of shape (BS, N_anchors) indicating which anchors are positive.
-            masks (torch.Tensor): Ground truth masks of shape (BS, H, W) if `overlap` is False, otherwise (BS, ?, H, W).
             target_gt_idx (torch.Tensor): Indexes of ground truth objects for each anchor of shape (BS, N_anchors).
             target_bboxes (torch.Tensor): Ground truth bounding boxes for each anchor of shape (BS, N_anchors, 4).
             batch_idx (torch.Tensor): Batch indices of shape (N_labels_in_batch, 1).
@@ -865,7 +940,7 @@ class v8SegmentationLoss(v8DetectionLoss):
             fg_mask_i, target_gt_idx_i, pred_masks_i, proto_i, mxyxy_i, marea_i, masks_i = single_i
             if fg_mask_i.any():
                 mask_idx = target_gt_idx_i[fg_mask_i]
-                if overlap:
+                if self.overlap:
                     gt_mask = masks_i == (mask_idx + 1).view(-1, 1, 1)
                     gt_mask = gt_mask.float()
                 else:
@@ -885,9 +960,9 @@ class v8SegmentationLoss(v8DetectionLoss):
 class v8PoseLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 pose estimation."""
 
-    def __init__(self, model):  # model must be de-paralleled
+    def __init__(self, model, tal_topk=10):  # model must be de-paralleled
         """Initialize v8PoseLoss with model parameters and keypoint-specific loss functions."""
-        super().__init__(model)
+        super().__init__(model, tal_topk)
         self.kpt_shape = model.model[-1].kpt_shape
         self.bce_pose = nn.BCEWithLogitsLoss()
         is_pose = self.kpt_shape == [17, 3]
@@ -897,11 +972,13 @@ class v8PoseLoss(v8DetectionLoss):
 
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the total loss and detach it for pose estimation."""
+        pred_kpts = preds["kpt"].permute(0, 2, 1).contiguous()
         loss = torch.zeros(5, device=self.device)  # box, cls, dfl, kpt_location, kpt_visibility
-        feats, pred_kpts = preds if isinstance(preds[0], list) else preds[1]
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
+        (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor), det_loss, _ = (
+            self.get_assigned_targets_and_loss(preds, batch)
         )
+        # NOTE: re-assign index for consistency for now. Need to be removed in the future.
+        loss[0], loss[3], loss[4] = det_loss[0], det_loss[1], det_loss[2]
 
         # B, grids, ..
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
@@ -922,43 +999,26 @@ class v8PoseLoss(v8DetectionLoss):
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
 
         # Pboxes
-        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
         pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, 17, 3)
-
-        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
-            pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-            anchor_points * stride_tensor,
-            gt_labels,
-            gt_bboxes,
-            mask_gt,
-        )
-
-        target_scores_sum = max(target_scores.sum(), 1)
-
-        # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[3] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
-            target_bboxes /= stride_tensor
-            loss[0], loss[4] = self.bbox_loss(
-                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
-            )
             keypoints = batch["keypoints"].to(self.device).float().clone()
             keypoints[..., 0] *= imgsz[1]
             keypoints[..., 1] *= imgsz[0]
 
             loss[1], loss[2] = self.calculate_keypoints_loss(
-                fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
+                fg_mask,
+                target_gt_idx,
+                keypoints,
+                batch["batch_idx"].view(-1, 1),
+                stride_tensor,
+                target_bboxes,
+                pred_kpts,
             )
 
-        loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.pose  # pose gain
         loss[2] *= self.hyp.kobj  # kobj gain
-        loss[3] *= self.hyp.cls  # cls gain
-        loss[4] *= self.hyp.dfl  # dfl gain
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
@@ -1033,6 +1093,7 @@ class v8PoseLoss(v8DetectionLoss):
         kpts_obj_loss = 0
 
         if masks.any():
+            target_bboxes /= stride_tensor
             gt_kpt = selected_keypoints[masks]
             area = xyxy2xywh(target_bboxes[masks])[:, 2:].prod(1, keepdim=True)
             pred_kpt = pred_kpts[masks]
@@ -1059,10 +1120,10 @@ class v8ClassificationLoss:
 class v8OBBLoss(v8DetectionLoss):
     """Calculates losses for object detection, classification, and box distribution in rotated YOLO models."""
 
-    def __init__(self, model):
+    def __init__(self, model, tal_topk=10):
         """Initialize v8OBBLoss with model, assigner, and rotated bbox loss; model must be de-paralleled."""
-        super().__init__(model)
-        self.assigner = RotatedTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
+        super().__init__(model, tal_topk=tal_topk)
+        self.assigner = RotatedTaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = RotatedBboxLoss(self.reg_max).to(self.device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -1085,20 +1146,16 @@ class v8OBBLoss(v8DetectionLoss):
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the loss for oriented bounding box detection."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
-        feats, pred_angle = preds if isinstance(preds[0], list) else preds[1]
-        batch_size = pred_angle.shape[0]  # batch size, number of masks, mask height, mask width
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
+        pred_distri, pred_scores, pred_angle = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+            preds["angle"].permute(0, 2, 1).contiguous(),
         )
-
-        # b, grids, ..
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
-        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
-        pred_angle = pred_angle.permute(0, 2, 1).contiguous()
+        anchor_points, stride_tensor = preds["anchors"], preds["strides"]
+        batch_size = pred_angle.shape[0]  # batch size, number of masks, mask height, mask width
 
         dtype = pred_scores.dtype
-        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        imgsz = torch.tensor(batch["resized_shape"][0], device=self.device, dtype=dtype)  # image size (h,w)
 
         # targets
         try:
@@ -1144,7 +1201,15 @@ class v8OBBLoss(v8DetectionLoss):
         if fg_mask.sum():
             target_bboxes[..., :4] /= stride_tensor
             loss[0], loss[2] = self.bbox_loss(
-                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+                pred_distri,
+                pred_bboxes,
+                anchor_points,
+                target_bboxes,
+                target_scores,
+                target_scores_sum,
+                fg_mask,
+                imgsz,
+                stride_tensor,
             )
         else:
             loss[0] += (pred_angle * 0).sum()
@@ -1193,6 +1258,45 @@ class E2EDetectLoss:
         return loss_one2many[0] + loss_one2one[0], loss_one2many[1] + loss_one2one[1]
 
 
+class E2ELoss:
+    """Criterion class for computing training losses for end-to-end detection."""
+
+    def __init__(self, model, loss_fn=v8DetectionLoss):
+        """Initialize E2ELoss with one-to-many and one-to-one detection losses using the provided model."""
+        self.one2many = loss_fn(model, tal_topk=10)
+        self.one2one = loss_fn(model, tal_topk=1)
+        self.updates = 0
+        self.total = 1.0
+        self.o2m = 0.8
+        self.o2o = self.total - self.o2m
+        self.o2m_copy = self.o2m
+        if self.one2one.hyp.o2m == 1.0:
+            self.o2o = 1.0
+            self.o2m = 1.0
+
+    def __call__(self, preds, batch):
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        preds = self.one2many.parse_output(preds)
+        one2many, one2one = preds["one2many"], preds["one2one"]
+        loss_one2many = self.one2many.loss(one2many, batch)
+        loss_one2one = self.one2one.loss(one2one, batch)
+        return loss_one2many[0] * self.o2m + loss_one2one[0] * self.o2o, loss_one2many[1] * self.o2m + loss_one2one[
+            1
+        ] * self.o2o
+
+    def update(self):
+        self.updates += 1
+        self.o2m = self.decay(self.updates)
+        self.o2o = max(self.total - self.o2m, 0)
+
+    def decay(self, x):
+        return (
+            max(1 - x / (self.one2one.hyp.epochs - 1), 0) * (self.o2m_copy - self.one2one.hyp.o2m)
+            + self.one2one.hyp.o2m
+        )
+
+
+# TODO: need to double check
 class TVPDetectLoss:
     """Criterion class for computing training losses for text-visual prompt detection."""
 
