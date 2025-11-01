@@ -40,6 +40,7 @@ from ultralytics.utils import (
     colorstr,
     emojis,
 )
+from ultralytics.optim import MuSGD
 from ultralytics.utils.autobatch import check_train_batch_size
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
@@ -467,6 +468,10 @@ class BaseTrainer:
                 self.run_callbacks("on_train_batch_end")
             if self.args.o2m != 1.0 and hasattr(de_parallel(self.model).criterion, "update"):
                 de_parallel(self.model).criterion.update()
+
+            # TODO
+            if self.args.o2m != 1.0 and hasattr(unwrap_model(self.model).criterion, "update"):
+                unwrap_model(self.model).criterion.update()
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
 
