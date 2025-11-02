@@ -9,6 +9,7 @@ from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import batch_probiou, box_iou
 from ultralytics.utils.ops import xywh2xyxy
 
+
 def non_max_suppression(
     prediction,
     conf_thres: float = 0.25,

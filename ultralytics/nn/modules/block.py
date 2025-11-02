@@ -105,222 +105,6 @@ class Proto(nn.Module):
         return self.cv3(self.cv2(self.upsample(self.cv1(x))))
 
 
-class Protov2(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, c1: int, p2_ch: int, c_: int = 256, c2: int = 32):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv1 = Conv(c1, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.cv2 = Conv(c_ + p2_ch, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        x1 = self.upsample(self.cv1(x[1]))
-        x = torch.cat([x[0], x1], dim=1)
-        x = self.cv3(self.cv2(x))
-        return x
-
-
-class Protov3(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, c1: int, c_: int = 256, c2: int = 32):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv0 = Conv(c1, c_, k=1)
-        self.cv1 = Conv(c_, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.upsample_p5 = nn.Upsample(scale_factor=4, mode='nearest')
-        self.upsample_p4 = nn.Upsample(scale_factor=2, mode='nearest')
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        p4 = self.upsample_p4(x[1])
-        p5 = self.upsample_p5(x[2])
-        x = torch.cat([x[0], p4, p5], dim=1)
-        return self.cv3(self.cv2(self.upsample(self.cv1(self.cv0(x)))))
-
-
-class Protov4(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, ch: int, c_: int = 256, c2: int = 32):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv0 = Conv(3*ch[0], c_, k=1)
-        self.cv1 = Conv(c_, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.upsample_p5 = nn.Sequential(Conv(ch[2], ch[0], k=1), nn.Upsample(scale_factor=4, mode='nearest'))
-        self.upsample_p4 = nn.Sequential(Conv(ch[1], ch[0], k=1), nn.Upsample(scale_factor=2, mode='nearest'))
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        p4 = self.upsample_p4(x[1])
-        p5 = self.upsample_p5(x[2])
-        x = torch.cat([x[0], p4, p5], dim=1)
-        return self.cv3(self.cv2(self.upsample(self.cv1(self.cv0(x)))))
-
-
-class Protov4_add(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, ch: int, c_: int = 256, c2: int = 32):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv0 = Conv(ch[0], c_, k=3)
-        self.cv1 = Conv(c_, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.upsample_p5 = nn.Sequential(Conv(ch[2], ch[0], k=1), nn.Upsample(scale_factor=4, mode='nearest'))
-        self.upsample_p4 = nn.Sequential(Conv(ch[1], ch[0], k=1), nn.Upsample(scale_factor=2, mode='nearest'))
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        p4 = self.upsample_p4(x[1])
-        p5 = self.upsample_p5(x[2])
-        x = x[0] + p4 + p5
-        return self.cv3(self.cv2(self.upsample(self.cv1(self.cv0(x)))))
-
-
-class Protov5(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, ch: int, c_: int = 256, c2: int = 32):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv1 = Conv(ch[0], c_, k=3)
-        self.upsample_p3 = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.upsample_p5 = nn.ConvTranspose2d(ch[2], ch[1], 2, 2, 0, bias=True)
-        self.bn_act_p5 = nn.Sequential(nn.BatchNorm2d(ch[1]), nn.SiLU())
-        self.upsample_p4 = nn.ConvTranspose2d(ch[1], ch[0], 2, 2, 0, bias=True)
-        self.bn_act_p4 = nn.Sequential(nn.BatchNorm2d(ch[0]), nn.SiLU())
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        upsampled_p5 = self.bn_act_p5(self.upsample_p5(x[2])) + x[1]
-        upsampled_p4 = self.bn_act_p4(self.upsample_p4(upsampled_p5)) + x[0]
-        return self.cv3(self.cv2(self.upsample_p3(self.cv1(upsampled_p4))))
-
-
-class Protov6(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, c1: int, c_: int = 256, c2: int = 32, nc: int = 80):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv1 = Conv(c1, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.semseg = nn.Sequential(Conv(c_, c_, k=3), nn.Conv2d(c_, nc, 1))
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        p2_feat = self.upsample(self.cv1(x))
-        insseg = self.cv3(self.cv2(p2_feat))
-        if self.training:
-            semseg = self.semseg(p2_feat)
-            return insseg, semseg
-        return insseg
-
-
-class Semseg(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, c1: int, c_: int = 256, nc: int = 80):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv1 = Conv(c1, c_, k=3)
-        self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = nn.Conv2d(c_, nc, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
-
-
-class Semsegv2(nn.Module):
-    """Ultralytics YOLO models mask Proto module for segmentation models."""
-
-    def __init__(self, c1: int, c_: int = 256, nc: int = 80):
-        """
-        Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
-
-        Args:
-            c1 (int): Input channels.
-            c_ (int): Intermediate channels.
-            c2 (int): Output channels (number of protos).
-        """
-        super().__init__()
-        self.cv1 = Conv(c1, c_, k=3)
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = nn.Conv2d(c_, nc, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        return self.cv3(self.cv2((self.cv1(x))))
-
-
 class HGStem(nn.Module):
     """
     StemBlock of PPHGNetV2 with 5 convolutions and one maxpool2d.
@@ -432,7 +216,7 @@ class SPP(nn.Module):
 class SPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
-    def __init__(self, c1: int, c2: int, k: int = 5, n: int = 3, shortcut: bool = False):
+    def __init__(self, c1: int, c2: int, k: int = 5):
         """
         Initialize the SPPF layer with given input/output channels and kernel size.
 
@@ -446,18 +230,15 @@ class SPPF(nn.Module):
         """
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1, act=False)
-        self.cv2 = Conv(c_ * (n + 1), c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.n = n
-        self.add = shortcut and c1 == c2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply sequential pooling operations to input and return concatenated feature maps."""
         y = [self.cv1(x)]
-        y.extend(self.m(y[-1]) for _ in range(getattr(self, "n", 3)))
-        y = self.cv2(torch.cat(y, 1))
-        return y + x if getattr(self, "add", False) else y
+        y.extend(self.m(y[-1]) for _ in range(3))
+        return self.cv2(torch.cat(y, 1))
 
 
 class C1(nn.Module):
@@ -1327,15 +1108,7 @@ class C3k2(C2f):
     """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
     def __init__(
-        self,
-        c1: int,
-        c2: int,
-        n: int = 1,
-        c3k: bool = False,
-        e: float = 0.5,
-        attn: bool = False,
-        g: int = 1,
-        shortcut: bool = True,
+        self, c1: int, c2: int, n: int = 1, c3k: bool = False, e: float = 0.5, g: int = 1, shortcut: bool = True
     ):
         """
         Initialize C3k2 module.
@@ -1351,15 +1124,7 @@ class C3k2(C2f):
         """
         super().__init__(c1, c2, n, shortcut, g, e)
         self.m = nn.ModuleList(
-            nn.Sequential(
-                Bottleneck(self.c, self.c, shortcut, g),
-                PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1)),
-            )
-            if attn
-            else C3k(self.c, self.c, 2, shortcut, g)
-            if c3k
-            else Bottleneck(self.c, self.c, shortcut, g)
-            for _ in range(n)
+            C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
         )
 
 
@@ -1591,7 +1356,6 @@ class Attention(nn.Module):
 
         attn = (q.transpose(-2, -1) @ k) * self.scale
         attn = attn.softmax(dim=-1)
-        # attn = attn.sigmoid()
         x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
         x = self.proj(x)
         return x
@@ -1689,7 +1453,7 @@ class PSA(nn.Module):
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         self.cv2 = Conv(2 * self.c, c1, 1)
 
-        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1))
+        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=self.c // 64)
         self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

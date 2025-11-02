@@ -22,16 +22,16 @@ test: # test images (optional)
 
 # Classes
 names:
-  00: aeroplane
-  01: bicycle
-  02: bird
-  03: boat
-  04: bottle
-  05: bus
-  06: car
-  07: cat
-  08: chair
-  09: cow
+  0: aeroplane
+  1: bicycle
+  2: bird
+  3: boat
+  4: bottle
+  5: bus
+  6: car
+  7: cat
+  8: chair
+  9: cow
   10: diningtable
   11: dog
   12: horse

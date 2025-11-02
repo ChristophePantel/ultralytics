@@ -220,13 +220,6 @@ class BaseValidator:
                     self.loss += model.loss(batch, preds)[1]
 
             # Postprocess
-            if self.device.type == "mps":
-                # post-processing much faster on CPU
-                batch = {k: (v.cpu() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
-                preds[0] = preds[0].cpu()
-                if isinstance(preds[1], tuple):
-                    preds[1] = tuple(p.cpu() if isinstance(p, torch.Tensor) else p for p in preds[1])
-
             with dt[3]:
                 preds = self.postprocess(preds)
 
@@ -247,11 +240,6 @@ class BaseValidator:
             self.run_callbacks("on_val_end")
 
         if self.training:
-            if self.args.save_json and self.jdict:
-                with open(str(self.save_dir / "predictions.json"), "w", encoding="utf-8") as f:
-                    LOGGER.info(f"Saving {f.name}...")
-                    json.dump(self.jdict, f)  # flatten and save
-                stats = self.eval_json(stats)  # update stats
             model.float()
             # Reduce loss across all GPUs
             loss = self.loss.clone().detach()
@@ -259,12 +247,6 @@ class BaseValidator:
                 dist.reduce(loss, dst=0, op=dist.ReduceOp.AVG)
             if RANK > 0:
                 return
-
-            if self.args.save_json and self.jdict:
-                with open(str(self.save_dir / "predictions.json"), "w", encoding="utf-8") as f:
-                    LOGGER.info(f"Saving {f.name}...")
-                    json.dump(self.jdict, f)  # flatten and save
-                stats = self.eval_json(stats)  # update stats
             results = {**stats, **trainer.label_loss_items(loss.cpu() / len(self.dataloader), prefix="val")}
             return {k: round(float(v), 5) for k, v in results.items()}  # return results as 5 decimal place floats
         else:

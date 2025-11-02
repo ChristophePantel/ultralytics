@@ -263,6 +263,7 @@ class DetectionValidator(BaseValidator):
         elif RANK > 0:
             dist.gather_object(self.metrics.stats, None, dst=0)
             dist.gather_object(self.jdict, None, dst=0)
+            self.jdict = []
             self.metrics.clear_stats()
 
     def get_stats(self) -> dict[str, Any]:
@@ -541,8 +542,6 @@ class DetectionValidator(BaseValidator):
                     # update mAP50-95 and mAP50
                     stats[f"metrics/mAP50({suffix[i][0]})"] = val.stats_as_dict["AP_50"]
                     stats[f"metrics/mAP50-95({suffix[i][0]})"] = val.stats_as_dict["AP_all"]
-                    # update fitness
-                    stats["fitness"] = 0.9 * val.stats_as_dict["AP_all"] + 0.1 * val.stats_as_dict["AP_50"]
 
                     if self.is_lvis:
                         stats[f"metrics/APr({suffix[i][0]})"] = val.stats_as_dict["APr"]
@@ -551,7 +550,6 @@ class DetectionValidator(BaseValidator):
 
                 if self.is_lvis:
                     stats["fitness"] = stats["metrics/mAP50-95(B)"]  # always use box mAP50-95 for fitness
-
             except Exception as e:
                 LOGGER.warning(f"faster-coco-eval unable to run: {e}")
         return stats

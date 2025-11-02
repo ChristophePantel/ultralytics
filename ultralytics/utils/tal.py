@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from . import LOGGER
 from .metrics import bbox_iou, probiou
-from .ops import xywhr2xyxyxyxy, xyxy2xywh, xywh2xyxy
+from .ops import xywhr2xyxyxyxy
 from .torch_utils import TORCH_1_11
 
 
@@ -24,15 +24,7 @@ class TaskAlignedAssigner(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(
-        self,
-        topk: int = 13,
-        num_classes: int = 80,
-        alpha: float = 1.0,
-        beta: float = 6.0,
-        stride: list = [8, 16, 32],
-        eps: float = 1e-9,
-    ):
+    def __init__(self, topk: int = 13, num_classes: int = 80, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
         """
         Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
@@ -48,7 +40,6 @@ class TaskAlignedAssigner(nn.Module):
         self.num_classes = num_classes
         self.alpha = alpha
         self.beta = beta
-        self.stride = stride
         self.eps = eps
 
     @torch.no_grad()
@@ -357,32 +348,22 @@ class TaskAlignedAssigner(nn.Module):
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
-    def select_candidates_in_gts(xy_centers, gt_bboxes, mask_gt, eps=1e-9):
+    def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):
         """
         Select positive anchor centers within ground truth bounding boxes.
 
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w, 2).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 4).
-            mask_gt (torch.Tensor): Mask for valid ground truth boxes, shape (b, n_boxes, 1).
-            stride (list[int]): List of stride values for each feature map level.
             eps (float, optional): Small value for numerical stability.
 
         Returns:
             (torch.Tensor): Boolean mask of positive anchors, shape (b, n_boxes, h*w).
 
-        Note:
-            b: batch size, n_boxes: number of ground truth boxes, h: height, w: width.
-            Bounding box format: [x_min, y_min, x_max, y_max].
+        Notes:
+            - b: batch size, n_boxes: number of ground truth boxes, h: height, w: width.
+            - Bounding box format: [x_min, y_min, x_max, y_max].
         """
-        # NOTE: this approach makes sure there's at least one anchor assigned to each gt
-        # but might be removed in next label assignment `mask_topk` as there's only a few of anchors
-        # TODO: use model stride
-        gt_bboxes_xywh = xyxy2xywh(gt_bboxes)
-        wh_mask = gt_bboxes_xywh[..., 2:] < 8
-        gt_bboxes_xywh[..., 2:] = torch.where((wh_mask * mask_gt).bool(), 16, gt_bboxes_xywh[..., 2:])
-        gt_bboxes = xywh2xyxy(gt_bboxes_xywh)
-
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
@@ -392,7 +373,8 @@ class TaskAlignedAssigner(nn.Module):
         bbox_deltas = bbox_deltas.amin(3)
         return bbox_deltas.gt_(eps)
 
-    def select_highest_overlaps(self, mask_pos, overlaps, n_max_boxes):
+    @staticmethod
+    def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
         """
         Select anchor boxes with highest IoU when assigned to multiple ground truths.
 
@@ -430,15 +412,13 @@ class RotatedTaskAlignedAssigner(TaskAlignedAssigner):
         return probiou(gt_bboxes, pd_bboxes).squeeze(-1).clamp_(0)
 
     @staticmethod
-    def select_candidates_in_gts(xy_centers, gt_bboxes, mask_gt, stride):
+    def select_candidates_in_gts(xy_centers, gt_bboxes):
         """
         Select the positive anchor center in gt for rotated bounding boxes.
 
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates with shape (h*w, 2).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes with shape (b, n_boxes, 5).
-            mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (b, n_boxes, 1).
-            stride (list[int]): List of stride values for each feature map level.
 
         Returns:
             (torch.Tensor): Boolean mask of positive anchors with shape (b, n_boxes, h*w).
@@ -488,13 +468,11 @@ def dist2bbox(relative_points, anchor_points, xywh=True, dim=-1):
         return torch.cat([c_xy, wh], dim)  # xywh bbox
     return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
+
 def bbox2dist(anchor_points, bbox, reg_max):
     """Transform the absolute coordinates of the bbox(xyxy) to relative ones (ltrb)."""
     x1y1, x2y2 = bbox.chunk(2, -1)
-    dist = torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1)
-    if reg_max is not None:
-        dist = dist.clamp_(0, reg_max - 0.01)  # dist (lt, rb)
-    return dist
+    return torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1).clamp_(0, reg_max - 0.01)  # dist (lt, rb)
 
 
 def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):

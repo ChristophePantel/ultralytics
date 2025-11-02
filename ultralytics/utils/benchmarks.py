@@ -387,7 +387,6 @@ class ProfileModels:
         half (bool): Flag to indicate whether to use FP16 half-precision for TensorRT profiling.
         trt (bool): Flag to indicate whether to profile using TensorRT.
         device (torch.device): Device used for profiling.
-        exist_ok (bool): Overwrite existing TensorRT weights if False.
 
     Methods:
         run: Profile YOLO models for speed and accuracy across various formats.
@@ -417,7 +416,6 @@ class ProfileModels:
         half: bool = True,
         trt: bool = True,
         device: torch.device | str | None = None,
-        exist_ok: bool = True
     ):
         """
         Initialize the ProfileModels class for profiling models.
@@ -431,7 +429,6 @@ class ProfileModels:
             half (bool): Flag to indicate whether to use FP16 half-precision for TensorRT profiling.
             trt (bool): Flag to indicate whether to profile using TensorRT.
             device (torch.device | str | None): Device used for profiling. If None, it is determined automatically.
-            exist_ok (bool): Overwrite existing TensorRT weights if False.
 
         Examples:
             Initialize and profile models
@@ -450,7 +447,6 @@ class ProfileModels:
         self.half = half
         self.trt = trt  # run TensorRT profiling
         self.device = device if isinstance(device, torch.device) else select_device(device)
-        self.exist_ok = exist_ok
 
     def run(self):
         """
@@ -479,7 +475,7 @@ class ProfileModels:
                 model = YOLO(str(file))
                 model.fuse()  # to report correct params and GFLOPs in model.info()
                 model_info = model.info()
-                if self.trt and self.device.type != "cpu" and (not self.exist_ok or not engine_file.is_file()):
+                if self.trt and self.device.type != "cpu" and not engine_file.is_file():
                     engine_file = model.export(
                         format="engine",
                         half=self.half,
@@ -496,15 +492,11 @@ class ProfileModels:
             elif file.suffix == ".onnx":
                 model_info = self.get_onnx_model_info(file)
                 onnx_file = file
-            elif file.suffix == ".engine":
-                model_info = self.get_tensorrt_model_info(file)
-                onnx_file = None
-                engine_file = file
             else:
                 continue
 
             t_engine = self.profile_tensorrt_model(str(engine_file))
-            t_onnx = self.profile_onnx_model(str(onnx_file)) if onnx_file is not None else (0.0, 0.0)
+            t_onnx = self.profile_onnx_model(str(onnx_file))
             table_rows.append(self.generate_table_row(file.stem, t_onnx, t_engine, model_info))
             output.append(self.generate_results_dict(file.stem, t_onnx, t_engine, model_info))
 
@@ -535,11 +527,6 @@ class ProfileModels:
     @staticmethod
     def get_onnx_model_info(onnx_file: str):
         """Extract metadata from an ONNX model file including parameters, GFLOPs, and input shape."""
-        return 0.0, 0.0, 0.0, 0.0  # return (num_layers, num_params, num_gradients, num_flops)
-
-    @staticmethod
-    def get_tensorrt_model_info(onnx_file: str):
-        """Extract metadata from an TensorRT model file including parameters, GFLOPs, and input shape."""
         return 0.0, 0.0, 0.0, 0.0  # return (num_layers, num_params, num_gradients, num_flops)
 
     @staticmethod
@@ -703,8 +690,8 @@ class ProfileModels:
         """
         _layers, params, _gradients, flops = model_info
         return (
-            f"| {model_name:18s} | {self.imgsz} | - | {t_onnx[0]:.2f}±{t_onnx[1]:.2f} ms | {t_engine[0]:.2f}±"
-            f"{t_engine[1]:.2f} ms | {params / 1e6:.2f} | {flops:.2f} |"
+            f"| {model_name:18s} | {self.imgsz} | - | {t_onnx[0]:.1f}±{t_onnx[1]:.1f} ms | {t_engine[0]:.1f}±"
+            f"{t_engine[1]:.1f} ms | {params / 1e6:.1f} | {flops:.1f} |"
         )
 
     @staticmethod

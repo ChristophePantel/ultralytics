@@ -1919,7 +1919,7 @@ class Albumentations:
         - Spatial transforms are handled differently and require special processing for bounding boxes.
     """
 
-    def __init__(self, p: float = 1.0, transforms: list | None = None) -> None:
+    def __init__(self, p: float = 1.0) -> None:
         """
         Initialize the Albumentations transform object for YOLO bbox formatted parameters.
 
@@ -1929,7 +1929,6 @@ class Albumentations:
 
         Args:
             p (float): Probability of applying the augmentations. Must be between 0 and 1.
-            transforms (list, optional): List of custom Albumentations transforms. If None, uses default transforms.
 
         Attributes:
             p (float): Probability of applying the augmentations.
@@ -1945,11 +1944,6 @@ class Albumentations:
             >>> augmented = transform(image=image, bboxes=bboxes, class_labels=classes)
             >>> augmented_image = augmented["image"]
             >>> augmented_bboxes = augmented["bboxes"]
-
-            >>> # Custom transforms example
-            >>> import albumentations as A
-            >>> custom_transforms = [A.Blur(p=0.01), A.CLAHE(p=0.01)]
-            >>> transform = Albumentations(p=1.0, transforms=custom_transforms)
 
         Notes:
             - Requires Albumentations version 1.0.3 or higher.
@@ -2012,19 +2006,16 @@ class Albumentations:
                 "XYMasking",
             }  # from https://albumentations.ai/docs/getting_started/transforms_and_targets/#spatial-level-transforms
 
-            # Transforms, use custom transforms if provided, otherwise use defaults
-            if transforms is not None:
-                T = transforms
-            else:
-                T = [
-                    A.Blur(p=0.01),
-                    A.MedianBlur(p=0.01),
-                    A.ToGray(p=0.01),
-                    A.CLAHE(p=0.01),
-                    A.RandomBrightnessContrast(p=0.0),
-                    A.RandomGamma(p=0.0),
-                    A.ImageCompression(quality_range=(75, 100), p=0.0),
-                ]
+            # Transforms
+            T = [
+                A.Blur(p=0.01),
+                A.MedianBlur(p=0.01),
+                A.ToGray(p=0.01),
+                A.CLAHE(p=0.01),
+                A.RandomBrightnessContrast(p=0.0),
+                A.RandomGamma(p=0.0),
+                A.ImageCompression(quality_range=(75, 100), p=0.0),
+            ]
 
             # Compose transforms
             self.contains_spatial = any(transform.__class__.__name__ in spatial_transforms for transform in T)
@@ -2141,8 +2132,6 @@ class Format:
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
-        semseg_loss=False,
-        nc=80
     ):
         """
         Initialize the Format class with given parameters for image and instance annotation formatting.
@@ -2186,8 +2175,6 @@ class Format:
         self.mask_overlap = mask_overlap
         self.batch_idx = batch_idx  # keep the batch indexes
         self.bgr = bgr
-        self.semseg_loss = semseg_loss
-        self.nc = nc
 
     def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """
@@ -2243,21 +2230,6 @@ class Format:
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, num_class)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
-        if self.semseg_loss:
-            if nl:
-                # onehot binary mask
-                sem_masks = labels["cls"].squeeze(1)[labels["masks"].long() - 1]  # 1xHxW
-                sem_masks = F.one_hot(sem_masks.long(), num_classes=self.nc).permute(0, 3, 1, 2)  # 1xncxHxW
-                mask_zero = labels["masks"] == 0  # 1xHxW
-                sem_masks[mask_zero.unsqueeze(0).expand_as(sem_masks)] = 0
-                # multi-class mask
-                # sem_masks = labels["cls"].squeeze(1)[labels["masks"].long() - 1]  # 1xHxW
-                # mask_zero = labels["masks"] == 0  # 1xHxW
-                # sem_masks[mask_zero] = 255  # ignore mask
-            else:
-                sem_masks = torch.zeros(1, self.nc, *labels["masks"].shape[-2:])
-                # sem_masks = torch.zeros(1, *labels["masks"].shape[-2:])
-            labels["sem_masks"] = sem_masks.float()
         if self.return_keypoint:
             labels["keypoints"] = (
                 torch.empty(0, 3) if instances.keypoints is None else torch.from_numpy(instances.keypoints)
@@ -2607,12 +2579,6 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace, stretch: bo
         >>> hyp = IterableSimpleNamespace(mosaic=1.0, copy_paste=0.5, degrees=10.0, translate=0.2, scale=0.9)
         >>> transforms = v8_transforms(dataset, imgsz=640, hyp=hyp)
         >>> augmented_data = transforms(dataset[0])
-
-        >>> # With custom albumentations
-        >>> import albumentations as A
-        >>> augmentations = [A.Blur(p=0.01), A.CLAHE(p=0.01)]
-        >>> hyp.augmentations = augmentations
-        >>> transforms = v8_transforms(dataset, imgsz=640, hyp=hyp)
     """
     mosaic = Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic)
     affine = RandomPerspective(
@@ -2650,7 +2616,7 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace, stretch: bo
             pre_transform,
             MixUp(dataset, pre_transform=pre_transform, p=hyp.mixup),
             CutMix(dataset, pre_transform=pre_transform, p=hyp.cutmix),
-            Albumentations(p=1.0, transforms=getattr(hyp, "augmentations", None)),
+            Albumentations(p=1.0),
             RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v),
             RandomFlip(direction="vertical", p=hyp.flipud, flip_idx=flip_idx),
             RandomFlip(direction="horizontal", p=hyp.fliplr, flip_idx=flip_idx),

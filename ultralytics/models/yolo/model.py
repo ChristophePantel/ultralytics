@@ -16,7 +16,6 @@ from ultralytics.nn.tasks import (
     OBBModel,
     PoseModel,
     SegmentationModel,
-    TennisBallPoseModel,
     WorldModel,
     YOLOEModel,
     YOLOESegModel,
@@ -113,12 +112,6 @@ class YOLO(Model):
             },
             "pose": {
                 "model": PoseModel,
-                "trainer": yolo.pose.PoseTrainer,
-                "validator": yolo.pose.PoseValidator,
-                "predictor": yolo.pose.PosePredictor,
-            },
-            "tennis-pose": {
-                "model": TennisBallPoseModel,
                 "trainer": yolo.pose.PoseTrainer,
                 "validator": yolo.pose.PoseValidator,
                 "predictor": yolo.pose.PosePredictor,
@@ -423,7 +416,7 @@ class YOLOE(Model):
                         "batch": 1,
                         "device": kwargs.get("device", None),
                         "half": kwargs.get("half", False),
-                        "imgsz": kwargs.get("imgsz", self.overrides.get("imgsz", 640)),
+                        "imgsz": kwargs.get("imgsz", self.overrides["imgsz"]),
                     },
                     _callbacks=self.callbacks,
                 )

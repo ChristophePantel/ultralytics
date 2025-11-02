@@ -63,15 +63,6 @@ from ultralytics.nn.modules import (
     RTDETRDecoder,
     SCDown,
     Segment,
-    Segmentv2,
-    Segmentv3,
-    Segmentv4,
-    Segmentv4_add,
-    Segmentv5,
-    Segmentv6,
-    Segmentv7,
-    Segmentv8,
-    Segmentv8_add,
     TorchVision,
     WorldDetect,
     YOLOEDetect,
@@ -81,7 +72,7 @@ from ultralytics.nn.modules import (
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import (
-    E2ELoss,
+    E2EDetectLoss,
     v8ClassificationLoss,
     v8DetectionLoss,
     v8OBBLoss,
@@ -256,7 +247,7 @@ class BaseModel(torch.nn.Module):
                 if isinstance(m, RepVGGDW):
                     m.fuse()
                     m.forward = m.forward_fuse
-                if isinstance(m, Detect) and getattr(m, "end2end", False):
+                if isinstance(m, v10Detect):
                     m.fuse()  # remove one2many head
             self.info(verbose=verbose)
 
@@ -408,6 +399,7 @@ class DetectionModel(BaseModel):
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
         self.names = {i: f"{i}" for i in range(self.yaml["nc"])}  # default names dict
         self.inplace = self.yaml.get("inplace", True)
+        self.end2end = getattr(self.model[-1], "end2end", False)
 
         # Build strides
         m = self.model[-1]  # Detect()
@@ -417,10 +409,9 @@ class DetectionModel(BaseModel):
 
             def _forward(x):
                 """Perform a forward pass through the model, handling different Detect subclass types accordingly."""
-                output = self.forward(x)
                 if self.end2end:
-                    output = output["one2many"]
-                return output["feats"]
+                    return self.forward(x)["one2many"]
+                return self.forward(x)[0] if isinstance(m, (Segment, YOLOESegment, Pose, OBB)) else self.forward(x)
 
             self.model.eval()  # Avoid changing batch statistics until training begins
             m.training = True  # Setting it to True to properly return strides
@@ -436,11 +427,6 @@ class DetectionModel(BaseModel):
         if verbose:
             self.info()
             LOGGER.info("")
-
-    @property
-    def end2end(self):
-        """Dynamically get the end2end attribute from the model's last layer for better consistency."""
-        return getattr(self.model[-1], "end2end", False)
 
     def _predict_augment(self, x):
         """
@@ -511,7 +497,7 @@ class DetectionModel(BaseModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the DetectionModel."""
-        return E2ELoss(self) if getattr(self, "end2end", False) else v8DetectionLoss(self)
+        return E2EDetectLoss(self) if getattr(self, "end2end", False) else v8DetectionLoss(self)
 
 
 class OBBModel(DetectionModel):
@@ -545,7 +531,7 @@ class OBBModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the model."""
-        return E2ELoss(self, v8OBBLoss) if getattr(self, "end2end", False) else v8OBBLoss(self)
+        return v8OBBLoss(self)
 
 
 class SegmentationModel(DetectionModel):
@@ -579,7 +565,7 @@ class SegmentationModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the SegmentationModel."""
-        return E2ELoss(self, v8SegmentationLoss) if getattr(self, "end2end", False) else v8SegmentationLoss(self)
+        return v8SegmentationLoss(self)
 
 
 class PoseModel(DetectionModel):
@@ -622,149 +608,6 @@ class PoseModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the PoseModel."""
-        return E2ELoss(self, v8PoseLoss) if getattr(self, "end2end", False) else v8PoseLoss(self)
-
-
-class TennisBallPoseModel(PoseModel):
-    """
-    YOLO tennis ball pose model with 4-channel input support.
-
-    This class extends PoseModel to handle tennis ball pose estimation with motion-aware input.
-    It supports 4-channel input (RGB + motion mask) for enhanced tennis ball tracking.
-
-    Attributes:
-        kpt_shape (tuple): Shape of keypoints data (1, 3) for tennis ball center point.
-        use_motion_masks (bool): Whether to use motion masks for enhanced detection.
-
-    Methods:
-        __init__: Initialize YOLO tennis ball pose model.
-        init_criterion: Initialize the loss criterion for tennis ball pose estimation.
-
-    Examples:
-        Initialize a tennis ball pose model
-        >>> model = TennisBallPoseModel("yolo11-tennis-pose.yaml", ch=4, nc=1, data_kpt_shape=(1, 3))
-        >>> results = model.predict(image_tensor)
-    """
-
-    def __init__(self, cfg="yolo11-tennis-pose.yaml", ch=4, nc=1, data_kpt_shape=(1, 3), verbose=True):
-        """
-        Initialize Ultralytics YOLO Tennis Ball Pose model.
-
-        Args:
-            cfg (str | dict): Model configuration file path or dictionary.
-            ch (int): Number of input channels (default: 4 for RGB + motion mask).
-            nc (int): Number of classes (default: 1 for tennis ball).
-            data_kpt_shape (tuple): Shape of keypoints data (default: (1, 3) for center point).
-            verbose (bool): Whether to display model information.
-        """
-        # Set default tennis ball keypoint shape if not provided
-        if data_kpt_shape == (None, None):
-            data_kpt_shape = (1, 3)  # 1 keypoint (center), 3 dimensions (x, y, visibility)
-        
-        # Initialize parent PoseModel with 4-channel support
-        super().__init__(cfg=cfg, ch=ch, nc=nc, data_kpt_shape=data_kpt_shape, verbose=verbose)
-        
-        # Store tennis ball specific attributes
-        self.use_motion_masks = ch == 4
-        self.tennis_ball_keypoints = ["center"]  # Single keypoint for tennis ball center
-        
-        if verbose:
-            LOGGER.info(f"TennisBallPoseModel initialized with {ch} input channels")
-            if self.use_motion_masks:
-                LOGGER.info("Motion mask support enabled for enhanced tennis ball tracking")
-
-    def load_pretrained_pose_weights(self, weights_path, adapt_first_layer=True):
-        """
-        Load pretrained pose weights and adapt for 4-channel input.
-        
-        Args:
-            weights_path (str): Path to pretrained pose model weights (.pt file)
-            adapt_first_layer (bool): Whether to adapt first layer for 4-channel input
-            
-        Returns:
-            bool: True if weights loaded successfully, False otherwise
-        """
-        try:
-            import torch
-            
-            # Load pretrained weights
-            if weights_path.endswith('.pt'):
-                ckpt = torch.load(weights_path, map_location='cpu')
-                if isinstance(ckpt, dict) and 'model' in ckpt:
-                    pretrained_state = ckpt['model'].state_dict()
-                else:
-                    pretrained_state = ckpt.state_dict() if hasattr(ckpt, 'state_dict') else ckpt
-            else:
-                LOGGER.warning(f"Unsupported weight file format: {weights_path}")
-                return False
-            
-            # Get current model state
-            current_state = self.state_dict()
-            
-            # Adapt first convolutional layer for 4-channel input if needed
-            if adapt_first_layer and self.use_motion_masks:
-                first_conv_key = None
-                for key in pretrained_state.keys():
-                    if 'model.0.conv.weight' in key or (key.startswith('model.0.') and 'weight' in key):
-                        first_conv_key = key
-                        break
-                
-                if first_conv_key and first_conv_key in pretrained_state:
-                    pretrained_first_weight = pretrained_state[first_conv_key]
-                    
-                    # Check if pretrained model has 3 channels and we need 4
-                    if pretrained_first_weight.shape[1] == 3 and self.use_motion_masks:
-                        LOGGER.info(f"Adapting first layer from 3 to 4 channels")
-                        
-                        # Create new 4-channel weight by duplicating one of the RGB channels
-                        # We'll duplicate the green channel as it's often most representative
-                        new_first_weight = torch.zeros((
-                            pretrained_first_weight.shape[0],  # out_channels
-                            4,  # new in_channels (RGB + motion)
-                            pretrained_first_weight.shape[2],  # height
-                            pretrained_first_weight.shape[3]   # width
-                        ))
-                        
-                        # Copy RGB channels
-                        new_first_weight[:, :3, :, :] = pretrained_first_weight
-                        # Initialize motion channel with average of RGB channels
-                        new_first_weight[:, 3, :, :] = pretrained_first_weight.mean(dim=1)
-                        
-                        pretrained_state[first_conv_key] = new_first_weight
-                        LOGGER.info(f"Adapted first layer weights from {pretrained_first_weight.shape} to {new_first_weight.shape}")
-            
-            # Load compatible weights
-            loaded_keys = []
-            incompatible_keys = []
-            
-            for key, param in current_state.items():
-                if key in pretrained_state:
-                    pretrained_param = pretrained_state[key]
-                    if param.shape == pretrained_param.shape:
-                        current_state[key] = pretrained_param
-                        loaded_keys.append(key)
-                    else:
-                        incompatible_keys.append(f"{key}: {param.shape} vs {pretrained_param.shape}")
-                        
-            # Load the adapted state dict
-            self.load_state_dict(current_state, strict=False)
-            
-            LOGGER.info(f"Loaded pretrained pose weights from {weights_path}")
-            LOGGER.info(f"Loaded {len(loaded_keys)} compatible layers")
-            if incompatible_keys:
-                LOGGER.info(f"Skipped {len(incompatible_keys)} incompatible layers")
-                # Show first 5 incompatible keys for debugging
-                for key in incompatible_keys[:5]:
-                    LOGGER.debug(f"  - {key}")
-            
-            return True
-            
-        except Exception as e:
-            LOGGER.error(f"Failed to load pretrained weights from {weights_path}: {e}")
-            return False
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the TennisBallPoseModel."""
         return v8PoseLoss(self)
 
 
@@ -1359,8 +1202,9 @@ class YOLOEModel(DetectionModel):
                 cls_pe = self.get_cls_pe(m.get_tpe(tpe), vpe).to(device=x[0].device, dtype=x[0].dtype)
                 if cls_pe.shape[0] != b or m.export:
                     cls_pe = cls_pe.expand(b, -1, -1)
-                x.append(cls_pe)  # adding cls embedding
-            x = m(x)  # run
+                x = m(x, cls_pe)
+            else:
+                x = m(x)  # run
 
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
@@ -1383,18 +1227,10 @@ class YOLOEModel(DetectionModel):
             from ultralytics.utils.loss import TVPDetectLoss
 
             visual_prompt = batch.get("visuals", None) is not None  # TODO
-            self.criterion = (
-                (E2ELoss(self, TVPDetectLoss) if getattr(self, "end2end", False) else TVPDetectLoss(self))
-                if visual_prompt
-                else self.init_criterion()
-            )
+            self.criterion = TVPDetectLoss(self) if visual_prompt else self.init_criterion()
 
         if preds is None:
-            preds = self.forward(
-                batch["img"],
-                tpe=None if "visuals" in batch else batch.get("txt_feats", None),
-                vpe=batch.get("visuals", None),
-            )
+            preds = self.forward(batch["img"], tpe=batch.get("txt_feats", None), vpe=batch.get("visuals", None))
         return self.criterion(preds, batch)
 
 
@@ -1439,11 +1275,7 @@ class YOLOESegModel(YOLOEModel, SegmentationModel):
             from ultralytics.utils.loss import TVPSegmentLoss
 
             visual_prompt = batch.get("visuals", None) is not None  # TODO
-            self.criterion = (
-                (E2ELoss(self, TVPSegmentLoss) if getattr(self, "end2end", False) else TVPSegmentLoss(self))
-                if visual_prompt
-                else self.init_criterion()
-            )
+            self.criterion = TVPSegmentLoss(self) if visual_prompt else self.init_criterion()
 
         if preds is None:
             preds = self.forward(batch["img"], tpe=batch.get("txt_feats", None), vpe=batch.get("visuals", None))
@@ -1725,8 +1557,7 @@ def parse_model(d, ch, verbose=True):
     # Args
     legacy = True  # backward compatibility for v3/v5/v8/v9 models
     max_channels = float("inf")
-    nc, act, scales, end2end = (d.get(x) for x in ("nc", "activation", "scales", "end2end"))
-    reg_max = d.get("reg_max", 16)
+    nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
     depth, width, kpt_shape = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape"))
     scale = d.get("scale")
     if scales:
@@ -1851,12 +1682,12 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, WorldDetect, YOLOEDetect, Segment, Segmentv2, Segmentv3, Segmentv4, Segmentv4_add, Segmentv5, Segmentv6, Segmentv7, Segmentv8, Segmentv8_add, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
+            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):
-            args.extend([reg_max, end2end, [ch[x] for x in f]])
+            args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segmentv2, Segmentv3, Segmentv4, Segmentv4_add, Segmentv5, Segmentv6, Segmentv7, Segmentv8, Segmentv8_add, YOLOESegment, Pose, OBB}:
+            if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
