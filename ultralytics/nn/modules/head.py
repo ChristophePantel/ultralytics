@@ -15,7 +15,7 @@ from ultralytics.utils import NOT_MACOS14
 from ultralytics.utils.tal import dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_inference_mode
 
-from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN, Protov2, Protov3, Protov4, Protov4_add, Protov5, Protov6, Semseg, Semsegv2
+from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN, Protov2, Protov3, Protov4, Protov4_add, Protov5, Protov6, Semseg, Semsegv2, Protov4_add_semseg
 from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
@@ -764,8 +764,7 @@ class Segmentv8_add(Detect):
         super().__init__(nc, ch)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
-        self.proto = Protov4_add(ch, self.npr, self.nm)  # protos
-        self.semseg = Semsegv2(ch[0], self.npr, nc)
+        self.proto = Protov4_add_semseg(ch, self.npr, self.nm, nc)  # protos
 
         c4 = max(ch[0] // 4, self.nm)
         self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
@@ -773,14 +772,12 @@ class Segmentv8_add(Detect):
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor]:
         """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
         p = self.proto(x)  # mask protos
-        bs = p.shape[0]  # batch size
+        bs = x[0].shape[0]  # batch size
 
         mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
-        if self.training:
-            semseg = self.semseg(x[0])
         x = Detect.forward(self, x)
         if self.training:
-            return x, mc, (p, semseg)
+            return x, mc, p
         return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
 
 
