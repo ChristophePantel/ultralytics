@@ -10,8 +10,8 @@ class QueueManager(BaseSolution):
     """
     Manages queue counting in real-time video streams based on object tracks.
 
-    This class extends BaseSolution to provide functionality for tracking and counting objects within a specified
-    region in video frames.
+    This class extends BaseSolution to provide functionality for tracking and counting objects within a specified region
+    in video frames.
 
     Attributes:
         counts (int): The current count of objects in the queue.
@@ -83,7 +83,7 @@ class QueueManager(BaseSolution):
 
         # Display queue counts
         annotator.queue_counts_display(
-            f"Queue Counts : {str(self.counts)}",
+            f"Queue Counts : {self.counts}",
             points=self.region,
             region_color=self.rect_color,
             txt_color=(104, 31, 17),

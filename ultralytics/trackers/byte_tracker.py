@@ -230,7 +230,7 @@ class STrack(BaseTrack):
     def result(self) -> list[float]:
         """Get the current tracking results in the appropriate bounding box format."""
         coords = self.xyxy if self.angle is None else self.xywha
-        return coords.tolist() + [self.track_id, self.score, self.cls, self.idx]
+        return [*coords.tolist(), self.track_id, self.score, self.cls, self.idx]
 
     def __repr__(self) -> str:
         """Return a string representation of the STrack object including start frame, end frame, and track ID."""
@@ -241,9 +241,9 @@ class BYTETracker:
     """
     BYTETracker: A tracking algorithm built on top of YOLOv8 for object detection and tracking.
 
-    This class encapsulates the functionality for initializing, updating, and managing the tracks for detected objects in a
-    video sequence. It maintains the state of tracked, lost, and removed tracks over frames, utilizes Kalman filtering for
-    predicting the new object locations, and performs data association.
+    This class encapsulates the functionality for initializing, updating, and managing the tracks for detected objects
+    in a video sequence. It maintains the state of tracked, lost, and removed tracks over frames, utilizes Kalman
+    filtering for predicting the new object locations, and performs data association.
 
     Attributes:
         tracked_stracks (list[STrack]): List of successfully activated tracks.
@@ -356,7 +356,7 @@ class BYTETracker:
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         # TODO
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
+        matches, u_track, _u_detection_second = matching.linear_assignment(dists, thresh=0.5)
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]

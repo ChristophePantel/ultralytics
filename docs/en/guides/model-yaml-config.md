@@ -1,12 +1,14 @@
 ---
-title: Model YAML Configuration Guide
+comments: true
 description: Learn how to structure and customize model architectures using Ultralytics YAML configuration files. Master module definitions, connections, and scaling parameters.
 keywords: Ultralytics, YOLO, model architecture, YAML configuration, neural networks, deep learning, backbone, head, modules, custom models
 ---
 
-# Model YAML Configuration
+# Model YAML Configuration Guide
 
 The model YAML configuration file serves as the architectural blueprint for Ultralytics neural networks. It defines how layers connect, what parameters each module uses, and how the entire network scales across different model sizes.
+
+<img width="1024" src="https://github.com/ultralytics/docs/releases/download/0/yaml-configuration-guide.avif" alt="Model YAML configuration workflow.">
 
 ## Configuration Structure
 
@@ -229,39 +231,46 @@ from ultralytics.nn.modules import (  # noqa: F401, E501
 
 Modifying the source code is the most versatile way to integrate your custom modules, but it can be tricky. To define and use a custom module, follow these steps:
 
-1. **Define your module** in [`ultralytics/nn/modules/block.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/modules/block.py):
+1. **Install Ultralytics in development mode** using the Git clone method from the [Quickstart guide](https://docs.ultralytics.com/quickstart#git-clone).
+
+2. **Define your module** in [`ultralytics/nn/modules/block.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/modules/block.py):
 
     ```python
     class CustomBlock(nn.Module):
+        """Custom block with Conv-BatchNorm-ReLU sequence."""
+
         def __init__(self, c1, c2):
+            """Initialize CustomBlock with input and output channels."""
             super().__init__()
             self.layers = nn.Sequential(nn.Conv2d(c1, c2, 3, 1, 1), nn.BatchNorm2d(c2), nn.ReLU())
 
         def forward(self, x):
+            """Forward pass through the block."""
             return self.layers(x)
     ```
 
-2. **Expose your module at the package level** in [`ultralytics/nn/modules/__init__.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/modules/__init__.py):
+3. **Expose your module at the package level** in [`ultralytics/nn/modules/__init__.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/modules/__init__.py):
 
     ```python
     from .block import CustomBlock  # noqa makes CustomBlock available as ultralytics.nn.modules.CustomBlock
     ```
 
-3. **Add to imports** in [`ultralytics/nn/tasks.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/tasks.py):
+4. **Add to imports** in [`ultralytics/nn/tasks.py`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/tasks.py):
 
     ```python
     from ultralytics.nn.modules import CustomBlock  # noqa
     ```
 
-4. **Handle special arguments** (if needed) inside [`parse_model()`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/tasks.py) in `ultralytics/nn/tasks.py`:
+5. **Handle special arguments** (if needed) inside [`parse_model()`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/tasks.py) in `ultralytics/nn/tasks.py`:
 
     ```python
-    elif m is CustomBlock:
+    # Add this condition in the parse_model() function
+    if m is CustomBlock:
         c1, c2 = ch[f], args[0]  # input channels, output channels
         args = [c1, c2, *args[1:]]
     ```
 
-5. **Use the module** in your model YAML:
+6. **Use the module** in your model YAML:
 
     ```yaml
     # custom_model.yaml
@@ -272,7 +281,7 @@ Modifying the source code is the most versatile way to integrate your custom mod
         - [-1, 1, Classify, [nc]]
     ```
 
-6. **Check FLOPs** to ensure the forward pass works:
+7. **Check FLOPs** to ensure the forward pass works:
 
     ```python
     from ultralytics import YOLO

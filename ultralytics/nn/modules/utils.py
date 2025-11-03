@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.init import uniform_
 
-__all__ = "multi_scale_deformable_attn_pytorch", "inverse_sigmoid"
+__all__ = "inverse_sigmoid", "multi_scale_deformable_attn_pytorch"
 
 
 def _get_clones(module, n):
@@ -37,9 +37,9 @@ def bias_init_with_prob(prior_prob=0.01):
     """
     Initialize conv/fc bias value according to a given probability value.
 
-    This function calculates the bias initialization value based on a prior probability using the inverse error function.
-    It's commonly used in object detection models to initialize classification layers with a specific positive prediction
-    probability.
+    This function calculates the bias initialization value based on a prior probability using the inverse error
+    function. It's commonly used in object detection models to initialize classification layers with a specific positive
+    prediction probability.
 
     Args:
         prior_prob (float, optional): Prior probability for bias initialization.
@@ -59,8 +59,8 @@ def linear_init(module):
     """
     Initialize the weights and biases of a linear module.
 
-    This function initializes the weights of a linear module using a uniform distribution within bounds calculated
-    from the input dimension. If the module has a bias, it is also initialized.
+    This function initializes the weights of a linear module using a uniform distribution within bounds calculated from
+    the input dimension. If the module has a bias, it is also initialized.
 
     Args:
         module (nn.Module): Linear module to initialize.

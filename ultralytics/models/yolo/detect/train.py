@@ -25,8 +25,8 @@ class DetectionTrainer(BaseTrainer):
     """
     A class extending the BaseTrainer class for training based on a detection model.
 
-    This trainer specializes in object detection tasks, handling the specific requirements for training YOLO models
-    for object detection including dataset building, data loading, preprocessing, and model configuration.
+    This trainer specializes in object detection tasks, handling the specific requirements for training YOLO models for
+    object detection including dataset building, data loading, preprocessing, and model configuration.
 
     Attributes:
         model (DetectionModel): The YOLO detection model being trained.
@@ -121,7 +121,7 @@ class DetectionTrainer(BaseTrainer):
         """
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
-                batch[k] = v.to(self.device, non_blocking=True)
+                batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = batch["img"].float() / 255
         if self.args.multi_scale:
             imgs = batch["img"]

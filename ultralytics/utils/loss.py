@@ -54,8 +54,8 @@ class FocalLoss(nn.Module):
     """
     Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5).
 
-    Implements the Focal Loss function for addressing class imbalance by down-weighting easy examples and focusing
-    on hard negatives during training.
+    Implements the Focal Loss function for addressing class imbalance by down-weighting easy examples and focusing on
+    hard negatives during training.
 
     Attributes:
         gamma (float): The focusing parameter that controls how much the loss focuses on hard-to-classify examples.
@@ -294,19 +294,21 @@ class KeypointLoss(nn.Module):
 
 
     # def loss_c(predictions, num_classes, indices_high, eps=1e-8, p=5):
+    #    batch size * class num * height * width
     #     b, _, h, w = predictions.shape
     #     predictions = torch.sigmoid(predictions.float())
     #
     #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
     #
     #     # v : classe composante, sous classe
-    #     # extraction de la partie correspondant aux numéros ???
+    #     # extraction de la partie correspondant aux numéros des composantes, sous-classes (avant 21 dernières)
+    #     # par bloc de composantes d'une même composite
     #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
     #     # applatissement pour faciliter la vectorisation
     #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
     #
     #     # p_v : parent of v, i.e. classe composite, super classe
-    #     # extraction de la partie correspondant aux numéros ???
+    #     # extraction de la partie correspondant aux numéros des composites, super classes (21 dernières)
     #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
     #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
     #
@@ -320,6 +322,7 @@ class KeypointLoss(nn.Module):
     #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
     #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
     #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
+    #         # par tranche de composantes indices[0]:indices[1] de la composite ii
     #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
     #
     #     # for all clause: use pmeanError to aggregate
@@ -420,6 +423,7 @@ class KeypointLoss(nn.Module):
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
+    # TODO (CP/IRIT): The model should carry all required data (inheritance and composition relations).
     def __init__(self, model, c_weight, d_weight, e_weight):
         """Initialize the KnowledgeModelLoss class."""
         super().__init__()
@@ -428,14 +432,104 @@ class KnowledgeBasedLoss(nn.Module):
         self.d_weight = d_weight
         self.e_weight = e_weight
         
-    def loss_c(self):
-        pass
+    def loss_c(self, pred_scores, num_composites_classes, power=3.0):
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        #     predictions = torch.sigmoid(predictions.float()) # already done
+        #
+        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+        #
+        #     # v : classe composante, sous classe
+        #     # extraction de la partie correspondant aux numéros ???
+        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+        #     # applatissement pour faciliter la vectorisation
+        #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
+        
+        MCMA = pred_scores.index_select( 3, model.component_indexes)
+        
+        #
+        #     # p_v : parent of v, i.e. classe composite, super classe
+        #     # extraction de la partie correspondant aux numéros ???
+        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
+        #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
+        MCMB = pred_scores.index_select( 3, model.component_indexes)
+        #
+        #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
+        predicate = MCMA.clone()
+        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
+        #     # Pour chaque numéro de classe composite
+        #     for ii in range(21):
+        #         # Intervalle des numéros des classes composantes
+        #         indices = indices_high[ii]
+        #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
+        #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
+        #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
+        #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
+        #
+        #     # for all clause: use pmeanError to aggregate
+        # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
+        loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
+        #
+        return loss_c
     
     def loss_d(self):
         pass
     
-    def loss_e(self):
-        pass
+    # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
+    def loss_e(self, pred_scores, num_composites_classes, power=3.0):
+        # Dimensions : b(atch) / anchor point / classe
+        batch_size, anchor_point_size, class_size = pred_scores.shape
+
+        # Application of a sigmoid to smooth between -1 and 1
+        # TODO (CP/IRIT): Check that it has already been done.
+        preds = torch.sigmoid(preds.float())
+
+        # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
+        index_composites = ...
+        preds_composites = predictions.index_select( 3, index_composites)
+        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
+        preds_composites_permutate = preds_composites.permute(0,2,3,1)
+        # Flattening to facilitate the vectorization 
+        MCMA = preds_composites_permutate.flatten(0,2)
+
+        # extraction of the part corresponding to the numbers of the last classes (after 21) (the components)
+        index_components = ...
+        preds_components = predictions.index_select( 3, index_components)
+        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
+        preds_components_permutate = preds_components.permute(0,2,3,1)
+        # Flattening to facilitate the vectorization 
+        # TODO (CP/IRIT): Where is MCMB ?
+        MCMA = preds_components_permutate.flatten(0,2)      
+
+        # TODO : On ne travaille pas sur les pixels mais uniquement sur 
+        # filter high confidence pixels
+        # Count the number of classes with a strong prediction for each pixel of each image
+        easy_A_pos = (MCMA>0.7).sum(-1)
+        # Count the number of classes with low prediction for each pixel of each image
+        easy_A_neg = (MCMA<0.3).sum(-1)
+        # determines the difficult pixels (several strong prediction or intermediate classes)
+        hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_composites_classes-1).float()
+        new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
+
+        easy_B_pos = (MCMB>0.7).sum(-1)
+        easy_B_neg = (MCMB<0.3).sum(-1)
+        hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
+        new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
+
+        mask_A = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
+        mask_B = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
+        # predicates: not (x and y)
+        predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
+        predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
+
+        # 1. for all pixels: use pmeanError to aggregate
+        all_A = torch.pow(torch.pow(predicate_A, power).mean(), 1.0/power)
+        all_B = torch.pow(torch.pow(predicate_B, power).mean(), 1.0/power)
+        # 2. average the clauses
+        factor_A = num_classes*num_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
+        factor_B = num_composites_classes*num_composites_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
+        loss_ex = all_A*factor_A + all_B*factor_B
+
+        return loss_ex
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
@@ -518,6 +612,7 @@ class v8DetectionLoss:
             loss items (torch.Tensor[Float]):
         """
         loss = torch.zeros(3, device=self.device)  # 3 loss items: box, cls, dfl
+        # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
         feats = preds[1] if isinstance(preds, tuple) else preds
         # merge all the prediction levels along dimension 2
         pred_merged = torch.cat( [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
@@ -531,6 +626,7 @@ class v8DetectionLoss:
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
+
         imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
@@ -580,13 +676,14 @@ class v8DetectionLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        bce_values = self.bce(pred_scores, target_scores.to(dtype))
+        loss[1] = bce_values.sum() / target_scores_sum  # BCE
 
         # Bbox loss
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[0], loss[2] = self.bbox_loss(
-                pred_for_bboxes,
+                pred_distri,
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,
@@ -596,7 +693,7 @@ class v8DetectionLoss:
             )
 
         loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.cls  # cls gain, in fact the class score gain
+        loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)

@@ -38,8 +38,8 @@ class Tuner:
     A class for hyperparameter tuning of YOLO models.
 
     The class evolves YOLO model hyperparameters over a given number of iterations by mutating them according to the
-    search space and retraining the model to evaluate their performance. Supports both local CSV storage and
-    distributed MongoDB Atlas coordination for multi-machine hyperparameter optimization.
+    search space and retraining the model to evaluate their performance. Supports both local CSV storage and distributed
+    MongoDB Atlas coordination for multi-machine hyperparameter optimization.
 
     Attributes:
         space (dict[str, tuple]): Hyperparameter search space containing bounds and scaling factors for mutation.
@@ -186,9 +186,8 @@ class Tuner:
         """
         Initialize MongoDB connection for distributed tuning.
 
-        Connects to MongoDB Atlas for distributed hyperparameter optimization across multiple machines.
-        Each worker saves results to a shared collection and reads the latest best hyperparameters
-        from all workers for evolution.
+        Connects to MongoDB Atlas for distributed hyperparameter optimization across multiple machines. Each worker
+        saves results to a shared collection and reads the latest best hyperparameters from all workers for evolution.
 
         Args:
             mongodb_uri (str): MongoDB connection string, e.g. 'mongodb+srv://username:password@cluster.mongodb.net/'.
@@ -257,13 +256,13 @@ class Tuner:
                 return
 
             # Write to CSV
-            headers = ",".join(["fitness"] + list(self.space.keys())) + "\n"
+            headers = ",".join(["fitness", *list(self.space.keys())]) + "\n"
             with open(self.tune_csv, "w", encoding="utf-8") as f:
                 f.write(headers)
                 for result in all_results:
                     fitness = result["fitness"]
                     hyp_values = [result["hyperparameters"][k] for k in self.space.keys()]
-                    log_row = [round(fitness, 5)] + hyp_values
+                    log_row = [round(fitness, 5), *hyp_values]
                     f.write(",".join(map(str, log_row)) + "\n")
 
         except Exception as e:
@@ -344,7 +343,7 @@ class Tuner:
 
         # Update types
         if "close_mosaic" in hyp:
-            hyp["close_mosaic"] = int(round(hyp["close_mosaic"]))
+            hyp["close_mosaic"] = round(hyp["close_mosaic"])
 
         return hyp
 
@@ -421,7 +420,7 @@ class Tuner:
             else:
                 # Save to CSV only if no MongoDB
                 log_row = [round(fitness, 5)] + [mutated_hyp[k] for k in self.space.keys()]
-                headers = "" if self.tune_csv.exists() else (",".join(["fitness"] + list(self.space.keys())) + "\n")
+                headers = "" if self.tune_csv.exists() else (",".join(["fitness", *list(self.space.keys())]) + "\n")
                 with open(self.tune_csv, "a", encoding="utf-8") as f:
                     f.write(headers + ",".join(map(str, log_row)) + "\n")
 
@@ -429,7 +428,7 @@ class Tuner:
             x = np.loadtxt(self.tune_csv, ndmin=2, delimiter=",", skiprows=1)
             fitness = x[:, 0]  # first column
             best_idx = fitness.argmax()
-            best_is_current = best_idx == (i - start)
+            best_is_current = best_idx == i
             if best_is_current:
                 best_save_dir = str(save_dir)
                 best_metrics = {k: round(v, 5) for k, v in metrics.items()}

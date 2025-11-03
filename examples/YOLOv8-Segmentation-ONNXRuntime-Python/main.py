@@ -19,8 +19,8 @@ class YOLOv8Seg:
     YOLOv8 segmentation model for performing instance segmentation using ONNX Runtime.
 
     This class implements a YOLOv8 instance segmentation model using ONNX Runtime for inference. It handles
-    preprocessing of input images, running inference with the ONNX model, and postprocessing the results to
-    generate bounding boxes and segmentation masks.
+    preprocessing of input images, running inference with the ONNX model, and postprocessing the results to generate
+    bounding boxes and segmentation masks.
 
     Attributes:
         session (ort.InferenceSession): ONNX Runtime inference session for model execution.
@@ -97,13 +97,13 @@ class YOLOv8Seg:
         r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
 
         # Compute padding
-        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+        new_unpad = round(shape[1] * r), round(shape[0] * r)
         dw, dh = (new_shape[1] - new_unpad[0]) / 2, (new_shape[0] - new_unpad[1]) / 2  # wh padding
 
         if shape[::-1] != new_unpad:  # resize
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
-        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        top, bottom = round(dh - 0.1), round(dh + 0.1)
+        left, right = round(dw - 0.1), round(dw + 0.1)
         img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
         return img

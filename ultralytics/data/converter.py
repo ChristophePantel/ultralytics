@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from ultralytics.utils import DATASETS_DIR, LOGGER, NUM_THREADS, TQDM, YAML
+from ultralytics.utils import ASSETS_URL, DATASETS_DIR, LOGGER, NUM_THREADS, TQDM, YAML
 from ultralytics.utils.checks import check_file, check_requirements
 from ultralytics.utils.downloads import download, zip_directory
 from ultralytics.utils.files import increment_path
@@ -130,9 +130,6 @@ def coco80_to_coco91_class() -> list[int]:
     Returns:
         (list[int]): A list of 80 class IDs where each value is the corresponding 91-index class ID.
 
-    References:
-        https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
-
     Examples:
         >>> import numpy as np
         >>> a = np.loadtxt("data/coco.names", dtype="str", delimiter="\n")
@@ -143,6 +140,9 @@ def coco80_to_coco91_class() -> list[int]:
 
         Convert the COCO to darknet format
         >>> x2 = [list(b[i] == a).index(True) if any(b[i] == a) else None for i in range(91)]
+
+    References:
+        https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
     """
     return [
         1,
@@ -308,7 +308,7 @@ def convert_coco(
                     continue
 
                 cls = coco80[ann["category_id"] - 1] if cls91to80 else ann["category_id"] - 1  # class
-                box = [cls] + box.tolist()
+                box = [cls, *box.tolist()]
                 if box not in bboxes:
                     bboxes.append(box)
                     if use_segments and ann.get("segmentation") is not None:
@@ -321,7 +321,7 @@ def convert_coco(
                         else:
                             s = [j for i in ann["segmentation"] for j in i]  # all segments concatenated
                             s = (np.array(s).reshape(-1, 2) / np.array([w, h])).reshape(-1).tolist()
-                        s = [cls] + s
+                        s = [cls, *s]
                         segments.append(s)
                     if use_keypoints and ann.get("keypoints") is not None:
                         keypoints.append(
@@ -540,7 +540,7 @@ def merge_multi_segment(segments: list[list]):
 
     Args:
         segments (list[list]): Original segmentations in COCO's JSON file.
-                               Each element is a list of coordinates, like [segmentation1, segmentation2,...].
+            Each element is a list of coordinates, like [segmentation1, segmentation2,...].
 
     Returns:
         s (list[np.ndarray]): A list of connected segments represented as NumPy arrays.
@@ -652,9 +652,9 @@ def create_synthetic_coco_dataset():
     """
     Create a synthetic COCO dataset with random images based on filenames from label lists.
 
-    This function downloads COCO labels, reads image filenames from label list files,
-    creates synthetic images for train2017 and val2017 subsets, and organizes
-    them in the COCO dataset structure. It uses multithreading to generate images efficiently.
+    This function downloads COCO labels, reads image filenames from label list files, creates synthetic images for
+    train2017 and val2017 subsets, and organizes them in the COCO dataset structure. It uses multithreading to generate
+    images efficiently.
 
     Examples:
         >>> from ultralytics.data.converter import create_synthetic_coco_dataset
@@ -679,9 +679,7 @@ def create_synthetic_coco_dataset():
 
     # Download labels
     dir = DATASETS_DIR / "coco"
-    url = "https://github.com/ultralytics/assets/releases/download/v0.0.0/"
-    label_zip = "coco2017labels-segments.zip"
-    download([url + label_zip], dir=dir.parent)
+    download([f"{ASSETS_URL}/coco2017labels-segments.zip"], dir=dir.parent)
 
     # Create synthetic images
     shutil.rmtree(dir / "labels" / "test2017", ignore_errors=True)  # Remove test2017 directory as not needed
@@ -710,8 +708,8 @@ def convert_to_multispectral(path: str | Path, n_channels: int = 10, replace: bo
     """
     Convert RGB images to multispectral images by interpolating across wavelength bands.
 
-    This function takes RGB images and interpolates them to create multispectral images with a specified number
-    of channels. It can process either a single image or a directory of images.
+    This function takes RGB images and interpolates them to create multispectral images with a specified number of
+    channels. It can process either a single image or a directory of images.
 
     Args:
         path (str | Path): Path to an image file or directory containing images to convert.
@@ -733,7 +731,7 @@ def convert_to_multispectral(path: str | Path, n_channels: int = 10, replace: bo
     path = Path(path)
     if path.is_dir():
         # Process directory
-        im_files = sum((list(path.rglob(f"*.{ext}")) for ext in (IMG_FORMATS - {"tif", "tiff"})), [])
+        im_files = [f for ext in (IMG_FORMATS - {"tif", "tiff"}) for f in path.rglob(f"*.{ext}")]
         for im_path in im_files:
             try:
                 convert_to_multispectral(im_path, n_channels)
@@ -762,9 +760,9 @@ async def convert_ndjson_to_yolo(ndjson_path: str | Path, output_path: str | Pat
     """
     Convert NDJSON dataset format to Ultralytics YOLO11 dataset structure.
 
-    This function converts datasets stored in NDJSON (Newline Delimited JSON) format to the standard YOLO
-    format with separate directories for images and labels. It supports parallel processing for efficient
-    conversion of large datasets and can download images from URLs if they don't exist locally.
+    This function converts datasets stored in NDJSON (Newline Delimited JSON) format to the standard YOLO format with
+    separate directories for images and labels. It supports parallel processing for efficient conversion of large
+    datasets and can download images from URLs if they don't exist locally.
 
     The NDJSON format consists of:
     - First line: Dataset metadata with class names and configuration

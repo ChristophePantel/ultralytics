@@ -87,12 +87,12 @@ def mouse_callback(event: int, x: int, y: int, flags: int, param: Any) -> None:
 
 def run(
     weights: str = "yolo11n.pt",
-    source: str = None,
+    source: str | None = None,
     device: str = "cpu",
     view_img: bool = False,
     save_img: bool = False,
     exist_ok: bool = False,
-    classes: list[int] = None,
+    classes: list[int] | None = None,
     line_thickness: int = 2,
     track_thickness: int = 2,
     region_thickness: int = 2,
@@ -101,8 +101,8 @@ def run(
     Run object detection and counting within specified regions using YOLO and ByteTrack.
 
     This function performs real-time object detection, tracking, and counting within user-defined polygonal or
-    rectangular regions. It supports interactive region manipulation, multiple counting areas, and both live viewing
-    and video saving capabilities.
+    rectangular regions. It supports interactive region manipulation, multiple counting areas, and both live viewing and
+    video saving capabilities.
 
     Args:
         weights (str): Path to the YOLO model weights file.

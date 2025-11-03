@@ -77,7 +77,7 @@ TASK2METRIC = {
 
 ARGV = sys.argv or ["", ""]  # sometimes sys.argv = []
 SOLUTIONS_HELP_MSG = f"""
-    Arguments received: {str(["yolo"] + ARGV[1:])}. Ultralytics 'yolo solutions' usage overview:
+    Arguments received: {["yolo", *ARGV[1:]]!s}. Ultralytics 'yolo solutions' usage overview:
 
         yolo solutions SOLUTION ARGS
 
@@ -107,7 +107,7 @@ SOLUTIONS_HELP_MSG = f"""
         yolo streamlit-predict
     """
 CLI_HELP_MSG = f"""
-    Arguments received: {str(["yolo"] + ARGV[1:])}. Ultralytics 'yolo' commands use the following syntax:
+    Arguments received: {["yolo", *ARGV[1:]]!s}. Ultralytics 'yolo' commands use the following syntax:
 
         yolo TASK MODE ARGS
 
@@ -237,7 +237,6 @@ CFG_BOOL_KEYS = frozenset(
         "nms",
         "profile",
         "multi_scale",
-        "compile",
     }
 )
 
@@ -277,7 +276,9 @@ def cfg2dict(cfg: str | Path | dict | SimpleNamespace) -> dict:
     return cfg
 
 
-def get_cfg(cfg: str | Path | dict | SimpleNamespace = DEFAULT_CFG_DICT, overrides: dict = None) -> SimpleNamespace:
+def get_cfg(
+    cfg: str | Path | dict | SimpleNamespace = DEFAULT_CFG_DICT, overrides: dict | None = None
+) -> SimpleNamespace:
     """
     Load and merge configuration data from a file or dictionary, with optional overrides.
 
@@ -329,8 +330,8 @@ def check_cfg(cfg: dict, hard: bool = True) -> None:
     """
     Check configuration argument types and values for the Ultralytics library.
 
-    This function validates the types and values of configuration arguments, ensuring correctness and converting
-    them if necessary. It checks for specific key types defined in global variables such as `CFG_FLOAT_KEYS`,
+    This function validates the types and values of configuration arguments, ensuring correctness and converting them if
+    necessary. It checks for specific key types defined in global variables such as `CFG_FLOAT_KEYS`,
     `CFG_FRACTION_KEYS`, `CFG_INT_KEYS`, and `CFG_BOOL_KEYS`.
 
     Args:
@@ -387,7 +388,7 @@ def check_cfg(cfg: dict, hard: bool = True) -> None:
                 cfg[k] = bool(v)
 
 
-def get_save_dir(args: SimpleNamespace, name: str = None) -> Path:
+def get_save_dir(args: SimpleNamespace, name: str | None = None) -> Path:
     """
     Return the directory path for saving outputs, derived from arguments or default settings.
 
@@ -463,7 +464,7 @@ def _handle_deprecation(custom: dict) -> dict:
     return custom
 
 
-def check_dict_alignment(base: dict, custom: dict, e: Exception = None) -> None:
+def check_dict_alignment(base: dict, custom: dict, e: Exception | None = None) -> None:
     """
     Check alignment between custom and base configuration dictionaries, handling deprecated keys and providing error
     messages for mismatched keys.
@@ -517,7 +518,8 @@ def merge_equals_args(args: list[str]) -> list[str]:
         args (list[str]): A list of strings where each element represents an argument or fragment.
 
     Returns:
-        (list[str]): A list of strings where the arguments around isolated '=' are merged and fragments with brackets are joined.
+        (list[str]): A list of strings where the arguments around isolated '=' are merged and fragments with brackets
+            are joined.
 
     Examples:
         >>> args = ["arg1", "=", "value", "arg2=", "value2", "arg3", "=value3", "imgsz=[3,", "640,", "640]"]
@@ -640,9 +642,7 @@ def handle_yolo_solutions(args: list[str]) -> None:
     Process YOLO solutions arguments and run the specified computer vision solutions pipeline.
 
     Args:
-        args (list[str]): Command-line arguments for configuring and running the Ultralytics YOLO
-            solutions: https://docs.ultralytics.com/solutions/, It can include solution name, source,
-            and other configuration parameters.
+        args (list[str]): Command-line arguments for configuring and running the Ultralytics YOLO solutions.
 
     Examples:
         Run people counting solution with default settings:
@@ -830,8 +830,8 @@ def entrypoint(debug: str = "") -> None:
     """
     Ultralytics entrypoint function for parsing and executing command-line arguments.
 
-    This function serves as the main entry point for the Ultralytics CLI, parsing command-line arguments and
-    executing the corresponding tasks such as training, validation, prediction, exporting models, and more.
+    This function serves as the main entry point for the Ultralytics CLI, parsing command-line arguments and executing
+    the corresponding tasks such as training, validation, prediction, exporting models, and more.
 
     Args:
         debug (str): Space-separated string of command-line arguments for debugging purposes.
@@ -1003,9 +1003,9 @@ def copy_default_cfg() -> None:
     """
     Copy the default configuration file and create a new one with '_copy' appended to its name.
 
-    This function duplicates the existing default configuration file (DEFAULT_CFG_PATH) and saves it
-    with '_copy' appended to its name in the current working directory. It provides a convenient way
-    to create a custom configuration file based on the default settings.
+    This function duplicates the existing default configuration file (DEFAULT_CFG_PATH) and saves it with '_copy'
+    appended to its name in the current working directory. It provides a convenient way to create a custom configuration
+    file based on the default settings.
 
     Examples:
         >>> copy_default_cfg()

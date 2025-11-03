@@ -38,11 +38,13 @@ from ultralytics.utils.patches import torch_load
 
 # Version checks (all default to version>=min_version)
 TORCH_1_9 = check_version(TORCH_VERSION, "1.9.0")
+TORCH_1_10 = check_version(TORCH_VERSION, "1.10.0")
 TORCH_1_11 = check_version(TORCH_VERSION, "1.11.0")
 TORCH_1_13 = check_version(TORCH_VERSION, "1.13.0")
 TORCH_2_0 = check_version(TORCH_VERSION, "2.0.0")
 TORCH_2_1 = check_version(TORCH_VERSION, "2.1.0")
 TORCH_2_4 = check_version(TORCH_VERSION, "2.4.0")
+TORCH_2_9 = check_version(TORCH_VERSION, "2.9.0")
 TORCHVISION_0_10 = check_version(TORCHVISION_VERSION, "0.10.0")
 TORCHVISION_0_11 = check_version(TORCHVISION_VERSION, "0.11.0")
 TORCHVISION_0_13 = check_version(TORCHVISION_VERSION, "0.13.0")
@@ -94,14 +96,14 @@ def autocast(enabled: bool, device: str = "cuda"):
     Returns:
         (torch.amp.autocast): The appropriate autocast context manager.
 
-    Notes:
-        - For PyTorch versions 1.13 and newer, it uses `torch.amp.autocast`.
-        - For older versions, it uses `torch.cuda.autocast`.
-
     Examples:
         >>> with autocast(enabled=True):
         ...     # Your mixed precision operations here
         ...     pass
+
+    Notes:
+        - For PyTorch versions 1.13 and newer, it uses `torch.amp.autocast`.
+        - For older versions, it uses `torch.cuda.autocast`.
     """
     if TORCH_1_13:
         return torch.amp.autocast(device, enabled=enabled)
@@ -129,7 +131,7 @@ def get_gpu_info(index):
     return f"{properties.name}, {properties.total_memory / (1 << 20):.0f}MiB"
 
 
-def select_device(device="", batch=0, newline=False, verbose=True):
+def select_device(device="", newline=False, verbose=True):
     """
     Select the appropriate PyTorch device based on the provided arguments.
 
@@ -140,16 +142,11 @@ def select_device(device="", batch=0, newline=False, verbose=True):
     Args:
         device (str | torch.device, optional): Device string or torch.device object. Options are 'None', 'cpu', or
             'cuda', or '0' or '0,1,2,3'. Auto-selects the first available GPU, or CPU if no GPU is available.
-        batch (int, optional): Batch size being used in your model.
         newline (bool, optional): If True, adds a newline at the end of the log string.
         verbose (bool, optional): If True, logs the device information.
 
     Returns:
         (torch.device): Selected device.
-
-    Raises:
-        ValueError: If the specified device is not available or if the batch size is not a multiple of the number of
-            devices when using multiple GPUs.
 
     Examples:
         >>> select_device("cuda:0")
@@ -212,18 +209,6 @@ def select_device(device="", batch=0, newline=False, verbose=True):
 
     if not cpu and not mps and torch.cuda.is_available():  # prefer GPU if available
         devices = device.split(",") if device else "0"  # i.e. "0,1" -> ["0", "1"]
-        n = len(devices)  # device count
-        if n > 1:  # multi-GPU
-            if batch < 1:
-                raise ValueError(
-                    "AutoBatch with batch<1 not supported for Multi-GPU training, "
-                    f"please specify a valid batch size multiple of GPU count {n}, i.e. batch={n * 8}."
-                )
-            if batch >= 0 and batch % n != 0:  # check batch_size is divisible by device_count
-                raise ValueError(
-                    f"'batch={batch}' must be a multiple of GPU count {n}. Try 'batch={batch // n * n}' or "
-                    f"'batch={batch // n * n + n}', the nearest batch sizes evenly divisible by {n}."
-                )
         space = " " * len(s)
         for i, d in enumerate(devices):
             s += f"{'' if i == 0 else space}CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB
@@ -261,7 +246,7 @@ def fuse_conv_and_bn(conv, bn):
     Returns:
         (nn.Conv2d): The fused convolutional layer with gradients disabled.
 
-    Example:
+    Examples:
         >>> conv = nn.Conv2d(3, 16, 3)
         >>> bn = nn.BatchNorm2d(16)
         >>> fused_conv = fuse_conv_and_bn(conv, bn)
@@ -295,7 +280,7 @@ def fuse_deconv_and_bn(deconv, bn):
     Returns:
         (nn.ConvTranspose2d): The fused transposed convolutional layer with gradients disabled.
 
-    Example:
+    Examples:
         >>> deconv = nn.ConvTranspose2d(16, 3, 3)
         >>> bn = nn.BatchNorm2d(3)
         >>> fused_deconv = fuse_deconv_and_bn(deconv, bn)
@@ -349,10 +334,10 @@ def model_info(model, detailed=False, verbose=True, imgsz=640):
             if len(m._parameters):
                 for pn, p in m.named_parameters():
                     LOGGER.info(
-                        f"{i:>5g}{f'{mn}.{pn}':>40}{mt:>20}{p.requires_grad!r:>10}{p.numel():>12g}{str(list(p.shape)):>20}{p.mean():>10.3g}{p.std():>10.3g}{str(p.dtype).replace('torch.', ''):>15}"
+                        f"{i:>5g}{f'{mn}.{pn}':>40}{mt:>20}{p.requires_grad!r:>10}{p.numel():>12g}{list(p.shape)!s:>20}{p.mean():>10.3g}{p.std():>10.3g}{str(p.dtype).replace('torch.', ''):>15}"
                     )
             else:  # layers with no learnable params
-                LOGGER.info(f"{i:>5g}{mn:>40}{mt:>20}{False!r:>10}{0:>12g}{str([]):>20}{'-':>10}{'-':>10}{'-':>15}")
+                LOGGER.info(f"{i:>5g}{mn:>40}{mt:>20}{False!r:>10}{0:>12g}{[]!s:>20}{'-':>10}{'-':>10}{'-':>15}")
 
     flops = get_flops(model, imgsz)  # imgsz may be int or list, i.e. imgsz=640 or imgsz=[640, 320]
     fused = " (fused)" if getattr(model, "is_fused", lambda: False)() else ""
@@ -411,9 +396,8 @@ def get_flops(model, imgsz=640):
     """
     Calculate FLOPs (floating point operations) for a model in billions.
 
-    Attempts two calculation methods: first with a stride-based tensor for efficiency,
-    then falls back to full image size if needed (e.g., for RTDETR models). Returns 0.0
-    if thop library is unavailable or calculation fails.
+    Attempts two calculation methods: first with a stride-based tensor for efficiency, then falls back to full image
+    size if needed (e.g., for RTDETR models). Returns 0.0 if thop library is unavailable or calculation fails.
 
     Args:
         model (nn.Module): The model to calculate FLOPs for.
@@ -637,8 +621,8 @@ class ModelEMA:
     """
     Updated Exponential Moving Average (EMA) implementation.
 
-    Keeps a moving average of everything in the model state_dict (parameters and buffers).
-    For EMA details see References.
+    Keeps a moving average of everything in the model state_dict (parameters and buffers). For EMA details see
+    References.
 
     To disable EMA set the `enabled` attribute to `False`.
 
@@ -701,7 +685,7 @@ class ModelEMA:
             copy_attr(self.ema, model, include, exclude)
 
 
-def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, Any] = None) -> dict[str, Any]:
+def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Strip optimizer from 'f' to finalize training, optionally save as 's'.
 
@@ -748,7 +732,7 @@ def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, A
 
     # Update other keys
     args = {**DEFAULT_CFG_DICT, **x.get("train_args", {})}  # combine args
-    for k in "optimizer", "best_fitness", "ema", "updates":  # keys
+    for k in "optimizer", "best_fitness", "ema", "updates", "scaler":  # keys
         x[k] = None
     x["epoch"] = -1
     x["train_args"] = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # strip non-default keys
@@ -785,9 +769,9 @@ def cuda_memory_usage(device=None):
     """
     Monitor and manage CUDA memory usage.
 
-    This function checks if CUDA is available and, if so, empties the CUDA cache to free up unused memory.
-    It then yields a dictionary containing memory usage information, which can be updated by the caller.
-    Finally, it updates the dictionary with the amount of memory reserved by CUDA on the specified device.
+    This function checks if CUDA is available and, if so, empties the CUDA cache to free up unused memory. It then
+    yields a dictionary containing memory usage information, which can be updated by the caller. Finally, it updates the
+    dictionary with the amount of memory reserved by CUDA on the specified device.
 
     Args:
         device (torch.device, optional): The CUDA device to query memory usage for.
@@ -881,7 +865,7 @@ def profile_ops(input, ops, n=10, device=None, max_num_obj=0):
                         mem += cuda_info["memory"] / 1e9  # (GB)
                 s_in, s_out = (tuple(x.shape) if isinstance(x, torch.Tensor) else "list" for x in (x, y))  # shapes
                 p = sum(x.numel() for x in m.parameters()) if isinstance(m, nn.Module) else 0  # parameters
-                LOGGER.info(f"{p:12}{flops:12.4g}{mem:>14.3f}{tf:14.4g}{tb:14.4g}{str(s_in):>24s}{str(s_out):>24s}")
+                LOGGER.info(f"{p:12}{flops:12.4g}{mem:>14.3f}{tf:14.4g}{tb:14.4g}{s_in!s:>24s}{s_out!s:>24s}")
                 results.append([p, flops, mem, tf, tb, s_in, s_out])
             except Exception as e:
                 LOGGER.info(e)
@@ -973,15 +957,15 @@ def attempt_compile(
     Returns:
         model (torch.nn.Module): Compiled model if compilation succeeds, otherwise the original unmodified model.
 
-    Notes:
-        - If the current PyTorch build does not provide torch.compile, the function returns the input model immediately.
-        - Warmup runs under torch.inference_mode and may use torch.autocast for CUDA/MPS to align compute precision.
-        - CUDA devices are synchronized after warmup to account for asynchronous kernel execution.
-
     Examples:
         >>> device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         >>> # Try to compile and warm up a model with a 640x640 input
         >>> model = attempt_compile(model, device=device, imgsz=640, use_autocast=True, warmup=True)
+
+    Notes:
+        - If the current PyTorch build does not provide torch.compile, the function returns the input model immediately.
+        - Warmup runs under torch.inference_mode and may use torch.autocast for CUDA/MPS to align compute precision.
+        - CUDA devices are synchronized after warmup to account for asynchronous kernel execution.
     """
     if not hasattr(torch, "compile") or not mode:
         return model

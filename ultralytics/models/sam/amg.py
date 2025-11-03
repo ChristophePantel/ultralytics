@@ -74,8 +74,8 @@ def calculate_stability_score(masks: torch.Tensor, mask_threshold: float, thresh
     """
     Compute the stability score for a batch of masks.
 
-    The stability score is the IoU between binary masks obtained by thresholding the predicted mask logits at
-    high and low values.
+    The stability score is the IoU between binary masks obtained by thresholding the predicted mask logits at high and
+    low values.
 
     Args:
         masks (torch.Tensor): Batch of predicted mask logits.
@@ -85,15 +85,15 @@ def calculate_stability_score(masks: torch.Tensor, mask_threshold: float, thresh
     Returns:
         (torch.Tensor): Stability scores for each mask in the batch.
 
-    Notes:
-        - One mask is always contained inside the other.
-        - Memory is saved by preventing unnecessary cast to torch.int64.
-
     Examples:
         >>> masks = torch.rand(10, 256, 256)  # Batch of 10 masks
         >>> mask_threshold = 0.5
         >>> threshold_offset = 0.1
         >>> stability_scores = calculate_stability_score(masks, mask_threshold, threshold_offset)
+
+    Notes:
+        - One mask is always contained inside the other.
+        - Memory is saved by preventing unnecessary cast to torch.int64.
     """
     intersections = (masks > (mask_threshold + threshold_offset)).sum(-1, dtype=torch.int16).sum(-1, dtype=torch.int32)
     unions = (masks > (mask_threshold - threshold_offset)).sum(-1, dtype=torch.int16).sum(-1, dtype=torch.int32)
@@ -145,7 +145,7 @@ def generate_crop_boxes(
 
     def crop_len(orig_len, n_crops, overlap):
         """Calculate the length of each crop given the original length, number of crops, and overlap."""
-        return int(math.ceil((overlap * (n_crops - 1) + orig_len) / n_crops))
+        return math.ceil((overlap * (n_crops - 1) + orig_len) / n_crops)
 
     for i_layer in range(n_layers):
         n_crops_per_side = 2 ** (i_layer + 1)
@@ -227,7 +227,7 @@ def remove_small_regions(mask: np.ndarray, area_thresh: float, mode: str) -> tup
     small_regions = [i + 1 for i, s in enumerate(sizes) if s < area_thresh]
     if not small_regions:
         return mask, False
-    fill_labels = [0] + small_regions
+    fill_labels = [0, *small_regions]
     if not correct_holes:
         # If every region is below threshold, keep largest
         fill_labels = [i for i in range(n_labels) if i not in fill_labels] or [int(np.argmax(sizes)) + 1]

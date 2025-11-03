@@ -20,8 +20,8 @@ class SegmentationValidator(DetectionValidator):
     """
     A class extending the DetectionValidator class for validation based on a segmentation model.
 
-    This validator handles the evaluation of segmentation models, processing both bounding box and mask predictions
-    to compute metrics such as mAP for both detection and segmentation tasks.
+    This validator handles the evaluation of segmentation models, processing both bounding box and mask predictions to
+    compute metrics such as mAP for both detection and segmentation tasks.
 
     Attributes:
         plot_masks (list): List to store masks for plotting.
@@ -159,21 +159,21 @@ class SegmentationValidator(DetectionValidator):
         Returns:
             (dict[str, np.ndarray]): A dictionary containing correct prediction matrices including 'tp_m' for mask IoU.
 
-        Notes:
-            - If `masks` is True, the function computes IoU between predicted and ground truth masks.
-            - If `overlap` is True and `masks` is True, overlapping masks are taken into account when computing IoU.
-
         Examples:
             >>> preds = {"cls": torch.tensor([1, 0]), "masks": torch.rand(2, 640, 640), "bboxes": torch.rand(2, 4)}
             >>> batch = {"cls": torch.tensor([1, 0]), "masks": torch.rand(2, 640, 640), "bboxes": torch.rand(2, 4)}
             >>> correct_preds = validator._process_batch(preds, batch)
+
+        Notes:
+            - If `masks` is True, the function computes IoU between predicted and ground truth masks.
+            - If `overlap` is True and `masks` is True, overlapping masks are taken into account when computing IoU.
         """
         tp = super()._process_batch(preds, batch)
         gt_cls = batch["cls"]
         if gt_cls.shape[0] == 0 or preds["cls"].shape[0] == 0:
             tp_m = np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)
         else:
-            iou = mask_iou(batch["masks"].flatten(1), preds["masks"].flatten(1))
+            iou = mask_iou(batch["masks"].flatten(1), preds["masks"].flatten(1).float())  # float, uint8
             tp_m = self.match_predictions(preds["cls"], gt_cls, iou).cpu().numpy()
         tp.update({"tp_m": tp_m})  # update tp with mask IoU
         return tp
@@ -222,7 +222,7 @@ class SegmentationValidator(DetectionValidator):
             predn (dict[str, torch.Tensor]): Predictions containing bboxes, masks, confidence scores, and classes.
             pbatch (dict[str, Any]): Batch dictionary containing 'imgsz', 'ori_shape', 'ratio_pad', and 'im_file'.
         """
-        from faster_coco_eval.core.mask import encode  # noqa
+        from faster_coco_eval.core.mask import encode
 
         def single_encode(x):
             """Encode predicted masks as RLE and append results to jdict."""

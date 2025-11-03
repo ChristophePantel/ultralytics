@@ -11,8 +11,8 @@ class TritonRemoteModel:
     """
     Client for interacting with a remote Triton Inference Server model.
 
-    This class provides a convenient interface for sending inference requests to a Triton Inference Server
-    and processing the responses. Supports both HTTP and gRPC communication protocols.
+    This class provides a convenient interface for sending inference requests to a Triton Inference Server and
+    processing the responses. Supports both HTTP and gRPC communication protocols.
 
     Attributes:
         endpoint (str): The name of the model on the Triton server.
@@ -64,12 +64,12 @@ class TritonRemoteModel:
 
         # Choose the Triton client based on the communication scheme
         if scheme == "http":
-            import tritonclient.http as client  # noqa
+            import tritonclient.http as client
 
             self.triton_client = client.InferenceServerClient(url=self.url, verbose=False, ssl=False)
             config = self.triton_client.get_model_config(endpoint)
         else:
-            import tritonclient.grpc as client  # noqa
+            import tritonclient.grpc as client
 
             self.triton_client = client.InferenceServerClient(url=self.url, verbose=False, ssl=False)
             config = self.triton_client.get_model_config(endpoint, as_json=True)["config"]

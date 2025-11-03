@@ -30,6 +30,7 @@ Usage - formats:
                               yolo11n_ncnn_model         # NCNN
                               yolo11n_imx_model          # Sony IMX
                               yolo11n_rknn_model         # Rockchip RKNN
+                              yolo11n.pte                # PyTorch Executorch
 """
 
 from __future__ import annotations
@@ -70,8 +71,8 @@ class BasePredictor:
     """
     A base class for creating predictors.
 
-    This class provides the foundation for prediction functionality, handling model setup, inference,
-    and result processing across various input sources.
+    This class provides the foundation for prediction functionality, handling model setup, inference, and result
+    processing across various input sources.
 
     Attributes:
         args (SimpleNamespace): Configuration for the predictor.
@@ -232,8 +233,8 @@ class BasePredictor:
         """
         Method used for Command Line Interface (CLI) prediction.
 
-        This function is designed to run predictions using the CLI. It sets up the source and model, then processes
-        the inputs in a streaming manner. This method ensures that no outputs accumulate in memory by consuming the
+        This function is designed to run predictions using the CLI. It sets up the source and model, then processes the
+        inputs in a streaming manner. This method ensures that no outputs accumulate in memory by consuming the
         generator without storing results.
 
         Args:
@@ -241,7 +242,7 @@ class BasePredictor:
                 Source for inference.
             model (str | Path | torch.nn.Module, optional): Model for inference.
 
-        Note:
+        Notes:
             Do not modify this function or remove the generator. The generator ensures that no outputs are
             accumulated in memory, which is critical for preventing memory issues during long-running predictions.
         """
@@ -339,12 +340,6 @@ class BasePredictor:
                         continue
 
                 # Postprocess
-                if self.device.type == "mps":
-                    # post-processing much faster on CPU
-                    preds[0] = preds[0].cpu()
-                    if isinstance(preds[1], tuple):
-                        preds[1] = tuple(p.cpu() if isinstance(p, torch.Tensor) else p for p in preds[1])
-
                 with profilers[2]:
                     self.results = self.postprocess(preds, im, im0s)
                 self.run_callbacks("on_predict_postprocess_end")

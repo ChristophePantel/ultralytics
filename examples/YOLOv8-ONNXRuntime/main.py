@@ -17,8 +17,8 @@ class YOLOv8:
     """
     YOLOv8 object detection model class for handling ONNX inference and visualization.
 
-    This class provides functionality to load a YOLOv8 ONNX model, perform inference on images,
-    and visualize the detection results with bounding boxes and labels.
+    This class provides functionality to load a YOLOv8 ONNX model, perform inference on images, and visualize the
+    detection results with bounding boxes and labels.
 
     Attributes:
         onnx_model (str): Path to the ONNX model file.
@@ -85,13 +85,13 @@ class YOLOv8:
         r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
 
         # Compute padding
-        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+        new_unpad = round(shape[1] * r), round(shape[0] * r)
         dw, dh = (new_shape[1] - new_unpad[0]) / 2, (new_shape[0] - new_unpad[1]) / 2  # wh padding
 
         if shape[::-1] != new_unpad:  # resize
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
-        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        top, bottom = round(dh - 0.1), round(dh + 0.1)
+        left, right = round(dw - 0.1), round(dw + 0.1)
         img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
         return img, (top, left)
@@ -163,8 +163,8 @@ class YOLOv8:
         """
         Perform post-processing on the model's output to extract and visualize detections.
 
-        This method processes the raw model output to extract bounding boxes, scores, and class IDs.
-        It applies non-maximum suppression to filter overlapping detections and draws the results on the input image.
+        This method processes the raw model output to extract bounding boxes, scores, and class IDs. It applies
+        non-maximum suppression to filter overlapping detections and draws the results on the input image.
 
         Args:
             input_image (np.ndarray): The input image.

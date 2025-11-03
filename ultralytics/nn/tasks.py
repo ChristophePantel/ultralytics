@@ -98,8 +98,8 @@ class BaseModel(torch.nn.Module):
     """
     Base class for all YOLO models in the Ultralytics family.
 
-    This class provides common functionality for YOLO models including forward pass handling, model fusion,
-    information display, and weight loading capabilities.
+    This class provides common functionality for YOLO models including forward pass handling, model fusion, information
+    display, and weight loading capabilities.
 
     Attributes:
         model (torch.nn.Module): The neural network model.
@@ -347,8 +347,8 @@ class DetectionModel(BaseModel):
     """
     YOLO detection model.
 
-    This class implements the YOLO detection architecture, handling model initialization, forward pass,
-    augmented inference, and loss computation for object detection tasks.
+    This class implements the YOLO detection architecture, handling model initialization, forward pass, augmented
+    inference, and loss computation for object detection tasks.
 
     Attributes:
         yaml (dict): Model configuration dictionary.
@@ -504,8 +504,8 @@ class OBBModel(DetectionModel):
     """
     YOLO Oriented Bounding Box (OBB) model.
 
-    This class extends DetectionModel to handle oriented bounding box detection tasks, providing specialized
-    loss computation for rotated object detection.
+    This class extends DetectionModel to handle oriented bounding box detection tasks, providing specialized loss
+    computation for rotated object detection.
 
     Methods:
         __init__: Initialize YOLO OBB model.
@@ -538,8 +538,8 @@ class SegmentationModel(DetectionModel):
     """
     YOLO segmentation model.
 
-    This class extends DetectionModel to handle instance segmentation tasks, providing specialized
-    loss computation for pixel-level object detection and segmentation.
+    This class extends DetectionModel to handle instance segmentation tasks, providing specialized loss computation for
+    pixel-level object detection and segmentation.
 
     Methods:
         __init__: Initialize YOLO segmentation model.
@@ -572,8 +572,8 @@ class PoseModel(DetectionModel):
     """
     YOLO pose model.
 
-    This class extends DetectionModel to handle human pose estimation tasks, providing specialized
-    loss computation for keypoint detection and pose estimation.
+    This class extends DetectionModel to handle human pose estimation tasks, providing specialized loss computation for
+    keypoint detection and pose estimation.
 
     Attributes:
         kpt_shape (tuple): Shape of keypoints data (num_keypoints, num_dimensions).
@@ -611,155 +611,12 @@ class PoseModel(DetectionModel):
         return v8PoseLoss(self)
 
 
-class TennisBallPoseModel(PoseModel):
-    """
-    YOLO tennis ball pose model with 4-channel input support.
-
-    This class extends PoseModel to handle tennis ball pose estimation with motion-aware input.
-    It supports 4-channel input (RGB + motion mask) for enhanced tennis ball tracking.
-
-    Attributes:
-        kpt_shape (tuple): Shape of keypoints data (1, 3) for tennis ball center point.
-        use_motion_masks (bool): Whether to use motion masks for enhanced detection.
-
-    Methods:
-        __init__: Initialize YOLO tennis ball pose model.
-        init_criterion: Initialize the loss criterion for tennis ball pose estimation.
-
-    Examples:
-        Initialize a tennis ball pose model
-        >>> model = TennisBallPoseModel("yolo11-tennis-pose.yaml", ch=4, nc=1, data_kpt_shape=(1, 3))
-        >>> results = model.predict(image_tensor)
-    """
-
-    def __init__(self, cfg="yolo11-tennis-pose.yaml", ch=4, nc=1, data_kpt_shape=(1, 3), verbose=True):
-        """
-        Initialize Ultralytics YOLO Tennis Ball Pose model.
-
-        Args:
-            cfg (str | dict): Model configuration file path or dictionary.
-            ch (int): Number of input channels (default: 4 for RGB + motion mask).
-            nc (int): Number of classes (default: 1 for tennis ball).
-            data_kpt_shape (tuple): Shape of keypoints data (default: (1, 3) for center point).
-            verbose (bool): Whether to display model information.
-        """
-        # Set default tennis ball keypoint shape if not provided
-        if data_kpt_shape == (None, None):
-            data_kpt_shape = (1, 3)  # 1 keypoint (center), 3 dimensions (x, y, visibility)
-        
-        # Initialize parent PoseModel with 4-channel support
-        super().__init__(cfg=cfg, ch=ch, nc=nc, data_kpt_shape=data_kpt_shape, verbose=verbose)
-        
-        # Store tennis ball specific attributes
-        self.use_motion_masks = ch == 4
-        self.tennis_ball_keypoints = ["center"]  # Single keypoint for tennis ball center
-        
-        if verbose:
-            LOGGER.info(f"TennisBallPoseModel initialized with {ch} input channels")
-            if self.use_motion_masks:
-                LOGGER.info("Motion mask support enabled for enhanced tennis ball tracking")
-
-    def load_pretrained_pose_weights(self, weights_path, adapt_first_layer=True):
-        """
-        Load pretrained pose weights and adapt for 4-channel input.
-        
-        Args:
-            weights_path (str): Path to pretrained pose model weights (.pt file)
-            adapt_first_layer (bool): Whether to adapt first layer for 4-channel input
-            
-        Returns:
-            bool: True if weights loaded successfully, False otherwise
-        """
-        try:
-            import torch
-            
-            # Load pretrained weights
-            if weights_path.endswith('.pt'):
-                ckpt = torch.load(weights_path, map_location='cpu')
-                if isinstance(ckpt, dict) and 'model' in ckpt:
-                    pretrained_state = ckpt['model'].state_dict()
-                else:
-                    pretrained_state = ckpt.state_dict() if hasattr(ckpt, 'state_dict') else ckpt
-            else:
-                LOGGER.warning(f"Unsupported weight file format: {weights_path}")
-                return False
-            
-            # Get current model state
-            current_state = self.state_dict()
-            
-            # Adapt first convolutional layer for 4-channel input if needed
-            if adapt_first_layer and self.use_motion_masks:
-                first_conv_key = None
-                for key in pretrained_state.keys():
-                    if 'model.0.conv.weight' in key or (key.startswith('model.0.') and 'weight' in key):
-                        first_conv_key = key
-                        break
-                
-                if first_conv_key and first_conv_key in pretrained_state:
-                    pretrained_first_weight = pretrained_state[first_conv_key]
-                    
-                    # Check if pretrained model has 3 channels and we need 4
-                    if pretrained_first_weight.shape[1] == 3 and self.use_motion_masks:
-                        LOGGER.info(f"Adapting first layer from 3 to 4 channels")
-                        
-                        # Create new 4-channel weight by duplicating one of the RGB channels
-                        # We'll duplicate the green channel as it's often most representative
-                        new_first_weight = torch.zeros((
-                            pretrained_first_weight.shape[0],  # out_channels
-                            4,  # new in_channels (RGB + motion)
-                            pretrained_first_weight.shape[2],  # height
-                            pretrained_first_weight.shape[3]   # width
-                        ))
-                        
-                        # Copy RGB channels
-                        new_first_weight[:, :3, :, :] = pretrained_first_weight
-                        # Initialize motion channel with average of RGB channels
-                        new_first_weight[:, 3, :, :] = pretrained_first_weight.mean(dim=1)
-                        
-                        pretrained_state[first_conv_key] = new_first_weight
-                        LOGGER.info(f"Adapted first layer weights from {pretrained_first_weight.shape} to {new_first_weight.shape}")
-            
-            # Load compatible weights
-            loaded_keys = []
-            incompatible_keys = []
-            
-            for key, param in current_state.items():
-                if key in pretrained_state:
-                    pretrained_param = pretrained_state[key]
-                    if param.shape == pretrained_param.shape:
-                        current_state[key] = pretrained_param
-                        loaded_keys.append(key)
-                    else:
-                        incompatible_keys.append(f"{key}: {param.shape} vs {pretrained_param.shape}")
-                        
-            # Load the adapted state dict
-            self.load_state_dict(current_state, strict=False)
-            
-            LOGGER.info(f"Loaded pretrained pose weights from {weights_path}")
-            LOGGER.info(f"Loaded {len(loaded_keys)} compatible layers")
-            if incompatible_keys:
-                LOGGER.info(f"Skipped {len(incompatible_keys)} incompatible layers")
-                # Show first 5 incompatible keys for debugging
-                for key in incompatible_keys[:5]:
-                    LOGGER.debug(f"  - {key}")
-            
-            return True
-            
-        except Exception as e:
-            LOGGER.error(f"Failed to load pretrained weights from {weights_path}: {e}")
-            return False
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the TennisBallPoseModel."""
-        return v8PoseLoss(self)
-
-
 class ClassificationModel(BaseModel):
     """
     YOLO classification model.
 
-    This class implements the YOLO classification architecture for image classification tasks,
-    providing model initialization, configuration, and output reshaping capabilities.
+    This class implements the YOLO classification architecture for image classification tasks, providing model
+    initialization, configuration, and output reshaping capabilities.
 
     Attributes:
         yaml (dict): Model configuration dictionary.
@@ -886,6 +743,22 @@ class RTDETRDetectionModel(DetectionModel):
         """
         super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
 
+    def _apply(self, fn):
+        """
+        Apply a function to all tensors in the model that are not parameters or registered buffers.
+
+        Args:
+            fn (function): The function to apply to the model.
+
+        Returns:
+            (RTDETRDetectionModel): An updated BaseModel object.
+        """
+        self = super()._apply(fn)
+        m = self.model[-1]
+        m.anchors = fn(m.anchors)
+        m.valid_mask = fn(m.valid_mask)
+        return self
+
     def init_criterion(self):
         """Initialize the loss criterion for the RTDETRDetectionModel."""
         from ultralytics.models.utils.loss import RTDETRDetectionLoss
@@ -980,8 +853,8 @@ class WorldModel(DetectionModel):
     """
     YOLOv8 World Model.
 
-    This class implements the YOLOv8 World model for open-vocabulary object detection, supporting text-based
-    class specification and CLIP model integration for zero-shot detection capabilities.
+    This class implements the YOLOv8 World model for open-vocabulary object detection, supporting text-based class
+    specification and CLIP model integration for zero-shot detection capabilities.
 
     Attributes:
         txt_feats (torch.Tensor): Text feature embeddings for classes.
@@ -1116,8 +989,8 @@ class YOLOEModel(DetectionModel):
     """
     YOLOE detection model.
 
-    This class implements the YOLOE architecture for efficient object detection with text and visual prompts,
-    supporting both prompt-based and prompt-free inference modes.
+    This class implements the YOLOE architecture for efficient object detection with text and visual prompts, supporting
+    both prompt-based and prompt-free inference modes.
 
     Attributes:
         pe (torch.Tensor): Prompt embeddings for classes.
@@ -1365,8 +1238,8 @@ class YOLOESegModel(YOLOEModel, SegmentationModel):
     """
     YOLOE segmentation model.
 
-    This class extends YOLOEModel to handle instance segmentation tasks with text and visual prompts,
-    providing specialized loss computation for pixel-level object detection and segmentation.
+    This class extends YOLOEModel to handle instance segmentation tasks with text and visual prompts, providing
+    specialized loss computation for pixel-level object detection and segmentation.
 
     Methods:
         __init__: Initialize YOLOE segmentation model.
@@ -1413,8 +1286,8 @@ class Ensemble(torch.nn.ModuleList):
     """
     Ensemble of models.
 
-    This class allows combining multiple YOLO models into an ensemble for improved performance through
-    model averaging or other ensemble techniques.
+    This class allows combining multiple YOLO models into an ensemble for improved performance through model averaging
+    or other ensemble techniques.
 
     Methods:
         __init__: Initialize an ensemble of models.
@@ -1461,9 +1334,9 @@ def temporary_modules(modules=None, attributes=None):
     """
     Context manager for temporarily adding or modifying modules in Python's module cache (`sys.modules`).
 
-    This function can be used to change the module paths during runtime. It's useful when refactoring code,
-    where you've moved a module from one location to another, but you still want to support the old import
-    paths for backwards compatibility.
+    This function can be used to change the module paths during runtime. It's useful when refactoring code, where you've
+    moved a module from one location to another, but you still want to support the old import paths for backwards
+    compatibility.
 
     Args:
         modules (dict, optional): A dictionary mapping old module paths to new module paths.
@@ -1474,7 +1347,7 @@ def temporary_modules(modules=None, attributes=None):
         >>> import old.module  # this will now import new.module
         >>> from old.module import attribute  # this will now import new.module.attribute
 
-    Note:
+    Notes:
         The changes are only in effect inside the context manager and are undone once the context manager exits.
         Be aware that directly manipulating `sys.modules` can lead to unpredictable results, especially in larger
         applications or libraries. Use this function with caution.
@@ -1689,7 +1562,7 @@ def parse_model(d, ch, verbose=True):
     scale = d.get("scale")
     if scales:
         if not scale:
-            scale = tuple(scales.keys())[0]
+            scale = next(iter(scales.keys()))
             LOGGER.warning(f"no model scale passed. Assuming scale='{scale}'.")
         depth, width, max_channels = scales[scale]
 
@@ -1836,7 +1709,7 @@ def parse_model(d, ch, verbose=True):
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         if verbose:
-            LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m_.np:10.0f}  {t:<45}{str(args):<30}")  # print
+            LOGGER.info(f"{i:>3}{f!s:>20}{n_:>3}{m_.np:10.0f}  {t:<45}{args!s:<30}")  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
@@ -1880,7 +1753,7 @@ def guess_model_scale(model_path):
         (str): The size character of the model's scale (n, s, m, l, or x).
     """
     try:
-        return re.search(r"yolo(e-)?[v]?\d+([nslmx])", Path(model_path).stem).group(2)  # noqa
+        return re.search(r"yolo(e-)?[v]?\d+([nslmx])", Path(model_path).stem).group(2)
     except AttributeError:
         return ""
 

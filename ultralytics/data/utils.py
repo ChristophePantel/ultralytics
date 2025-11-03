@@ -19,6 +19,7 @@ from PIL import Image, ImageOps
 
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.utils import (
+    ASSETS_URL,
     DATASETS_DIR,
     LOGGER,
     NUM_THREADS,
@@ -53,8 +54,8 @@ def check_file_speeds(
     """
     Check dataset file access speed and provide performance feedback.
 
-    This function tests the access speed of dataset files by measuring ping (stat call) time and read speed.
-    It samples up to 5 files from the provided list and warns if access times exceed the threshold.
+    This function tests the access speed of dataset files by measuring ping (stat call) time and read speed. It samples
+    up to 5 files from the provided list and warns if access times exceed the threshold.
 
     Args:
         files (list[str]): List of file paths to check for access speed.
@@ -220,7 +221,7 @@ def verify_image_label(args: tuple) -> list:
             if os.path.isfile(km_file):
                 with open(km_file, encoding="utf-8") as km_f:
                 # Extract the various data items from each line
-                    km_lb = np.array([x.split() for x in km_f.read().strip().splitlines() if len(x)],dtype=np.float32)
+                    km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
             else:
                 km_lb = np.zeros((len(lb),0))
             if nl := len(lb):
@@ -244,12 +245,14 @@ def verify_image_label(args: tuple) -> list:
                     f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
                     f"Possible class labels are 0-{num_cls - 1}"
                 )
-                _, i = np.unique(lb, axis=0, return_index=True)
-                if len(i) < nl:  # duplicate row check
-                    lb = lb[i]  # remove duplicates
+                _, cleaned_indices = np.unique(lb, axis=0, return_index=True)
+                if len(cleaned_indices) < nl:  # duplicate row check
+                    lb = lb[cleaned_indices]  # remove duplicates
+                    km_lb = [km_lb[i] for i in cleaned_indices] # remove duplicates
                     if segments:
-                        segments = [segments[x] for x in i]
-                    msg = f"{prefix}{im_file}: {nl - len(i)} duplicate labels removed"
+                        segments = [segments[i] for i in cleaned_indices]
+                    msg = f"{prefix}{im_file}: {nl - len(cleaned_indices)} duplicate labels removed"
+                    nl = len(lb)
             else:
                 ne = 1  # label empty
                 lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)
@@ -267,6 +270,9 @@ def verify_image_label(args: tuple) -> list:
         for i in range(nl):
                 for cls in lb[i,0:-4]:
                     class_scores[i,int(cls)]=1.0
+                for cls in km_lb[i]:
+                    class_scores[i,int(cls)]=1.0
+        # TODO (CP/IRIT): Add Knowledge Model classes
         core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]
         # returns a Tuple
@@ -283,10 +289,10 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
     """
     Visualize YOLO annotations (bounding boxes and class labels) on an image.
 
-    This function reads an image and its corresponding annotation file in YOLO format, then
-    draws bounding boxes around detected objects and labels them with their respective class names.
-    The bounding box colors are assigned based on the class ID, and the text color is dynamically
-    adjusted for readability, depending on the background color's luminance.
+    This function reads an image and its corresponding annotation file in YOLO format, then draws bounding boxes around
+    detected objects and labels them with their respective class names. The bounding box colors are assigned based on
+    the class ID, and the text color is dynamically adjusted for readability, depending on the background color's
+    luminance.
 
     Args:
         image_path (str): The path to the image file to annotate, and it can be in formats supported by PIL.
@@ -332,7 +338,7 @@ def polygon2mask(
     Args:
         imgsz (tuple[int, int]): The size of the image as (height, width).
         polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where
-                                     N is the number of polygons, and M is the number of points such that M % 2 = 0.
+            N is the number of polygons, and M is the number of points such that M % 2 = 0.
         color (int, optional): The color value to fill in the polygons on the mask.
         downsample_ratio (int, optional): Factor by which to downsample the mask.
 
@@ -357,7 +363,7 @@ def polygons2masks(
     Args:
         imgsz (tuple[int, int]): The size of the image as (height, width).
         polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where
-                                     N is the number of polygons, and M is the number of points such that M % 2 = 0.
+            N is the number of polygons, and M is the number of points such that M % 2 = 0.
         color (int): The color value to fill in the polygons on the masks.
         downsample_ratio (int, optional): Factor by which to downsample each mask.
 
@@ -489,7 +495,7 @@ def check_det_dataset(dataset: str, autodownload: bool = True) -> dict[str, Any]
         if not all(x.exists() for x in val):
             name = clean_url(dataset)  # dataset name with URL auth stripped
             LOGGER.info("")
-            m = f"Dataset '{name}' images not found, missing path '{[x for x in val if not x.exists()][0]}'"
+            m = f"Dataset '{name}' images not found, missing path '{next(x for x in val if not x.exists())}'"
             if s and autodownload:
                 LOGGER.warning(m)
             else:
@@ -516,8 +522,8 @@ def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
     """
     Check a classification dataset such as Imagenet.
 
-    This function accepts a `dataset` name and attempts to retrieve the corresponding dataset information.
-    If the dataset is not found locally, it attempts to download the dataset from the internet and save it locally.
+    This function accepts a `dataset` name and attempts to retrieve the corresponding dataset information. If the
+    dataset is not found locally, it attempts to download the dataset from the internet and save it locally.
 
     Args:
         dataset (str | Path): The name of the dataset.
@@ -542,14 +548,18 @@ def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
     dataset = Path(dataset)
     data_dir = (dataset if dataset.is_dir() else (DATASETS_DIR / dataset)).resolve()
     if not data_dir.is_dir():
+        if data_dir.suffix != "":
+            raise ValueError(
+                f'Classification datasets must be a directory (data="path/to/dir") not a file (data="{dataset}"), '
+                "See https://docs.ultralytics.com/datasets/classify/"
+            )
         LOGGER.info("")
         LOGGER.warning(f"Dataset not found, missing path {data_dir}, attempting download...")
         t = time.time()
         if str(dataset) == "imagenet":
             subprocess.run(["bash", str(ROOT / "data/scripts/get_imagenet.sh")], check=True)
         else:
-            url = f"https://github.com/ultralytics/assets/releases/download/v0.0.0/{dataset}.zip"
-            download(url, dir=data_dir.parent)
+            download(f"{ASSETS_URL}/{dataset}.zip", dir=data_dir.parent)
         LOGGER.info(f"Dataset download success ✅ ({time.time() - t:.1f}s), saved to {colorstr('bold', data_dir)}\n")
     train_set = data_dir / "train"
     if not train_set.is_dir():
@@ -625,10 +635,6 @@ class HUBDatasetStats:
         get_json: Return dataset JSON for Ultralytics HUB.
         process_images: Compress images for Ultralytics HUB.
 
-    Note:
-        Download *.zip files from https://github.com/ultralytics/hub/tree/main/example_datasets
-        i.e. https://github.com/ultralytics/hub/raw/main/example_datasets/coco8.zip for coco8.zip.
-
     Examples:
         >>> from ultralytics.data.utils import HUBDatasetStats
         >>> stats = HUBDatasetStats("path/to/coco8.zip", task="detect")  # detect dataset
@@ -638,6 +644,10 @@ class HUBDatasetStats:
         >>> stats = HUBDatasetStats("path/to/imagenet10.zip", task="classify")  # classification dataset
         >>> stats.get_json(save=True)
         >>> stats.process_images()
+
+    Notes:
+        Download *.zip files from https://github.com/ultralytics/hub/tree/main/example_datasets
+        i.e. https://github.com/ultralytics/hub/raw/main/example_datasets/coco8.zip for coco8.zip.
     """
 
     def __init__(self, path: str = "coco8.yaml", task: str = "detect", autodownload: bool = False):
@@ -774,7 +784,7 @@ class HUBDatasetStats:
         return self.im_dir
 
 
-def compress_one_image(f: str, f_new: str = None, max_dim: int = 1920, quality: int = 50):
+def compress_one_image(f: str, f_new: str | None = None, max_dim: int = 1920, quality: int = 50):
     """
     Compress a single image file to reduced size while preserving its aspect ratio and quality using either the Python
     Imaging Library (PIL) or OpenCV library. If the input image is smaller than the maximum dimension, it will not be
@@ -831,4 +841,4 @@ def save_dataset_cache_file(prefix: str, path: Path, x: dict, version: str):
             np.save(file, x)
         LOGGER.info(f"{prefix}New cache created: {path}")
     else:
-        LOGGER.warning(f"{prefix}Cache directory {path.parent} is not writeable, cache not saved.")
+        LOGGER.warning(f"{prefix}Cache directory {path.parent} is not writable, cache not saved.")

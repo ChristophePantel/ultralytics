@@ -82,6 +82,7 @@ class WorldTrainer(DetectionTrainer):
         """
         # NOTE: This `nc` here is the max number of different text samples in one image, rather than the actual `nc`.
         # NOTE: Following the official config, nc hard-coded to 80 for now.
+        # TODO (CP/IRIT): Why is it hard-coded to 80 ?
         model = WorldModel(
             cfg["yaml_file"] if isinstance(cfg, dict) else cfg,
             ch=self.data["channels"],
@@ -118,8 +119,8 @@ class WorldTrainer(DetectionTrainer):
         """
         Set text embeddings for datasets to accelerate training by caching category names.
 
-        This method collects unique category names from all datasets, then generates and caches text embeddings
-        for these categories to improve training efficiency.
+        This method collects unique category names from all datasets, then generates and caches text embeddings for
+        these categories to improve training efficiency.
 
         Args:
             datasets (list[Any]): List of datasets from which to extract category names.
@@ -172,7 +173,8 @@ class WorldTrainer(DetectionTrainer):
 
         # Add text features
         texts = list(itertools.chain(*batch["texts"]))
-        txt_feats = torch.stack([self.text_embeddings[text] for text in texts]).to(self.device, non_blocking=True)
-        txt_feats = txt_feats / txt_feats.norm(p=2, dim=-1, keepdim=True)
+        txt_feats = torch.stack([self.text_embeddings[text] for text in texts]).to(
+            self.device, non_blocking=self.device.type == "cuda"
+        )
         batch["txt_feats"] = txt_feats.reshape(len(batch["texts"]), -1, txt_feats.shape[-1])
         return batch

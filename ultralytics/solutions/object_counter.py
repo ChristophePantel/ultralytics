@@ -106,11 +106,8 @@ class ObjectCounter(BaseSolution):
                 region_width = max(p[0] for p in self.region) - min(p[0] for p in self.region)
                 region_height = max(p[1] for p in self.region) - min(p[1] for p in self.region)
 
-                if (
-                    region_width < region_height
-                    and current_centroid[0] > prev_position[0]
-                    or region_width >= region_height
-                    and current_centroid[1] > prev_position[1]
+                if (region_width < region_height and current_centroid[0] > prev_position[0]) or (
+                    region_width >= region_height and current_centroid[1] > prev_position[1]
                 ):  # Moving right or downward
                     self.in_count += 1
                     self.classwise_count[self.names[cls]]["IN"] += 1
@@ -135,7 +132,7 @@ class ObjectCounter(BaseSolution):
             str.capitalize(key): f"{'IN ' + str(value['IN']) if self.show_in else ''} "
             f"{'OUT ' + str(value['OUT']) if self.show_out else ''}".strip()
             for key, value in self.classwise_count.items()
-            if value["IN"] != 0 or value["OUT"] != 0 and (self.show_in or self.show_out)
+            if value["IN"] != 0 or (value["OUT"] != 0 and (self.show_in or self.show_out))
         }
         if labels_dict:
             self.annotator.display_analytics(plot_im, labels_dict, (104, 31, 17), (255, 255, 255), self.margin)
@@ -144,16 +141,16 @@ class ObjectCounter(BaseSolution):
         """
         Process input data (frames or object tracks) and update object counts.
 
-        This method initializes the counting region, extracts tracks, draws bounding boxes and regions, updates
-        object counts, and displays the results on the input image.
+        This method initializes the counting region, extracts tracks, draws bounding boxes and regions, updates object
+        counts, and displays the results on the input image.
 
         Args:
             im0 (np.ndarray): The input image or frame to be processed.
 
         Returns:
             (SolutionResults): Contains processed image `im0`, 'in_count' (int, count of objects entering the region),
-                'out_count' (int, count of objects exiting the region), 'classwise_count' (dict, per-class object count),
-                and 'total_tracks' (int, total number of tracked objects).
+                'out_count' (int, count of objects exiting the region), 'classwise_count' (dict, per-class object
+                count), and 'total_tracks' (int, total number of tracked objects).
 
         Examples:
             >>> counter = ObjectCounter()
