@@ -683,7 +683,7 @@ class v8DetectionLoss:
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[0], loss[2] = self.bbox_loss(
-                pred_distri,
+                pred_for_bboxes,
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,

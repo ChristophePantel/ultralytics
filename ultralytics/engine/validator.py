@@ -287,22 +287,30 @@ class BaseValidator:
         # LxD matrix where L - labels (rows), D - detections (columns)
         # TODO (CP/IRIT): Replace with multiclass comparaison using bce between true scores and predicted scores.
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
+        # Has the ground truth class been correctly predicted ?
         correct_class = true_classes[:, None] == pred_classes
+        sz_correct_class = torch.numel(correct_class)
+        nz_correct_class = torch.count_nonzero(correct_class)
+        # Only keeps the IoU of correct classes (set the incorrect ones to 0)
         iou = iou * correct_class  # zero out the wrong classes
         iou = iou.cpu().numpy()
+        # Iterates over IoU thresholds
         for i, threshold in enumerate(self.iouv.cpu().tolist()):
+            iou_over_threshold = (iou >= threshold)
+            sz_iou_over_threshold = iou_over_threshold.size
+            nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
             if use_scipy:
                 # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
                 import scipy  # scope import to avoid importing for all commands
 
-                cost_matrix = iou * (iou >= threshold)
+                cost_matrix = iou * iou_over_threshold
                 if cost_matrix.any():
                     labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
                         correct[detections_idx[valid], i] = True
             else:
-                matches = np.nonzero(iou >= threshold)  # IoU > threshold and classes match
+                matches = np.nonzero(iou_over_threshold)  # IoU > threshold and classes match
                 matches = np.array(matches).T
                 if matches.shape[0]:
                     if matches.shape[0] > 1:

@@ -760,6 +760,7 @@ def compute_ap(recall: list[float], precision: list[float]) -> tuple[float, np.n
     return ap, mpre, mrec
 
 
+# TODO (CP/IRIT): Add scores management
 def ap_per_class(
     tp: np.ndarray,
     conf: np.ndarray,
@@ -1041,8 +1042,8 @@ class DetMetrics(SimpleClass, DataExportMixin):
         box (Metric): An instance of the Metric class for storing detection results.
         speed (dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
         task (str): The task type, set to 'detect'.
-        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes,
-            target classes, and target images.
+        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes, 
+            predicted scores, target classes, target_scores, and target images.
         nt_per_class: Number of targets per class.
         nt_per_image: Number of targets per image.
 
@@ -1073,6 +1074,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
         self.box = Metric()
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
         self.task = "detect"
+        # DONE (CP/IRIT): Adding scores, both predicted and target
         self.stats = dict(tp=[], conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
         self.nt_per_class = None
         self.nt_per_image = None
@@ -1103,6 +1105,10 @@ class DetMetrics(SimpleClass, DataExportMixin):
         stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
         if not stats:
             return stats
+        # TODO (CP/IRIT): Add scores management
+        # Should classes be derived from scores instead of main class ?
+        # Should predicted scores be set to 0 / 1 instead of a value between 0 and 1 ?
+        # Should TP/TN/FP/FN be computed from scores ? (How is it done for boxes ?)
         results = ap_per_class(
             stats["tp"],
             stats["conf"],

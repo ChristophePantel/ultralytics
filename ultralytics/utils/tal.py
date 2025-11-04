@@ -150,6 +150,8 @@ class TaskAlignedAssigner(nn.Module):
         """
         # Positive anchor points (included in bounding boxes) for all strides  
         mask_in_gts = self.select_candidates_in_gts(anchor_points, gt_bboxes)
+        sz_mask_in_gts = torch.numel(mask_in_gts)
+        nz_mask_in_gts = torch.count_nonzero(mask_in_gts)
         # save2debug( 'mask_in_gts.txt', mask_in_gts, True)
         # Get anchor_align metric, (b, max_num_obj, h*w)
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
@@ -157,9 +159,13 @@ class TaskAlignedAssigner(nn.Module):
         # save2debug( 'overlaps.txt', overlaps, True)
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
+        sz_mask_topk = torch.numel(mask_topk)
+        nz_mask_topk = torch.count_nonzero(mask_topk)
         # save2debug( 'mask_topk.txt', mask_topk, True)
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         mask_pos = mask_topk * mask_in_gts * mask_gt
+        sz_mask_pos = torch.numel(mask_pos)
+        nz_mask_pos = torch.count_nonzero(mask_pos)
 
         return mask_pos, align_metric, overlaps
 
@@ -180,17 +186,20 @@ class TaskAlignedAssigner(nn.Module):
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
         try:
-            na = pd_bboxes.shape[-2] # number of anchor points h*w
+            sz_anchor_points = pd_bboxes.shape[-2] # number of anchor points h*w
             # TODO (CP/IRIT): Why not convert it earlier ?
             mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
             sz_mask_gt = torch.numel(mask_gt)
-            overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+            nz_mask_gt = torch.count_nonzero(mask_gt)
+            overlaps = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
             sz_overlaps = torch.numel(overlaps)
-            bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
+            bbox_scores = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_scores.dtype, device=pd_scores.device)
     
-            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
-            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
+            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, bs, max_num_obj
+            # for each batch, vector of max_num_obj value of batch index
+            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj
             # TODO (CP/IRIT): Purpose of ind[1]
+            # for each batch, vector of max_num_obj class index
             gt_labels_squeeze = gt_labels.squeeze(-1)
             ind[1] =  gt_labels_squeeze # b, max_num_obj
             # Get the scores of each grid for each gt cls
@@ -199,22 +208,29 @@ class TaskAlignedAssigner(nn.Module):
             pd_scores_ind = pd_scores[ind_0, :, ind_1]
             sz_bbox_scores = torch.numel(bbox_scores)
             sz_pd_scores_ind = torch.numel(pd_scores_ind)
+            nz_pd_scores_ind = torch.count_nonzero(pd_scores_ind)
             assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
             pd_scores_masked = pd_scores_ind[mask_gt]
             sz_pd_scores_masked = torch.numel(pd_scores_masked)
+            nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
             assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
             bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w
-    
+            nz_bbox_scores = torch.count_nonzero(bbox_scores)
             # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
             pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
-            gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
-            iou_results = self.iou_calculation(gt_boxes, pd_boxes)
+            gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, sz_anchor_points, -1)[mask_gt]
             
+            iou_results = self.iou_calculation(gt_boxes, pd_boxes)
             sz_iou_results = torch.numel(iou_results)
+            nz_iou_results = torch.count_nonzero(iou_results)
+            
             assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
             overlaps[mask_gt] = iou_results
-    
+            nz_overlaps = torch.count_nonzero(overlaps)
             align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+            sz_align_metrics = torch.numel(align_metric)
+            nz_align_metrics = torch.count_nonzero(align_metric)
+            
             return align_metric, overlaps
         except Exception as e:
             return None, None
@@ -398,6 +414,8 @@ class TaskAlignedAssigner(nn.Module):
             is_max_overlaps.scatter_(1, max_overlaps_idx.unsqueeze(1), 1)
 
             mask_pos = torch.where(mask_multi_gts, is_max_overlaps, mask_pos).float()  # (b, n_max_boxes, h*w)
+            sz_mask_pos = torch.numel(mask_pos)
+            nz_mask_pos = torch.count_nonzero(mask_pos)
             fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
