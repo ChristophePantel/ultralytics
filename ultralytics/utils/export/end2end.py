@@ -9,15 +9,8 @@ import torch
 from ultralytics.nn.tasks import DetectionModel
 
 
-def _forward_end2end_nopost(self, x: list[torch.Tensor]) -> dict | tuple:
-    """Perform forward pass of the v10Detect module without postprocess.
-
-    Args:
-        x (list[torch.Tensor]): Input feature maps from different levels.
-
-    Returns:
-        outputs (dict | tuple): Returns decoded output of one2one head.
-    """
+def _forward_end2end_nopost(self, x: list[torch.Tensor]) -> torch.Tensor:
+    """Perform forward pass of the v10Detect module without postprocess."""
     x_detach = [xi.detach() for xi in x]
     one2one = [
         torch.cat((self.one2one_cv2[i](x_detach[i]), self.one2one_cv3[i](x_detach[i])), 1) for i in range(self.nl)
@@ -51,15 +44,15 @@ def postprocess(preds: torch.Tensor, max_det: int, nc: int = 80) -> torch.Tensor
     return torch.cat([boxes[i, pi], scores[..., None], (index % nc)[..., None].float(), extras[i, pi]], dim=-1)
 
 
-def end2end_wrapper(model: DetectionModel) -> None:
+def end2end_wrapper(model: DetectionModel) -> DetectionModel:
     """Patch end2end forward pass to remove postprocessing.
-    
+
     Args:
         model (DetectionModel): YOLO end2end model to patch.
-    
+
     Returns:
         model (DetectionModel): Patched end2end model.
     """
-    if getattr(model, "end2end"):
+    if getattr(model.model[-1], "end2end", False):
         model.model[-1].forward_end2end = MethodType(_forward_end2end_nopost, model.model[-1])
     return model
