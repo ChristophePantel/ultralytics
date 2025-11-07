@@ -1088,8 +1088,6 @@ class Exporter:
         # this is for YOLOv8
         config = CompilerConfig(tiling_depth=6, split_buffer_promotion=True)
         
-    
-        
         qmodel = compiler.quantize(
             model=onnx_path,
             calibration_dataset=self.get_int8_calibration_dataloader(prefix),
@@ -1097,18 +1095,10 @@ class Exporter:
             transform_fn=transform_fn
         )
         
-        # TODO: Enable the below in the future when `top_level` is dropped
-        # compiler.compile(
-        #     model=qmodel,
-        #     config=config,
-        #     output_dir=str(export_path)
-        # )
-        
-        # Use the internal lower function directly with correct parameter name
-        manifest = top_level.lower(
-            quantized_model=qmodel,
+        compiler.compile(
+            model=qmodel,
             config=config,
-            output_dir=export_path,
+            output_dir=str(export_path)
         )
         
         return str(export_path)
