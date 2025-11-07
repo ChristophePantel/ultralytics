@@ -16,8 +16,7 @@ def _forward_end2end_nopost(self, x: list[torch.Tensor]) -> dict | tuple:
         x (list[torch.Tensor]): Input feature maps from different levels.
 
     Returns:
-        outputs (dict | tuple): Training mode returns dict with one2many and one2one outputs. Inference mode returns
-            processed detections or tuple with detections and raw outputs.
+        outputs (dict | tuple): Returns decoded output of one2one head.
     """
     x_detach = [xi.detach() for xi in x]
     one2one = [
@@ -25,11 +24,7 @@ def _forward_end2end_nopost(self, x: list[torch.Tensor]) -> dict | tuple:
     ]
     for i in range(self.nl):
         x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
-    if self.training:  # Training path
-        return {"one2many": x, "one2one": one2one}
-
-    y = self._inference(one2one)
-    return y if self.export else (y, {"one2many": x, "one2one": one2one})
+    return self._inference(one2one)
 
 
 def postprocess(preds: torch.Tensor, max_det: int, nc: int = 80) -> torch.Tensor:
@@ -57,7 +52,14 @@ def postprocess(preds: torch.Tensor, max_det: int, nc: int = 80) -> torch.Tensor
 
 
 def end2end_wrapper(model: DetectionModel) -> None:
-    """Patch end2end forward pass to remove postprocessing."""
+    """Patch end2end forward pass to remove postprocessing.
+    
+    Args:
+        model (DetectionModel): YOLO end2end model to patch.
+    
+    Returns:
+        model (DetectionModel): Patched end2end model.
+    """
     if getattr(model, "end2end"):
         model.model[-1].forward_end2end = MethodType(_forward_end2end_nopost, model.model[-1])
     return model
