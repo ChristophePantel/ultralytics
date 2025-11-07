@@ -221,9 +221,9 @@ class MuSGD(optim.Optimizer):
                     lr = (
                         group["lr"] * self.cls_w
                         if group["param_names"] is not None
-                        and re.search(pattern, group["param_names"][i])
-                        # and "cv3" in group["param_names"][i]
-                        # and "23" in group["param_names"][i]
+                        and "cv3" in group["param_names"][i]
+                        and "23" in group["param_names"][i]
+                        # and ("2.weight" in group["param_names"][i] or "2.bias" in group["param_names"][i])
                         # and int(group["param_names"][i].split(".")[1]) in list(range(11, 24))
                         else group["lr"]
                     )
@@ -257,9 +257,9 @@ class MuSGD(optim.Optimizer):
                     lr = (
                         group["lr"] * self.cls_w
                         if group["param_names"] is not None
-                        and re.search(pattern, group["param_names"][i])
-                        # and "cv3" in group["param_names"][i]
-                        # and "23" in group["param_names"][i]
+                        and "cv3" in group["param_names"][i]
+                        and "23" in group["param_names"][i]
+                        # and ("2.weight" in group["param_names"][i] or "2.bias" in group["param_names"][i])
                         # and int(group["param_names"][i].split(".")[1]) in list(range(11, 24))
                         else group["lr"]
                     )
