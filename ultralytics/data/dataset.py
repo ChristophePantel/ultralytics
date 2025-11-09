@@ -246,6 +246,7 @@ class YOLODataset(BaseDataset):
                 mask_ratio=hyp.mask_ratio,
                 mask_overlap=hyp.overlap_mask,
                 bgr=hyp.bgr if self.augment else 0.0,  # only affect training.
+                semseg_loss=hyp.semseg_loss if "train" in self.prefix else False
             )
         )
         return transforms
@@ -314,7 +315,7 @@ class YOLODataset(BaseDataset):
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb"}:
+            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb", "sem_masks"}:
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
