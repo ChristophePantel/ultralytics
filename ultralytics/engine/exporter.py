@@ -615,7 +615,7 @@ class Exporter:
     @try_export
     def export_onnx(self, prefix=colorstr("ONNX:"), dynamo=True):
         """Export YOLO model to ONNX format."""
-        requirements = ["onnx>=1.12.0", "onnxscript>=0.2.5"]
+        requirements = ["onnx>=1.12.0,<=1.19.1"]
         if self.args.simplify:
             requirements += ["onnxslim>=0.1.71", "onnxruntime" + ("-gpu" if torch.cuda.is_available() else "")]
         check_requirements(requirements)
@@ -984,7 +984,7 @@ class Exporter:
                 "sng4onnx>=1.0.1",  # required by 'onnx2tf' package
                 "onnx_graphsurgeon>=0.3.26",  # required by 'onnx2tf' package
                 "ai-edge-litert>=1.2.0" + (",<1.4.0" if MACOS else ""),  # required by 'onnx2tf' package
-                "onnx>=1.12.0",
+                "onnx>=1.12.0,<=1.19.1",
                 "onnx2tf>=1.26.3",
                 "onnxslim>=0.1.71",
                 "onnxruntime-gpu" if cuda else "onnxruntime",
