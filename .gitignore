@@ -174,10 +174,21 @@ pnnx*
 
 # calibration image
 calibration_*.npy
-Dataset/
-Dataset_YOLO/
-motion_training/
-*.png
+
+# Videos and Pictures
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
 *.jpg
-motion_cache/
-tennis_ball_training/
+*.jpeg
+*.png
+*.bmp
+*.tiff
+*.gif
+*.svg
+*.webp
+*.heic
+*.ico
+*.raw
