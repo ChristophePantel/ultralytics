@@ -373,8 +373,7 @@ def plt_settings(rcparams=None, backend="Agg"):
             finally:
                 if switch:
                     plt.close("all")
-                    with contextlib.suppress(Exception):
-                        plt.switch_backend(original_backend)  # get_backend() doesn't guarantee valid backend
+                    plt.switch_backend(original_backend)
             return result
 
         return wrapper

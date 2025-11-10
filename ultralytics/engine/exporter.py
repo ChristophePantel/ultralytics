@@ -78,7 +78,7 @@ from ultralytics.data import build_dataloader
 from ultralytics.data.dataset import YOLODataset
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.nn.autobackend import check_class_names, default_class_names
-from ultralytics.nn.modules import Classify, Detect, RTDETRDecoder
+from ultralytics.nn.modules import C2f, Classify, Detect, RTDETRDecoder
 from ultralytics.nn.tasks import ClassificationModel, DetectionModel, SegmentationModel, WorldModel
 from ultralytics.utils import (
     ARM64,
@@ -155,8 +155,7 @@ def export_formats():
         ["NCNN", "ncnn", "_ncnn_model", True, True, ["batch", "half"]],
         ["IMX", "imx", "_imx_model", True, True, ["int8", "fraction", "nms"]],
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
-        ["Axelera", "axelera", "_axelera_model", False, False, ["batch", "name"]],
-        
+        ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
 
@@ -319,9 +318,24 @@ class Exporter:
         flags = [x == fmt for x in fmts]
         if sum(flags) != 1:
             raise ValueError(f"Invalid export format='{fmt}'. Valid formats are {fmts}")
-        (jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, mnn, ncnn, imx, rknn, axelera) = (
-            flags  # export booleans
-        )
+        (
+            jit,
+            onnx,
+            xml,
+            engine,
+            coreml,
+            saved_model,
+            pb,
+            tflite,
+            edgetpu,
+            tfjs,
+            paddle,
+            mnn,
+            ncnn,
+            imx,
+            rknn,
+            executorch,
+        ) = flags  # export booleans
 
         is_tf_format = any((saved_model, pb, tflite, edgetpu, tfjs))
 
@@ -440,14 +454,10 @@ class Exporter:
             from ultralytics.utils.export.imx import FXModel
 
             model = FXModel(model, self.imgsz)
-        elif tflite or edgetpu:
+        if tflite or edgetpu:
             from ultralytics.utils.export.tensorflow import tf_wrapper
 
             model = tf_wrapper(model)
-        elif ncnn:
-            from ultralytics.utils.export.end2end import end2end_wrapper
-
-            model = end2end_wrapper(model)
         for m in model.modules():
             if isinstance(m, Classify):
                 m.export = True
@@ -459,6 +469,9 @@ class Exporter:
                 m.xyxy = self.args.nms and not coreml
                 if hasattr(model, "pe") and hasattr(m, "fuse"):  # for YOLOE models
                     m.fuse(model.pe.to(self.device))
+            elif isinstance(m, C2f) and not is_tf_format:
+                # EdgeTPU does not support FlexSplitV while split provides cleaner ONNX graph
+                m.forward = m.forward_split
 
         y = None
         for _ in range(2):  # dry runs
@@ -495,10 +508,9 @@ class Exporter:
             "batch": self.args.batch,
             "imgsz": self.imgsz,
             "names": model.names,
-            "args": {k: v for k, v in self.args if k in [*fmt_keys, "max_det"]},
+            "args": {k: v for k, v in self.args if k in fmt_keys},
             "channels": model.yaml.get("channels", 3),
         }  # model metadata
-        self.metadata["args"].update({"nms": self.args.nms or getattr(model, "end2end", False)})
         if dla is not None:
             self.metadata["dla"] = dla  # make sure `AutoBackend` uses correct dla device if it has one
         if model.task == "pose":
@@ -544,8 +556,8 @@ class Exporter:
             f[13] = self.export_imx()
         if rknn:
             f[14] = self.export_rknn()
-        if axelera:
-            f[15] = self.export_axelera()
+        if executorch:
+            f[15] = self.export_executorch()
 
         # Finish
         f = [str(x) for x in f if x]  # filter out '' and None
@@ -613,7 +625,7 @@ class Exporter:
         return f
 
     @try_export
-    def export_onnx(self, prefix=colorstr("ONNX:"), dynamo=True):
+    def export_onnx(self, prefix=colorstr("ONNX:")):
         """Export YOLO model to ONNX format."""
         requirements = ["onnx>=1.12.0,<=1.19.1"]
         if self.args.simplify:
@@ -650,7 +662,6 @@ class Exporter:
                 input_names=["images"],
                 output_names=output_names,
                 dynamic=dynamic or None,
-                dynamo=dynamo,
             )
 
         # Checks
@@ -1021,7 +1032,7 @@ class Exporter:
             self.args.opset = self.args.opset or 19
             assert 16 <= self.args.opset <= 19, "RTDETR export requires opset>=16;<=19"
         self.args.simplify = True
-        f_onnx = self.export_onnx(dynamo=False)  # ensure ONNX is available
+        f_onnx = self.export_onnx()  # ensure ONNX is available
         keras_model = onnx2saved_model(
             f_onnx,
             f,
@@ -1059,47 +1070,6 @@ class Exporter:
         else:
             f = saved_model / f"{self.file.stem}_float32.tflite"
         return str(f)
-    
-    @try_export
-    def export_axelera(self, prefix=colorstr("Axelera:")):
-        """YOLOv8 Axelera export."""
-
-        from axelera import compiler
-        from axelera.compiler import CompilerConfig, top_level
-        
-        self.args.opset = 17
-        onnx_path = self.export_onnx()
-        export_path = Path(f"{Path(onnx_path).stem}_axelera_model")
-        export_path.mkdir(exist_ok=True)
-                
-        assert not self.args.dynamic, "Axelera does not support Dynamic tensor"
-        assert not self.args.int8, "Axelera only supports int8 input; the model runs in mixed precision on hardware"
-        
-        def transform_fn(data_item) -> np.ndarray:
-            data_item: torch.Tensor = data_item["img"] if isinstance(data_item, dict) else data_item
-            assert data_item.dtype == torch.uint8, "Input image must be uint8 for the quantization preprocessing"
-            im = data_item.numpy().astype(np.float32) / 255.0  # uint8 to fp16/32 and 0 - 255 to 0.0 - 1.0
-            return np.expand_dims(im, 0) if im.ndim == 3 else im
-        
-        if "C2PSA" in self.model.__str__(): # YOLO11
-            config = CompilerConfig(ptq_scheme="per_tensor_min_max", ignore_weight_buffers=False, resources_used=0.25, aipu_cores_used=1, multicore_mode="batch")
-        else: # YOLOv8
-            config = CompilerConfig(tiling_depth=6, split_buffer_promotion=True, resources_used=0.25, aipu_cores_used=1, multicore_mode="batch")
-        
-        qmodel = compiler.quantize(
-            model=onnx_path,
-            calibration_dataset=self.get_int8_calibration_dataloader(prefix),
-            config=config,
-            transform_fn=transform_fn
-        )
-        
-        compiler.compile(
-            model=qmodel,
-            config=config,
-            output_dir=str(export_path)
-        )
-        
-        return str(export_path)
 
     @try_export
     def export_executorch(self, prefix=colorstr("ExecuTorch:")):
@@ -1427,7 +1397,7 @@ class NMSModel(torch.nn.Module):
         for i in range(bs):
             box, cls, score, extra = boxes[i], classes[i], scores[i], extras[i]
             mask = score > self.args.conf
-            if self.is_tf or (self.args.format == "onnx" and self.obb) or self.dynamo():
+            if self.is_tf or (self.args.format == "onnx" and self.obb):
                 # TFLite GatherND error if mask is empty
                 score *= mask
                 # Explicit length otherwise reshape error, hardcoded to `self.args.max_det * 5`
@@ -1465,12 +1435,7 @@ class NMSModel(torch.nn.Module):
                 torch.cat([nmsbox, extra], dim=-1) if self.obb else nmsbox,
                 score,
                 self.args.iou,
-            )
-            if self.dynamo():
-                keep = torch.nn.functional.pad(
-                    keep, (0, self.args.max_det), value=mask.shape[0] - 1
-                )  # repeat the final index as pad
-            keep = keep[: self.args.max_det]
+            )[: self.args.max_det]
             dets = torch.cat(
                 [box[keep], score[keep].view(-1, 1), cls[keep].view(-1, 1).to(out.dtype), extra[keep]], dim=-1
             )
@@ -1478,9 +1443,3 @@ class NMSModel(torch.nn.Module):
             pad = (0, 0, 0, self.args.max_det - dets.shape[0])
             out[i] = torch.nn.functional.pad(dets, pad)
         return (out[:bs], preds[1]) if self.model.task == "segment" else out[:bs]
-
-    def dynamo(self):
-        """Check if export is using dynamo."""
-        if hasattr(torch, "compiler") and hasattr(torch.compiler, "is_exporting"):
-            return torch.compiler.is_exporting()
-        return False

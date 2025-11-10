@@ -63,7 +63,6 @@ from ultralytics.nn.modules import (
     RTDETRDecoder,
     SCDown,
     Segment,
-    Segmentv8_add,
     TorchVision,
     WorldDetect,
     YOLOEDetect,
@@ -1002,14 +1001,12 @@ class YOLOEModel(DetectionModel):
         """
         from ultralytics.nn.text_model import build_text_model
 
-        clip_weight=self.args.clip_weight_name
-
         device = next(self.model.parameters()).device
         if not getattr(self, "clip_model", None) and cache_clip_model:
             # For backwards compatibility of models lacking clip_model attribute
-            self.clip_model = build_text_model(clip_weight, device=device)
+            self.clip_model = build_text_model("mobileclip:blt", device=device)
 
-        model = self.clip_model if cache_clip_model else build_text_model(clip_weight, device=device)
+        model = self.clip_model if cache_clip_model else build_text_model("mobileclip:blt", device=device)
         text_token = model.tokenize(text)
         txt_feats = [model.encode_text(token).detach() for token in text_token.split(batch)]
         txt_feats = txt_feats[0] if len(txt_feats) == 1 else torch.cat(txt_feats, dim=0)
@@ -1628,12 +1625,12 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, WorldDetect, YOLOEDetect, Segment, Segmentv8_add, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
+            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):
-            args.extend([reg_max, end2end, [ch[x] for x in f]])
-            if m is Segment or m is Segmentv8_add or m is YOLOESegment:
+            args.append([ch[x] for x in f])
+            if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segmentv8_add, YOLOESegment, Pose, OBB}:
+            if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])

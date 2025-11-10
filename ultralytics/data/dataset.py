@@ -44,9 +44,6 @@ from .utils import (
 
 # Ultralytics dataset *.cache version, >= 1.0.0 for Ultralytics YOLO models
 DATASET_CACHE_VERSION = "1.0.3"
-# CACHE_SUFFIX=".cache"
-# CACHE_SUFFIX=".merged.cache" #
-CACHE_SUFFIX=".cache" # refine
 
 
 class YOLODataset(BaseDataset):
@@ -176,14 +173,11 @@ class YOLODataset(BaseDataset):
             (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
         """
         self.label_files = img2label_paths(self.im_files)
-        cache_path = Path(self.label_files[0]).parent.with_suffix(CACHE_SUFFIX)
+        cache_path = Path(self.label_files[0]).parent.with_suffix(".cache")
         try:
             cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
-            files = self.label_files + self.im_files
-            if not check_file_speeds(self.im_files, prefix=self.prefix):
-                files = TQDM(files, f"{self.prefix}Checking cache file integrity")
-            assert cache["hash"] == get_hash(files)  # identical hash
+            assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
         except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError):
             cache, exists = self.cache_labels(cache_path), False  # run cache ops
 
@@ -246,7 +240,6 @@ class YOLODataset(BaseDataset):
                 mask_ratio=hyp.mask_ratio,
                 mask_overlap=hyp.overlap_mask,
                 bgr=hyp.bgr if self.augment else 0.0,  # only affect training.
-                semseg_loss=hyp.semseg_loss if "train" in self.prefix else False
             )
         )
         return transforms
@@ -458,8 +451,6 @@ class GroundingDataset(YOLODataset):
         self.max_samples = max_samples
         super().__init__(*args, task=task, data={"channels": 3}, **kwargs)
 
-        assert CACHE_SUFFIX in {".cache", ".merged.cache", ".engine.cache"}, f"cache_suffix must be either '.cache' or '.merged.cache', but got {CACHE_SUFFIX}"
-
     def get_img_files(self, img_path: str) -> list:
         """The image files would be read in `get_labels` function, return empty list here.
 
@@ -568,7 +559,7 @@ class GroundingDataset(YOLODataset):
                                 .reshape(-1)
                                 .tolist()
                             )
-                        s = [cls] + s
+                        s = [cls, *s]
                         segments.append(s)
             lb = np.array(bboxes, dtype=np.float32) if len(bboxes) else np.zeros((0, 5), dtype=np.float32)
 
@@ -592,12 +583,6 @@ class GroundingDataset(YOLODataset):
                 }
             )
         x["hash"] = get_hash(self.json_file)
-
-
-        if CACHE_SUFFIX == ".merged.cache":
-            x["labels"] = self.run_merge_labels(x["labels"])
-
-
         save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
         return x
 
@@ -607,7 +592,7 @@ class GroundingDataset(YOLODataset):
         Returns:
             (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
         """
-        cache_path = Path(self.json_file).with_suffix(CACHE_SUFFIX)
+        cache_path = Path(self.json_file).with_suffix(".cache")
         try:
             cache, _ = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
@@ -616,10 +601,7 @@ class GroundingDataset(YOLODataset):
             cache, _ = self.cache_labels(cache_path), False  # run cache ops
         [cache.pop(k) for k in ("hash", "version")]  # remove items
         labels = cache["labels"]
-
-        # if CACHE_SUFFIX == ".cache":
-        #     self.verify_labels(labels)
-
+        self.verify_labels(labels)
         self.im_files = [str(label["im_file"]) for label in labels]
         if LOCAL_RANK in {-1, 0}:
             LOGGER.info(f"Load {self.json_file} from cache file {cache_path}")
@@ -788,7 +770,6 @@ class ClassificationDataset:
                 hsv_h=args.hsv_h,
                 hsv_s=args.hsv_s,
                 hsv_v=args.hsv_v,
-                augmentations=getattr(args, "augmentations", None),
             )
             if augment
             else classify_transforms(size=args.imgsz)
@@ -833,12 +814,10 @@ class ClassificationDataset:
         path = Path(self.root).with_suffix(".cache")  # *.cache file path
 
         try:
+            check_file_speeds([file for (file, _) in self.samples[:5]], prefix=self.prefix)  # check image read speeds
             cache = load_dataset_cache_file(path)  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
-            files = [x[0] for x in self.samples]
-            if not check_file_speeds([file for (file, _) in self.samples[:5]], prefix=self.prefix):
-                files = TQDM(files, f"{self.prefix}Checking cache file integrity")
-            assert cache["hash"] == get_hash(files)  # identical hash
+            assert cache["hash"] == get_hash([x[0] for x in self.samples])  # identical hash
             nf, nc, n, samples = cache.pop("results")  # found, missing, empty, corrupt, total
             if LOCAL_RANK in {-1, 0}:
                 d = f"{desc} {nf} images, {nc} corrupt"
