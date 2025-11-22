@@ -422,15 +422,21 @@ class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
     # TODO (CP/IRIT): The model should carry all required data (inheritance and composition relations).
-    def __init__(self, model, c_weight, d_weight, e_weight):
+    def __init__(self, model, power = 3.0, 
+                 decomposition_weight = 1.0, composition_weight = 1.0, composition_exclusion_weight = 1.0,
+                 generalization_weight = 1.0, specialization_weight = 1.0, specialization_exclusion_weight = 1.0):
         """Initialize the KnowledgeModelLoss class."""
         super().__init__()
         self.model = model
-        self.c_weight = c_weight
-        self.d_weight = d_weight
-        self.e_weight = e_weight
+        self.power = power
+        self.decomposition_weight = decomposition_weight
+        self.composition_weight = composition_weight
+        self.composition_exclusion_weight = composition_exclusion_weight
+        self.generalization_weight = generalization_weight
+        self.specialization_weight = specialization_weight
+        self.specialization_exclusion_weight = specialization_exclusion_weight
         
-    def loss_c(self, pred_scores, num_composites_classes, power=3.0):
+    def disjunction_loss(self, pred_scores, class_indexes, target_class_indexes, power=3.0):
         batch_size, anchor_point_size, class_number = pred_scores.shape
         #     predictions = torch.sigmoid(predictions.float()) # already done
         #
@@ -450,9 +456,11 @@ class KnowledgeBasedLoss(nn.Module):
         #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
         #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
         MCMB = pred_scores.index_select( 3, model.component_indexes)
+        
         #
         #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
         predicate = MCMA.clone()
+        
         #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
         #     # Pour chaque numéro de classe composite
         #     for ii in range(21):
@@ -464,7 +472,9 @@ class KnowledgeBasedLoss(nn.Module):
         #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
         #
         #     # for all clause: use pmeanError to aggregate
+        #     # compute weighted mean along image pixels (a value for each class) 
         # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
+        # TODO (CP/IRIT): forall o in O, p_c(o)
         loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
         #
         return loss_c
@@ -473,7 +483,7 @@ class KnowledgeBasedLoss(nn.Module):
         pass
     
     # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
-    def loss_e(self, pred_scores, num_composites_classes, power=3.0):
+    def exclusion_loss(self, pred_scores, class_indexes, target_class_indexes, power=3.0):
         # Dimensions : b(atch) / anchor point / classe
         batch_size, anchor_point_size, class_size = pred_scores.shape
 
@@ -558,6 +568,7 @@ class v8DetectionLoss:
 
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        self.km_loss = KnowledgeBasedLoss(model)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
