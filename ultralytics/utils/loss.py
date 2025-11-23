@@ -435,55 +435,32 @@ class KnowledgeBasedLoss(nn.Module):
         self.generalization_weight = generalization_weight
         self.specialization_weight = specialization_weight
         self.specialization_exclusion_weight = specialization_exclusion_weight
+        self.refinement = model.refinement
+        self.composition = model.composition
+        self.classes = set(range(model.nc))
         
-    def disjunction_loss(self, pred_scores, class_indexes, target_class_indexes, power=3.0):
+        
+    def disjunction_loss(self, pred_scores, origin_class_indexes, target_class_indexes, power=3.0):
         batch_size, anchor_point_size, class_number = pred_scores.shape
-        #     predictions = torch.sigmoid(predictions.float()) # already done
-        #
-        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-        #
-        #     # v : classe composante, sous classe
-        #     # extraction de la partie correspondant aux numéros ???
-        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-        #     # applatissement pour faciliter la vectorisation
-        #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
+        origin_number = len(origin_class_indexes)
+        predicate = torch.zeros(origin_number)
+        indexes = range(origin_number)
+        for idx_c,c in indexes,origin_class_indexes:
+            c_target_indexes = target_class_indexes[c]
+            # p_c(o)
+            origin_class_scores = pred_scores[:,:,c:c+1]
+            # p_d(o)
+            target_class_scores = pred_scores.index_select( 3, c_target_indexes)
+            # max(p_d(o))
+            target_class_scores_max = target_class_scores.max()
+            # p_c(o) - p_c(o)*max(p_d(o))
+            predicate_c = origin_class_scores - origin_class_scores * target_class_scores_max
+            predicate[idx_c] = torch.power(torch.pow(predicate_c,power).mean(dim=(0,1)),1/p)
         
-        MCMA = pred_scores.index_select( 3, model.component_indexes)
-        
-        #
-        #     # p_v : parent of v, i.e. classe composite, super classe
-        #     # extraction de la partie correspondant aux numéros ???
-        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-        #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-        MCMB = pred_scores.index_select( 3, model.component_indexes)
-        
-        #
-        #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
-        predicate = MCMA.clone()
-        
-        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-        #     # Pour chaque numéro de classe composite
-        #     for ii in range(21):
-        #         # Intervalle des numéros des classes composantes
-        #         indices = indices_high[ii]
-        #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
-        #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
-        #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
-        #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
-        #
-        #     # for all clause: use pmeanError to aggregate
-        #     # compute weighted mean along image pixels (a value for each class) 
-        # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
-        # TODO (CP/IRIT): forall o in O, p_c(o)
-        loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
-        #
-        return loss_c
-    
-    def loss_d(self):
-        pass
-    
+        return torch.mean(predicate)
+       
     # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
-    def exclusion_loss(self, pred_scores, class_indexes, target_class_indexes, power=3.0):
+    def exclusion_loss(self, pred_scores, origin_class_indexes, target_class_indexes, power=3.0):
         # Dimensions : b(atch) / anchor point / classe
         batch_size, anchor_point_size, class_size = pred_scores.shape
 

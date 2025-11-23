@@ -96,6 +96,12 @@ names:
   77: teddy bear
   78: hair drier
   79: toothbrush
+  
+  # liste of classes that compose the target class 
+composition:
+  0: [11,22]
+  11: []
+  22: []
 
 # Download script/URL (optional)
 download: https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8.zip
