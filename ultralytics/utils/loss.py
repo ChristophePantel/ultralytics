@@ -418,6 +418,13 @@ class KeypointLoss(nn.Module):
     #
     #         return 0.5*hiera_loss + 0.3*factor*(c_rule+d_rule+e_rule*2/3)
     
+class KnowledgeModel:
+    def __init__(self, model):
+        self.model = model
+        self.refinement = model.refinement
+        self.composition = model.composition
+        self.classes = set(range(model.nc))
+    
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
