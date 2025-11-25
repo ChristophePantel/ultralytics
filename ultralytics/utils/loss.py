@@ -16,7 +16,6 @@ from ultralytics.utils.torch_utils import autocast
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
 
-
 class VarifocalLoss(nn.Module):
     """Varifocal loss by Zhang et al.
 
@@ -424,6 +423,165 @@ class KnowledgeModel:
         self.refinement = model.refinement
         self.composition = model.composition
         self.classes = set(range(model.nc))
+        
+    def get_class_names():
+        class_names = {
+            'Aeroplane', 
+           'Animal_Wing', 
+           'Animals', 
+           'Arm', 
+           'Artifact_Wing', 
+           'Beak', 
+           'Bicycle', 
+           'Bird', 
+           'Boat', 
+           'Body', 
+           'Bodywork', 
+           'Bottle', 
+           'Bus', 
+           'Cap', 
+           'Car', 
+           'Cat', 
+           'Chain_Wheel', 
+           'Chair', 
+           'Coach', 
+           'Cow', 
+           'Dining_Table', 
+           'Dog', 
+           'Door', 
+           'Ear', 
+           'Eyebrow', 
+           'Engine', 
+           'Eye', 
+           'Foot', 
+           'Hair', 
+           'Hand', 
+           'Handlebar', 
+           'Head', 
+           'Headlight', 
+           'Hoof', 
+           'Horn', 
+           'Horse', 
+           'Leg', 
+           'License_Plate', 
+           'Locomotive', 
+           'Mirror', 
+           'Motorbike', 
+           'Mouth', 
+           'Muzzle', 
+           'Neck', 
+           'Nose', 
+           'Person', 
+           'Plant', 
+           'Pot', 
+           'Potted_Plant', 
+           'Saddle', 
+           'Screen', 
+           'Sheep', 
+           'Sofa', 
+           'Stern', 
+           'Tail', 
+           'Torso', 
+           'Train', 
+           'TV_Monitor', 
+           'Vehicle', 
+           'Wheel', 
+           'Window',
+        }
+        return class_names
+    
+    def get_refined_classes():
+        refined_classes = {
+            "Bird" : [ "Animals" ],
+            "Cat" : [ "Animals" ],
+            "Cow" : [ "Animals" ],
+            "Dog" : [ "Animals" ],
+            "Horse" : [ "Animals" ],
+            "Person" : [ "Animals" ],
+            "Sheep" : [ "Animals" ],
+            "Aeroplane" : [ "Vehicle" ], 
+            "Bicycle" : [ "Vehicle" ],
+            "Boat" : [ "Vehicle" ],
+            "Car" : [ "Vehicle" ],
+            "Motorbike" : [ "Vehicle" ],
+            "Train" : ["Vehicle"]
+            }
+        return refined_classes
+    
+    def get_contained_classes():
+        contained_classes = {
+            "Animals" : [ "Eye", "Head", "Leg", "Neck", "Torso" ],
+            "Bird" : ["Animal_Wing", "Beak", "Tail"],
+            "Cat" : ["Ear", "Tail"],
+            "Cow" : ["Ear", "Horn", "Muzzle", "Tail"],
+            "Dog" : ["Ear", "Muzzle", "Nose", "Tail"],
+            "Horse" : ["Ear", "Hoof", "Muzzle", "Tail"],
+            "Person" : ["Arm", "Ear", "Eyebrow", "Foot", "Hair", "Hand", "Mouth", "Nose"],
+            "Sheep" : ["Ear", "Horn", "Muzzle", "Tail"],
+            "Bottle" : ["Body", "Cap"],
+            "Potted_Plant" : ["Plant", "Pot"],
+            "TV_Monitor" : ["Screen"],
+            "Aeroplane" : ["Artifact_Wing", "Body", "Engine", "Stern", "Wheel"],
+            "Bicycle" : ["Chain_Wheel", "Handlebar", "Headlight", "Saddle", "Wheel"],
+            "Bus" : ["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"],
+            "Car" : ["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"],
+            "Motorbike" : ["Handlebar", "Headlight", "Saddle", "Wheel"],
+            "Train" : [ "Coach", "Headlight", "Locomotive" ]
+            }
+        return contained_classes
+    
+    def associate_number_to_class_and_class_to_number(classe_names):
+        dictionnary_number_to_class = {}
+        dictionnary_class_to_number = {}
+        indice = 0
+        for element in classe_names:
+            dictionnary_number_to_class[indice] = element
+            dictionnary_class_to_number[element] = indice
+            indice += 1
+        return dictionnary_number_to_class, dictionnary_class_to_number
+
+def associate_codes_to_hierarchies(codes, named_hierarchy):
+    coded_named_hierarchy = {}
+    for key in named_hierarchy:
+        values = named_hierarchy.get(key)
+        coded_values = []
+        for element in values:
+            element_code = codes.get(element)
+            coded_values.append(element_code)
+        coded_key = codes.get(key)
+        coded_named_hierarchy[coded_key] = coded_values
+
+    return coded_named_hierarchy
+    
+    def invert_relation(relation):
+        inverted_relation = {}
+        for key in relation:
+            inverted_relation[key] = []
+        print(inverted_relation)
+        for key in relation:
+            values = relation.get(key)
+            for value in values:
+                inverted_relation[value].append(key)
+    
+        return inverted_relation 
+    
+    def non_empty_keys(relation):
+        non_empty_keys_results = list(relation.keys())
+        for key in relation:
+            if relation[key] == []:
+                non_empty_keys_results.remove(key)
+        return non_empty_keys_results
+    
+    def class_siblings(searched_class, ancestors):
+        siblings = []
+        inverted_ancestors = invert_relation(ancestors)
+        parents_searched_class = ancestors.get(searched_class)
+        for parent in parents_searched_class:
+            children_search_class = inverted_ancestors.get(parent)
+            for child in children_search_class:
+                if child != searched_class:
+                    siblings.append(child)
+        return siblings
     
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
@@ -445,133 +603,106 @@ class KnowledgeBasedLoss(nn.Module):
         self.refinement = model.refinement
         self.composition = model.composition
         self.classes = set(range(model.nc))
-        
-        
-    def disjunction_loss(self, pred_scores, origin_class_indexes, target_class_indexes, power=3.0):
-        batch_size, anchor_point_size, class_number = pred_scores.shape
-        origin_number = len(origin_class_indexes)
-        predicate = torch.zeros(origin_number)
-        indexes = range(origin_number)
-        for idx_c,c in indexes,origin_class_indexes:
-            c_target_indexes = target_class_indexes[c]
-            # p_c(o)
-            origin_class_scores = pred_scores[:,:,c:c+1]
-            # p_d(o)
-            target_class_scores = pred_scores.index_select( 3, c_target_indexes)
-            # max(p_d(o))
-            target_class_scores_max = target_class_scores.max()
-            # p_c(o) - p_c(o)*max(p_d(o))
-            predicate_c = origin_class_scores - origin_class_scores * target_class_scores_max
-            predicate[idx_c] = torch.power(torch.pow(predicate_c,power).mean(dim=(0,1)),1/power)
-        
-        return torch.mean(predicate)
+        self.refinement_forward = self.refinement # TODO (CP/IRIT)
+        self.refinement_backward = invert_relation( self.refinement ) # TODO (CP/IRIT)
+        self.composition_forward = self.composition # TODO (CP/IRIT)
+        self.composition_backward = invert_relation( self.composition) # TODO (CP/IRIT)
     
-    def conjuction_loss(self, pred_scores, origin_class_indexes, target_class_indexes, power=3.0):
+    # One of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> \/_{t in T(s)} p_t(o)
+    # origin_indexes : class indexes for the domain
+    # targets_from_source : class indexes for the co-domain
+    def disjunction_loss(self, pred_scores, targets_from_source, power=3.0):
         batch_size, anchor_point_size, class_number = pred_scores.shape
-        origin_number = len(origin_class_indexes)
-        predicate = torch.zeros(origin_number)
-        indexes = range(origin_number)
-        for idx_c,c in indexes,origin_class_indexes:
-            c_target_indexes = target_class_indexes[c]
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            targets_from_s = targets_from_source[c]
             # p_c(o)
-            origin_class_scores = pred_scores[:,:,c:c+1]
-            # p_a(o)
-            target_class_scores = pred_scores.index_select( 3, c_target_indexes)
-            # p_c(o) - p_c(o)*p_a(o)
-            predicate_a = origin_class_scores - origin_class_scores * target_class_scores
-            # moyenne sur O
-            predicate[idx_c] = torch.power(torch.pow(predicate_a,power).mean(dim=(0,1)),1/power)
-            # moyenne sur A
-
-            # moyenne sur C\R
-            
-       
-    # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
-    def exclusion_loss(self, pred_scores, origin_class_indexes, target_class_indexes, power=3.0):
-        # Dimensions : b(atch) / anchor point / classe
-        batch_size, anchor_point_size, class_size = pred_scores.shape
-        origin_number = len(origin_class_indexes)
-        predicate = torch.zeros(origin_number)
-        indexes = range(origin_number)
-
-        for idx_c,c in indexes,origin_class_indexes:
-            c_target_indexes = target_class_indexes[c]
+            source_scores = pred_scores[:, :, s:s+1]
             # p_d(o)
-
-            # p_e(o)
-
-            # p_d(o) * p_e(o)
-            predicate_e = 0.0
-            # moyenne sur O
-            predicate[idx_c] = torch.power(torch.pow(predicate_e,power).mean(dim=(0,1)),1/power)
-            # moyenne sur D(c) privé de d
-
-            # moyenne sur D(c)
-            
-            # moyenne sur C \ L  
-
-
-        
-
-        # Application of a sigmoid to smooth between -1 and 1
-        # TODO (CP/IRIT): Check that it has already been done.
-        # preds = torch.sigmoid(preds.float())
-
-        # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
-        # index_composites = ...
-        # preds_composites = predictions.index_select( 3, index_composites)
-        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
-        # preds_composites_permutate = preds_composites.permute(0,2,3,1)
-        # Flattening to facilitate the vectorization 
-        # MCMA = preds_composites_permutate.flatten(0,2)
-
-        # extraction of the part corresponding to the numbers of the last classes (after 21) (the components)
-        # index_components = ...
-        # preds_components = predictions.index_select( 3, index_components)
-        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
-        # preds_components_permutate = preds_components.permute(0,2,3,1)
-        # Flattening to facilitate the vectorization 
-        # TODO (CP/IRIT): Where is MCMB ?
-        # MCMA = preds_components_permutate.flatten(0,2)      
-
-        # TODO : On ne travaille pas sur les pixels mais uniquement sur 
-        # filter high confidence pixels
-        # Count the number of classes with a strong prediction for each pixel of each image
-        # easy_A_pos = (MCMA>0.7).sum(-1)
-        # Count the number of classes with low prediction for each pixel of each image
-        # easy_A_neg = (MCMA<0.3).sum(-1)
-        # determines the difficult pixels (several strong prediction or intermediate classes)
-        # hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_composites_classes-1).float()
-        # new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
-
-        # easy_B_pos = (MCMB>0.7).sum(-1)
-        # easy_B_neg = (MCMB<0.3).sum(-1)
-        # hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
-        # new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
-
-        # mask_A = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
-        # mask_B = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
-        # predicates: not (x and y)
-        # predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
-        # predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
-
-        # 1. for all pixels: use pmeanError to aggregate
-        # all_A = torch.pow(torch.pow(predicate_A, power).mean(), 1.0/power)
-        # all_B = torch.pow(torch.pow(predicate_B, power).mean(), 1.0/power)
-        # 2. average the clauses
-        # factor_A = num_classes*num_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
-        # factor_B = num_composites_classes*num_composites_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
-        # loss_ex = all_A*factor_A + all_B*factor_B
-
-        # return loss_ex
+            target_scores = pred_scores.index_select( 3, targets_from_s)
+            # max(p_d(o))
+            target_scores_max = target_scores.max()
+            # p_s(o) - p_s(o) * max(p_t(o))
+            predicate_s_o = source_scores - source * target_scores_max
+            # p-mean on O
+            predicate_s[idx_s] = torch.power(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
+        # mean for s in sources
+        return torch.mean(predicate_s)
+    
+    # All of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
+    # sources : indexes for the sources
+    # targets_from_source : list of targets for a given source
+    def conjunction_loss(self, pred_scores, targets_from_source, power=3.0):
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            # p_s(o)
+            source_scores = pred_scores[:,:,s:s+1]
+            targets_from_s = targets_from_source[s]
+            s_targets_number = len(targets_from_s)
+            predicate_s_t = torch.zeros(s_targets_number)
+            for idx_t, t in enumerate(targets_from_s):
+                # p_t(o)
+                target_scores_t = pred_scores.index_select( 3, targets_from_s)
+                # p_s(o) - p_s(o) * p_t(o)
+                predicate_s_t_o = source_scores - source_scores * target_scores_t
+                # moyenne sur O
+                predicate_s_t[idx_t] = torch.power(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
+            # moyenne sur A
+            predicate_s[idx_s] = torch.mean(predicate_s_t)
+        # moyenne sur C \ R
+        return torch.mean(predicate_s)    
+    
+    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # sources : class indexes for the domain
+    # targets_from_source : class indexes for the co-domain
+    def exclusion_loss(self, pred_scores, targets_from_source, power=3.0):
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            # p_s(o)
+            source_scores = pred_scores[:,:,s:s+1]
+            targets_from_s = targets_from_source[s]
+            s_targets_number = len(targets_from_s)
+            predicate_s_t = torch.zeros(s_targets_number)
+            for idx_t, t in enumerate(targets_from_s):
+                targets_expect_t = targets_from_s
+                targets_expect_t.remove(t)
+                # p_t(o)
+                target_scores_t = pred_scores[:,:, t:t+1]
+                # p_e(o)
+                target_scores_e = pred_scores.index_select( 3, targets_expect_t)
+                e_target_number = len(targets_expect_t)
+                for idx_e, e in enumerate(targets_except_t):
+                    # p_t(o) * p_e(o)
+                    predicate_s_t_e_o = target_scores_t * target_scores_e
+                    # moyenne sur O
+                    predicate_s_t_e[idx_e] = torch.power(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
+                # moyenne sur e in T(s) \ { t }
+                predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
+            # moyenne sur t in T(s)
+            predicate_s[idx_s] = torch.mean(predicate_s_t)
+        # moyenne sur s in S
+        return torch.mean(predicate_s)
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
-        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
-        kpt_loss_factor = kpt_mask.shape[1] / (torch.sum(kpt_mask != 0, dim=1) + 1e-9)
-        # e = d / (2 * (area * self.sigmas) ** 2 + 1e-9)  # from formula
-        e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
-        return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
+        # Call disjunction_loss for refinement and composition
+        S_loss = disjunction_loss(pred_scores, refinement_forward)
+        C_loss = disjunction_loss(pred_scores, composition_forward)
+        # Call exclusion_loss for refinement and composition
+        SE_loss = exclusion_loss(pred_scores, refinement_forward)
+        CE_loss = exclusion_loss(pred_scores, composition_forward)
+        # Call conjunction_loss for refinement
+        G_loss = conjunction_loss(pred_scores, refinement_backward)
+        D_loss = conjunction_loss(pred_scores, composition_backward)
+        return self.specialization_weight * S_loss + self.composition_weight * C_loss + self.specialization_exclusion_weight * SE_loss + self.composition_exclusion_weight * CE_loss + self.generalization_weight * G_loss + self.decomposition_weight * D_loss
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
