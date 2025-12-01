@@ -582,7 +582,18 @@ def associate_codes_to_hierarchies(codes, named_hierarchy):
                 if child != searched_class:
                     siblings.append(child)
         return siblings
-    
+
+def invert_relation(relation):
+    inverted_relation = {}
+    for key in relation:
+        values = relation.get(key)
+        for value in values:
+            if value in inverted_relation:
+                inverted_relation[value].append(key)
+            else:
+                inverted_relation[value] = [key]
+    return inverted_relation
+
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
@@ -617,17 +628,18 @@ class KnowledgeBasedLoss(nn.Module):
         source_number = len(sources)
         predicate_s = torch.zeros(source_number)
         for idx_s, s in enumerate(sources):
-            targets_from_s = targets_from_source[c]
+            targets_from_s = targets_from_source[s]
             # p_c(o)
             source_scores = pred_scores[:, :, s:s+1]
             # p_d(o)
-            target_scores = pred_scores.index_select( 3, targets_from_s)
+            indexes = torch.tensor(targets_from_s,device=pred_scores.device)
+            target_scores = pred_scores.index_select( 2, indexes)
             # max(p_d(o))
             target_scores_max = target_scores.max()
             # p_s(o) - p_s(o) * max(p_t(o))
-            predicate_s_o = source_scores - source * target_scores_max
+            predicate_s_o = source_scores - source_scores * target_scores_max
             # p-mean on O
-            predicate_s[idx_s] = torch.power(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
+            predicate_s[idx_s] = torch.pow(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
         # mean for s in sources
         return torch.mean(predicate_s)
     
@@ -643,15 +655,16 @@ class KnowledgeBasedLoss(nn.Module):
             # p_s(o)
             source_scores = pred_scores[:,:,s:s+1]
             targets_from_s = targets_from_source[s]
+            indexes = torch.tensor(targets_from_s,device=pred_scores.device)
             s_targets_number = len(targets_from_s)
             predicate_s_t = torch.zeros(s_targets_number)
             for idx_t, t in enumerate(targets_from_s):
                 # p_t(o)
-                target_scores_t = pred_scores.index_select( 3, targets_from_s)
+                target_scores_t = pred_scores.index_select( 2, indexes)
                 # p_s(o) - p_s(o) * p_t(o)
                 predicate_s_t_o = source_scores - source_scores * target_scores_t
                 # moyenne sur O
-                predicate_s_t[idx_t] = torch.power(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
+                predicate_s_t[idx_t] = torch.pow(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
             # moyenne sur A
             predicate_s[idx_s] = torch.mean(predicate_s_t)
         # moyenne sur C \ R
@@ -671,21 +684,24 @@ class KnowledgeBasedLoss(nn.Module):
             targets_from_s = targets_from_source[s]
             s_targets_number = len(targets_from_s)
             predicate_s_t = torch.zeros(s_targets_number)
-            for idx_t, t in enumerate(targets_from_s):
-                targets_expect_t = targets_from_s
-                targets_expect_t.remove(t)
-                # p_t(o)
-                target_scores_t = pred_scores[:,:, t:t+1]
-                # p_e(o)
-                target_scores_e = pred_scores.index_select( 3, targets_expect_t)
-                e_target_number = len(targets_expect_t)
-                for idx_e, e in enumerate(targets_except_t):
-                    # p_t(o) * p_e(o)
-                    predicate_s_t_e_o = target_scores_t * target_scores_e
-                    # moyenne sur O
-                    predicate_s_t_e[idx_e] = torch.power(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
-                # moyenne sur e in T(s) \ { t }
-                predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
+            if s_targets_number > 1:
+                for idx_t, t in enumerate(targets_from_s):
+                    targets_except_t = targets_from_s.copy()
+                    targets_except_t.remove(t)
+                    # p_t(o)
+                    target_scores_t = pred_scores[:,:, t:t+1]
+                    # p_e(o)
+                    indexes = torch.tensor(targets_except_t,device=pred_scores.device)
+                    target_scores_e = pred_scores.index_select( 2, indexes)
+                    e_target_number = len(targets_except_t)
+                    predicate_s_t_e = torch.zeros(e_target_number)
+                    for idx_e, e in enumerate(targets_except_t):
+                        # p_t(o) * p_e(o)
+                        predicate_s_t_e_o = target_scores_t * target_scores_e
+                        # moyenne sur O
+                        predicate_s_t_e[idx_e] = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
+                    # moyenne sur e in T(s) \ { t }
+                    predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
             # moyenne sur t in T(s)
             predicate_s[idx_s] = torch.mean(predicate_s_t)
         # moyenne sur s in S
@@ -694,14 +710,15 @@ class KnowledgeBasedLoss(nn.Module):
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
         # Call disjunction_loss for refinement and composition
-        S_loss = disjunction_loss(pred_scores, refinement_forward)
-        C_loss = disjunction_loss(pred_scores, composition_forward)
+        norm_pred_scores = pred_scores.sigmoid()
+        S_loss = self.disjunction_loss(norm_pred_scores, self.refinement_forward)
+        C_loss = self.disjunction_loss(norm_pred_scores, self.composition_forward)
         # Call exclusion_loss for refinement and composition
-        SE_loss = exclusion_loss(pred_scores, refinement_forward)
-        CE_loss = exclusion_loss(pred_scores, composition_forward)
+        SE_loss = self.exclusion_loss(norm_pred_scores, self.refinement_forward)
+        CE_loss = self.exclusion_loss(norm_pred_scores, self.composition_forward)
         # Call conjunction_loss for refinement
-        G_loss = conjunction_loss(pred_scores, refinement_backward)
-        D_loss = conjunction_loss(pred_scores, composition_backward)
+        G_loss = self.conjunction_loss(norm_pred_scores, self.refinement_backward)
+        D_loss = self.conjunction_loss(norm_pred_scores, self.composition_backward)
         return self.specialization_weight * S_loss + self.composition_weight * C_loss + self.specialization_exclusion_weight * SE_loss + self.composition_exclusion_weight * CE_loss + self.generalization_weight * G_loss + self.decomposition_weight * D_loss
 
 class v8DetectionLoss:
@@ -844,6 +861,10 @@ class v8DetectionLoss:
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
         loss[1] = bce_values.sum() / target_scores_sum  # BCE
+        
+        # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
+        km_loss = self.km_loss(pred_scores,target_scores)
+        loss[1] += km_loss
 
         # Bbox loss
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
