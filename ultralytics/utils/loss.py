@@ -693,13 +693,10 @@ class KnowledgeBasedLoss(nn.Module):
                     # p_e(o)
                     indexes = torch.tensor(targets_except_t,device=pred_scores.device)
                     target_scores_e = pred_scores.index_select( 2, indexes)
-                    e_target_number = len(targets_except_t)
-                    predicate_s_t_e = torch.zeros(e_target_number)
-                    for idx_e, e in enumerate(targets_except_t):
-                        # p_t(o) * p_e(o)
-                        predicate_s_t_e_o = target_scores_t * target_scores_e
-                        # moyenne sur O
-                        predicate_s_t_e[idx_e] = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
+                    # p_t(o) * p_e(o)
+                    predicate_s_t_e_o = target_scores_t * target_scores_e
+                    # moyenne sur O
+                    predicate_s_t_e = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
                     # moyenne sur e in T(s) \ { t }
                     predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
             # moyenne sur t in T(s)
