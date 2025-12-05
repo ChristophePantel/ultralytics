@@ -864,6 +864,7 @@ class v8DetectionLoss:
         
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
         km_loss = self.km_loss(pred_scores,target_scores)
+        print('Knowledge Model Loss = ',km_loss)
         loss[1] += km_loss
 
         # Bbox loss
