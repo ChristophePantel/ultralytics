@@ -194,6 +194,8 @@ class DetectionValidator(BaseValidator):
             cls = pbatch["cls"].cpu().numpy()
             scores = pbatch["scores"].cpu().numpy()
             no_pred = predn["cls"].shape[0] == 0
+            if no_pred:
+                print("No prediction has been produced.")
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),
