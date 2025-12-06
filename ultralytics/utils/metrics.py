@@ -1071,7 +1071,11 @@ class DetMetrics(SimpleClass, DataExportMixin):
         Returns:
             (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
         """
-        stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
+        stats = {}
+        for k, v in self.stats.items():
+            print(k)
+            stats[k] = np.concatenate(v, 0)
+        # stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
         if not stats:
             return stats
         # TODO (CP/IRIT): Add scores management
