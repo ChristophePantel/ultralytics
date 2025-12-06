@@ -1073,9 +1073,10 @@ class DetMetrics(SimpleClass, DataExportMixin):
         """
         stats = {}
         for k, v in self.stats.items():
-            print(k,len(v))
+            expected = len(v[0].shape)
             for e in v:
-                print(e.shape)
+                if len(e.shape) != expected:
+                    print('ko',k,len(v))
             stats[k] = np.concatenate(v, 0)
         # stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
         if not stats:
