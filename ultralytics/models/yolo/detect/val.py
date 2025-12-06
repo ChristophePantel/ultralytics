@@ -193,6 +193,7 @@ class DetectionValidator(BaseValidator):
 
             cls = pbatch["cls"].cpu().numpy()
             scores = pbatch["scores"].cpu().numpy()
+            class_number = scores.shape[1]
             no_pred = predn["cls"].shape[0] == 0
             if no_pred:
                 print("No prediction has been produced.")
@@ -204,7 +205,7 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": np.zeros(0) if no_pred else predn["scores"].cpu().numpy()
+                    "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy()
                 }
             )
             # Evaluate
