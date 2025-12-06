@@ -204,7 +204,7 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": np.zeros(0) if no_pred else predn["scores"].cpu().numpy()
+                    "pred_scores": np.zeros((0,0)) if no_pred else predn["scores"].cpu().numpy()
                 }
             )
             # Evaluate
