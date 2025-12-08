@@ -1006,6 +1006,8 @@ class Metric(SimpleClass):
         ]
 
 
+# TODO (CP/IRIT): Switch to predicted score analysis instead basic class.
+# Rely on the list of concrete class variants generated from the knowledge model.
 class DetMetrics(SimpleClass, DataExportMixin):
     """Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP).
 

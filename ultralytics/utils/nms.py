@@ -35,6 +35,7 @@ def non_max_suppression(
     Args:
         prediction (torch.Tensor): Predictions with shape (batch_size, num_classes + 4 + num_masks, num_boxes)
             containing boxes, classes, and optional masks.
+            if tuple/list : first is aggregated prediction for all anchor points, second is TPN prediction for 3 level of details
         conf_thres (float): Confidence threshold for filtering detections. Valid values are between 0.0 and 1.0.
         iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0.
         classes (list[int], optional): List of class indices to consider. If None, all classes are considered.
@@ -59,11 +60,12 @@ def non_max_suppression(
     assert 0 <= conf_thres <= 1, f"Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0"
     assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
     if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
-        prediction = prediction[0]  # select only inference output
+        prediction = prediction[0]  # select only inference output (aggregated predictions for all anchor points)
     if classes is not None:
         classes = torch.tensor(classes, device=prediction.device)
+    anchor_points_number = prediction.shape[-1]
 
-    if prediction.shape[-1] == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6)
+    if anchor_points_number == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6) / only 6 anchor points
         output = [pred[pred[:, 4] > conf_thres][:max_det] for pred in prediction]
         if classes is not None:
             output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
@@ -73,27 +75,31 @@ def non_max_suppression(
     # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
     nc = nc or (prediction.shape[1] - 4)  # number of classes
     extra = prediction.shape[1] - nc - 4  # number of extra info
-    mi = 4 + nc  # mask start index
-    xc = prediction[:, 4:mi].amax(1) > conf_thres  # candidates
-    xinds = torch.arange(prediction.shape[-1], device=prediction.device).expand(bs, -1)[..., None]  # to track idxs
+    mi = 4 + nc  # mask start index / end of scores
+    # TODO (CP/IRIT): Confidence is more complex when using knowledge models. A confidence should be computed for class variants (BCE with scores).
+    # requires to have access to the class variants and not only the predictions
+    pred_scores = prediction[:, 4:mi]
+    max_pred_scores = pred_scores.amax(1)
+    xc =  max_pred_scores > conf_thres  # candidates (maximum of scores over confidence threshold)
+    xinds = torch.arange(anchor_points_number, device=prediction.device).expand(bs, -1)[..., None]  # to track idxs, associate its index to each anchor point in each image from the batch
 
     # Settings
     # min_wh = 2  # (pixels) minimum box width and height
     time_limit = 2.0 + max_time_img * bs  # seconds to quit after
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
 
-    prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
+    prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84) a.k.a (1,features,anchor points) -> (1,anchor points, features)
     if not rotated:
         prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
 
     t = time.time()
-    output = [torch.zeros((0, 6 + extra), device=prediction.device)] * bs
+    output = [torch.zeros((0, 6 + extra), device=prediction.device)] * bs # 6 = bounding box & class & confidence
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
     for xi, (x, xk) in enumerate(zip(prediction, xinds)):  # image index, (preds, preds indices)
         # Apply constraints
         # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        filt = xc[xi]  # confidence
-        x = x[filt]
+        filt = xc[xi]  # confidence for each anchor point in an image index
+        x = x[filt] # 
         if return_idxs:
             xk = xk[filt]
 
@@ -109,12 +115,12 @@ def non_max_suppression(
         if not x.shape[0]:
             continue
 
-        # Detections matrix nx6 (xyxy, conf, cls)
-        box, cls, mask = x.split((4, nc, extra), 1)
+        # Detections matrix nx6 (xyxy, conf, cls) 
+        box, cls, mask = x.split((4, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
-            i, j = torch.where(cls > conf_thres)
-            x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), cls[i], mask[i]), 1)
+            i, j = torch.where(cls > conf_thres) # indices in cls where the values are over conf_thres, i: anchor point index, j: class index  
+            x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), cls[i], mask[i]), 1) # box[i] box of the i-th prediction, x[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 xk = xk[i]
         else:  # best class only
@@ -141,13 +147,13 @@ def non_max_suppression(
             if return_idxs:
                 xk = xk[filt]
 
-        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
         scores = x[:, 4]  # scores
         if rotated:
             boxes = torch.cat((x[:, :2] + c, x[:, 2:4], x[:, -1:]), dim=-1)  # xywhr
             i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
         else:
-            boxes = x[:, :4] + c  # boxes (offset by class)
+            boxes = x[:, :4] + c  # boxes (offset by class) 
             # Speed strategy: torchvision for val or already loaded (faster), TorchNMS for predict (lower latency)
             if "torchvision" in sys.modules:
                 import torchvision  # scope as slow import
@@ -160,7 +166,7 @@ def non_max_suppression(
         output[xi] = x[i]
         if return_idxs:
             keepi[xi] = xk[i].view(-1)
-        if (time.time() - t) > time_limit:
+        if not __debug__ and (time.time() - t) > time_limit:
             LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded")
             break  # time limit exceeded
 

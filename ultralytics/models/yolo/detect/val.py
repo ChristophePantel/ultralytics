@@ -98,6 +98,10 @@ class DetectionValidator(BaseValidator):
         self.args.save_json |= self.args.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
         self.names = model.names
         self.nc = len(model.names)
+        # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
+        # self.refinement = model.refinement
+        # self.composition = model.composition
+        self.class_variants = None
         self.end2end = getattr(model, "end2end", False)
         self.seen = 0
         self.jdict = []
@@ -123,6 +127,7 @@ class DetectionValidator(BaseValidator):
             preds,
             self.args.conf,
             self.args.iou,
+            # TODO (CP/IRIT): transmit the class variants from the model
             # TODO (CP/IRIT): Why is nc set to 0 for detection ?
             nc=0 if self.args.task == "detect" else self.nc,
             # TODO (CP/IRIT): Why is multi_label always set to True ?
@@ -309,6 +314,12 @@ class DetectionValidator(BaseValidator):
         return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
 
     def scores_bce(self, batch_scores, prediction_scores):
+        """Compute binary cross entropy between expected scores and predicted scores.
+        
+        Args:
+        
+        Returns:
+        """
         batch_range = batch_scores.shape[0]
         prediction_range = prediction_scores.shape[0]
         batch_scores_sum = torch.sum(batch_scores,1)
