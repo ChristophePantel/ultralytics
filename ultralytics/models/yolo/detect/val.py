@@ -101,6 +101,7 @@ class DetectionValidator(BaseValidator):
         # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
         # self.refinement = model.refinement
         # self.composition = model.composition
+        self.no_detection = []
         self.class_variants = None
         self.end2end = getattr(model, "end2end", False)
         self.seen = 0
@@ -200,8 +201,8 @@ class DetectionValidator(BaseValidator):
             scores = pbatch["scores"].cpu().numpy()
             class_number = scores.shape[1]
             no_pred = predn["cls"].shape[0] == 0
-            if no_pred:
-                print("No prediction has been produced.")
+            # if no_pred:
+            #    print("No prediction has been produced.")
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),

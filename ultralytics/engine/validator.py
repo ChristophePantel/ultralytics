@@ -115,8 +115,10 @@ class BaseValidator:
         self.confusion_matrix = None
         self.nc = None
         # TODO (CP/IRIT): Adding knowledge model relations.
-        # self.refinement = None
-        # self.composition = None
+        self.refinement = None
+        self.composition = None
+        # TODO (CP/IRIT): Adding no detection metrics
+        self.no_detection = None
         self.iouv = None
         self.jdict = None
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}

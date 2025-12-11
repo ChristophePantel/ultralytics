@@ -2056,6 +2056,7 @@ class Format:
             (dict[str, Any]): A dictionary with formatted data, including:
                 - 'img': Formatted image tensor.
                 - 'cls': Class label's tensor.
+                - 'scores': Class prediction score's tensor
                 - 'bboxes': Bounding boxes tensor in the specified format.
                 - 'masks': Instance masks tensor (if return_mask is True).
                 - 'keypoints': Keypoints tensor (if return_keypoint is True).
@@ -2072,6 +2073,7 @@ class Format:
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels.pop("cls")
         scores = labels.pop("scores")
+        num_class = scores.shape[-1]
         instances = labels.pop("instances")
         instances.convert_bbox(format=self.bbox_format)
         instances.denormalize(w, h)
