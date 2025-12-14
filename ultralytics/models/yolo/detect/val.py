@@ -99,8 +99,14 @@ class DetectionValidator(BaseValidator):
         self.names = model.names
         self.nc = len(model.names)
         # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
-        # self.refinement = model.refinement
-        # self.composition = model.composition
+        if hasattr(model, 'refinement'):
+            self.refinement = model.refinement
+        else:
+            self.refinement = model.model.refinement
+        if hasattr(model, 'composition'):
+            self.composition = model.composition
+        else:
+            self.composition = model.model.composition
         self.no_detection = []
         self.class_variants = None
         self.end2end = getattr(model, "end2end", False)
@@ -312,6 +318,7 @@ class DetectionValidator(BaseValidator):
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
         bce = self.scores_bce(batch["scores"], preds["scores"])
+        # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
         return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
 
     def scores_bce(self, batch_scores, prediction_scores):
