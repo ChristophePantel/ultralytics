@@ -19,6 +19,7 @@ from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import plot_images
 
+from ultralytics.utils import km
 
 class DetectionValidator(BaseValidator):
     """A class extending the BaseValidator class for validation based on a detection model.
@@ -108,7 +109,13 @@ class DetectionValidator(BaseValidator):
         else:
             self.composition = model.model.composition
         self.no_detection = []
-        self.class_variants = None
+        class_codes = frozenset(range(self.nc))
+        full_composition = km.resolve(class_codes,self.composition,self.refinement)
+        inverted_full_composition = km.invert_relation(full_composition)
+        class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
+        generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
+        self.class_variants = km.encode_variants(self.nc, generalized_class_variants)
+        self.variant_to_class = variant_to_class
         self.end2end = getattr(model, "end2end", False)
         self.seen = 0
         self.jdict = []
@@ -143,6 +150,8 @@ class DetectionValidator(BaseValidator):
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
+            class_variants=self.class_variants,
+            variant_to_class=self.variant_to_class,
         )
         return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "extra": x[:, 6+self.nc:]} for x in outputs]
 

@@ -248,13 +248,15 @@ def resolve(elements,composition,refinement):
             result[element] = result[element].union(expanded_composition[concept])
     return result
 
-def generalize(relation,refinement):
+def generalize(elements,relation,refinement):
+    expanded_refinement = expand(elements,refinement)
+    reflexive_transitive_refinement = reflexive_transitive_closure(expanded_refinement)
     result = {}
     for element in relation:
         result[element] = frozenset()
         for target in relation[element]:
-            if target in refinement:
-                result[element] = result[element].union(refinement[target]) 
+            if target in reflexive_transitive_refinement:
+                result[element] = result[element].union(reflexive_transitive_refinement[target]) 
     return result
             
 def class_siblings(searched_class, ancestors):

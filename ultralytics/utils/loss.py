@@ -13,6 +13,8 @@ from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
 
+from ultralytics.utils import km
+
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
 
@@ -191,184 +193,6 @@ class KeypointLoss(nn.Module):
 
 # TODO (CP/IRIT): LogicSeg derived loss to enforce consistency between the knowledge model and the prediction.
 
-    
-class KnowledgeModel:
-    def __init__(self, model):
-        self.model = model
-        self.refinement = model.refinement
-        self.composition = model.composition
-        self.classes = set(range(model.nc))
-        
-    def get_class_names():
-        class_names = {
-            'Aeroplane', 
-           'Animal_Wing', 
-           'Animals', 
-           'Arm', 
-           'Artifact_Wing', 
-           'Beak', 
-           'Bicycle', 
-           'Bird', 
-           'Boat', 
-           'Body', 
-           'Bodywork', 
-           'Bottle', 
-           'Bus', 
-           'Cap', 
-           'Car', 
-           'Cat', 
-           'Chain_Wheel', 
-           'Chair', 
-           'Coach', 
-           'Cow', 
-           'Dining_Table', 
-           'Dog', 
-           'Door', 
-           'Ear', 
-           'Eyebrow', 
-           'Engine', 
-           'Eye', 
-           'Foot', 
-           'Hair', 
-           'Hand', 
-           'Handlebar', 
-           'Head', 
-           'Headlight', 
-           'Hoof', 
-           'Horn', 
-           'Horse', 
-           'Leg', 
-           'License_Plate', 
-           'Locomotive', 
-           'Mirror', 
-           'Motorbike', 
-           'Mouth', 
-           'Muzzle', 
-           'Neck', 
-           'Nose', 
-           'Person', 
-           'Plant', 
-           'Pot', 
-           'Potted_Plant', 
-           'Saddle', 
-           'Screen', 
-           'Sheep', 
-           'Sofa', 
-           'Stern', 
-           'Tail', 
-           'Torso', 
-           'Train', 
-           'TV_Monitor', 
-           'Vehicle', 
-           'Wheel', 
-           'Window',
-        }
-        return class_names
-    
-    def get_refined_classes():
-        refined_classes = {
-            "Bird" : [ "Animals" ],
-            "Cat" : [ "Animals" ],
-            "Cow" : [ "Animals" ],
-            "Dog" : [ "Animals" ],
-            "Horse" : [ "Animals" ],
-            "Person" : [ "Animals" ],
-            "Sheep" : [ "Animals" ],
-            "Aeroplane" : [ "Vehicle" ], 
-            "Bicycle" : [ "Vehicle" ],
-            "Boat" : [ "Vehicle" ],
-            "Car" : [ "Vehicle" ],
-            "Motorbike" : [ "Vehicle" ],
-            "Train" : ["Vehicle"]
-            }
-        return refined_classes
-    
-    def get_contained_classes():
-        contained_classes = {
-            "Animals" : [ "Eye", "Head", "Leg", "Neck", "Torso" ],
-            "Bird" : ["Animal_Wing", "Beak", "Tail"],
-            "Cat" : ["Ear", "Tail"],
-            "Cow" : ["Ear", "Horn", "Muzzle", "Tail"],
-            "Dog" : ["Ear", "Muzzle", "Nose", "Tail"],
-            "Horse" : ["Ear", "Hoof", "Muzzle", "Tail"],
-            "Person" : ["Arm", "Ear", "Eyebrow", "Foot", "Hair", "Hand", "Mouth", "Nose"],
-            "Sheep" : ["Ear", "Horn", "Muzzle", "Tail"],
-            "Bottle" : ["Body", "Cap"],
-            "Potted_Plant" : ["Plant", "Pot"],
-            "TV_Monitor" : ["Screen"],
-            "Aeroplane" : ["Artifact_Wing", "Body", "Engine", "Stern", "Wheel"],
-            "Bicycle" : ["Chain_Wheel", "Handlebar", "Headlight", "Saddle", "Wheel"],
-            "Bus" : ["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"],
-            "Car" : ["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"],
-            "Motorbike" : ["Handlebar", "Headlight", "Saddle", "Wheel"],
-            "Train" : [ "Coach", "Headlight", "Locomotive" ]
-            }
-        return contained_classes
-    
-    def associate_number_to_class_and_class_to_number(classe_names):
-        dictionnary_number_to_class = {}
-        dictionnary_class_to_number = {}
-        indice = 0
-        for element in classe_names:
-            dictionnary_number_to_class[indice] = element
-            dictionnary_class_to_number[element] = indice
-            indice += 1
-        return dictionnary_number_to_class, dictionnary_class_to_number
-
-def associate_codes_to_hierarchies(codes, named_hierarchy):
-    coded_named_hierarchy = {}
-    for key in named_hierarchy:
-        values = named_hierarchy.get(key)
-        coded_values = []
-        for element in values:
-            element_code = codes.get(element)
-            coded_values.append(element_code)
-        coded_key = codes.get(key)
-        coded_named_hierarchy[coded_key] = coded_values
-
-    return coded_named_hierarchy
-    
-    def invert_relation(relation):
-        inverted_relation = {}
-        for key in relation:
-            inverted_relation[key] = []
-        print(inverted_relation)
-        for key in relation:
-            values = relation.get(key)
-            for value in values:
-                inverted_relation[value].append(key)
-    
-        return inverted_relation 
-    
-    def non_empty_keys(relation):
-        non_empty_keys_results = list(relation.keys())
-        for key in relation:
-            if relation[key] == []:
-                non_empty_keys_results.remove(key)
-        return non_empty_keys_results
-    
-    def class_siblings(searched_class, ancestors):
-        siblings = []
-        inverted_ancestors = invert_relation(ancestors)
-        parents_searched_class = ancestors.get(searched_class)
-        for parent in parents_searched_class:
-            children_search_class = inverted_ancestors.get(parent)
-            for child in children_search_class:
-                if child != searched_class:
-                    siblings.append(child)
-        return siblings
-
-def invert_relation(relation):
-    inverted_relation = {}
-    for key in relation:
-        values = relation.get(key)
-        for value in values:
-            if value in inverted_relation:
-                inverted_relation[value].append(key)
-            else:
-                inverted_relation[value] = [key]
-    return inverted_relation
-
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
@@ -390,9 +214,9 @@ class KnowledgeBasedLoss(nn.Module):
         self.composition = model.composition
         self.classes = set(range(model.nc))
         self.refinement_forward = self.refinement # TODO (CP/IRIT)
-        self.refinement_backward = invert_relation( self.refinement ) # TODO (CP/IRIT)
+        self.refinement_backward = km.invert_relation( self.refinement ) # TODO (CP/IRIT)
         self.composition_forward = self.composition # TODO (CP/IRIT)
-        self.composition_backward = invert_relation( self.composition) # TODO (CP/IRIT)
+        self.composition_backward = km.invert_relation( self.composition) # TODO (CP/IRIT)
     
     # One of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> \/_{t in T(s)} p_t(o)
     # origin_indexes : class indexes for the domain
@@ -403,7 +227,7 @@ class KnowledgeBasedLoss(nn.Module):
         source_number = len(sources)
         predicate_s = torch.zeros(source_number)
         for idx_s, s in enumerate(sources):
-            targets_from_s = targets_from_source[s]
+            targets_from_s = list(targets_from_source[s])
             # p_c(o)
             source_scores = pred_scores[:, :, s:s+1]
             # p_d(o)
@@ -429,7 +253,7 @@ class KnowledgeBasedLoss(nn.Module):
         for idx_s, s in enumerate(sources):
             # p_s(o)
             source_scores = pred_scores[:,:,s:s+1]
-            targets_from_s = targets_from_source[s]
+            targets_from_s = list(targets_from_source[s])
             indexes = torch.tensor(targets_from_s,device=pred_scores.device)
             s_targets_number = len(targets_from_s)
             # p_t(o)
@@ -454,7 +278,7 @@ class KnowledgeBasedLoss(nn.Module):
         for idx_s, s in enumerate(sources):
             # p_s(o)
             source_scores = pred_scores[:,:,s:s+1]
-            targets_from_s = targets_from_source[s]
+            targets_from_s = list(targets_from_source[s])
             s_targets_number = len(targets_from_s)
             predicate_s_t = torch.zeros(s_targets_number)
             if s_targets_number > 1:

@@ -4,11 +4,30 @@ import sys
 import time
 
 import torch
+import torch.nn as nn
 
 from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import batch_probiou, box_iou
 from ultralytics.utils.ops import xywh2xyxy
 
+def scores_bce(batch_scores, prediction_scores):
+    """Compute binary cross entropy between expected scores and predicted scores.
+    
+    Args:
+    
+    Returns:
+    """
+    bce_calculator = nn.BCELoss(reduction="none")
+    batch_range = batch_scores.shape[0]
+    prediction_range = prediction_scores.shape[0]
+    batch_scores_sum = torch.sum(batch_scores,1)
+    aligned_batch_scores_sum = torch.unsqueeze(batch_scores_sum, 0).expand(prediction_range,-1)
+    aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
+    aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
+    bce_per_class = bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
+    bce = torch.sum(bce_per_class,2) / batch_scores_sum
+    detected = torch.where(bce < 1)
+    return bce
 
 def non_max_suppression(
     prediction,
@@ -26,6 +45,8 @@ def non_max_suppression(
     rotated: bool = False,
     end2end: bool = False,
     return_idxs: bool = False,
+    class_variants = None,
+    variant_to_class = None,
 ):
     """Perform non-maximum suppression (NMS) on prediction results.
 
@@ -61,6 +82,8 @@ def non_max_suppression(
     assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
     if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
         prediction = prediction[0]  # select only inference output (aggregated predictions for all anchor points)
+    if class_variants is not None:
+        class_variants = class_variants.to(prediction.device)
     if classes is not None:
         classes = torch.tensor(classes, device=prediction.device)
     anchor_points_number = prediction.shape[-1]
@@ -124,9 +147,18 @@ def non_max_suppression(
         box, cls, mask = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
+            # TODO (CP/IRIT): compute BCE between cls and class_variants
             i, j = torch.where(cls > conf_thres) # indices in cls where the values are over conf_thres, i: anchor point index, j: class index  
             # TODO (CP/IRIT): select the class based on BCE between class variants from the knowledge model and class predicted scores
-            selected_image_prediction = torch.cat((box[i], selected_image_prediction[i, 4 + j, None], j[:, None].float(), cls[i], mask[i]), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+            selected_boxes = box[i]
+            selected_confidence = selected_image_prediction[i, 4 + j, None]
+            selected_class = j[:, None].float()
+            selected_scores = cls[i]
+            bce = scores_bce(class_variants, selected_scores)
+            cpu = torch.device('cpu')
+            selected_variant = torch.unsqueeze(torch.argmin(bce,1),1).to(cpu).apply_(variant_to_class.get).to(class_variants.device)
+            selected_mask = mask[i]
+            selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_variant, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[i]
         else:  # best class only
@@ -177,8 +209,6 @@ def non_max_suppression(
             break  # time limit exceeded
 
     return (output, keepi) if return_idxs else output
-
-
 
 def non_max_suppression_revised(
     batch_predictions,
