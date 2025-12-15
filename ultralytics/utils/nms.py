@@ -83,7 +83,7 @@ def non_max_suppression(
     if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
         prediction = prediction[0]  # select only inference output (aggregated predictions for all anchor points)
     if class_variants is not None:
-        class_variants = class_variants.to(prediction.device)
+        class_variants = class_variants.to(device=prediction.device,dtype=prediction.dtype)
     if classes is not None:
         classes = torch.tensor(classes, device=prediction.device)
     anchor_points_number = prediction.shape[-1]
