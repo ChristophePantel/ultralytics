@@ -326,7 +326,11 @@ class DetectionValidator(BaseValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        bce = self.scores_bce(batch["scores"].to(device=preds["scores"].device,dtype=preds["scores"].dtype), preds["scores"])
+        device = preds["scores"].device
+        dtype = preds["scores"].dtype
+        batch_scores = batch["scores"].to( device = device, dtype = dtype)
+        pred_scores = preds["scores"]
+        bce = self.scores_bce( batch_scores, pred_scores)
         # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
         return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
 

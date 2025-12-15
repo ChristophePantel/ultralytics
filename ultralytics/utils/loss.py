@@ -479,6 +479,9 @@ class v8DetectionLoss:
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.km  # km gain
         loss[3] *= self.hyp.dfl  # dfl gain
+        
+        if math.isnan(loss[0]) or math.isnan(loss[1]) or math.isnan(loss[2]) or math.isnan(loss[3]):
+            print("NaN occured in loss computation.")
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
