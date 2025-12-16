@@ -269,8 +269,9 @@ def verify_image_label(args: tuple) -> list:
         for i in range(nl):
                 for cls in lb[i,0:-4]:
                     class_scores[i,int(cls)]=1.0
-                for cls in km_lb[i]:
-                    class_scores[i,int(cls)]=1.0
+        # TODO(CP/IRIT): ignore knowledge model
+        #        for cls in km_lb[i]:
+        #            class_scores[i,int(cls)]=1.0
         # TODO (CP/IRIT): Add Knowledge Model classes
         core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]

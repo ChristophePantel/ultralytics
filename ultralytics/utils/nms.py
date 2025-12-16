@@ -154,6 +154,8 @@ def non_max_suppression(
             selected_confidence = selected_image_prediction[i, 4 + j, None]
             selected_class = j[:, None].float()
             selected_scores = cls[i]
+            smoothed_class_variant = 10*class_variants - 5
+            bce_test = scores_bce(class_variants,smoothed_class_variant.sigmoid())
             bce = scores_bce(class_variants, selected_scores)
             cpu = torch.device('cpu')
             selected_variant = torch.unsqueeze(torch.argmin(bce,1),1).to(cpu).apply_(variant_to_class.get).to(class_variants.device)

@@ -18,6 +18,8 @@ from ultralytics.utils import km
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
 
+import math
+
 class VarifocalLoss(nn.Module):
     """Varifocal loss by Zhang et al.
 
