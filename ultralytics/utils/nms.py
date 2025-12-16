@@ -160,7 +160,8 @@ def non_max_suppression(
             cpu = torch.device('cpu')
             selected_variant = torch.unsqueeze(torch.argmin(bce,1),1).to(cpu).apply_(variant_to_class.get).to(class_variants.device)
             selected_mask = mask[i]
-            selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_variant, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+            # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
+            selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[i]
         else:  # best class only
