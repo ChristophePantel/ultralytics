@@ -98,15 +98,15 @@ names:
   79: toothbrush
   
   # list of classes that refines the target class
-refinement:
-  0 : [20, 33]
-  1 : [75] 
+#refinement:
+#  0 : [20, 33]
+#  1 : [75] 
   
   # liste of classes that compose the target class 
-composition:
-  0: [11,22]
-  11: [71]
-  22: [74]
+#composition:
+#  0: [11,22]
+#  11: [71]
+#  22: [74]
 
 # Download script/URL (optional)
 download: https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8.zip
