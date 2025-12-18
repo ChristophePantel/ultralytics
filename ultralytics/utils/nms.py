@@ -144,30 +144,29 @@ def non_max_suppression(
             continue
 
         # Detections matrix nx6 (xyxy, conf, cls) 
-        box, cls, mask = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
+        predicted_boxes, predicted_scores, predicted_masks = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
-            # TODO (CP/IRIT): compute BCE between cls and class_variants
-            i, j = torch.where(cls > conf_thres) # indices in cls where the values are over conf_thres, i: anchor point index, j: class index  
+            # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants
+            i, j = torch.where(predicted_scores > conf_thres) # indices in predicted_scores where the values are over conf_thres, i: anchor point index, j: class index  
             # TODO (CP/IRIT): select the class based on BCE between class variants from the knowledge model and class predicted scores
-            selected_boxes = box[i]
+            selected_boxes = predicted_boxes[i]
             selected_confidence = selected_image_prediction[i, 4 + j, None]
             selected_class = j[:, None].float()
-            selected_scores = cls[i]
-            smoothed_class_variant = 10*class_variants - 5
-            bce_test = scores_bce(class_variants,smoothed_class_variant.sigmoid())
+            selected_scores = predicted_scores[i]
+            # TDO (CP/IRIT): Compare variants with selected predicted scores to identify
             bce = scores_bce(class_variants, selected_scores)
             cpu = torch.device('cpu')
             selected_variant = torch.unsqueeze(torch.argmin(bce,1),1).to(cpu).apply_(variant_to_class.get).to(class_variants.device)
-            selected_mask = mask[i]
+            selected_mask = predicted_masks[i]
             # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
             selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[i]
         else:  # best class only
-            conf, j = cls.max(1, keepdim=True)
-            image_anchor_point_candidates = conf.view(-1) > conf_thres
-            selected_image_prediction = torch.cat((box, conf, j.float(), mask), 1)[image_anchor_point_candidates]
+            confidence, class_index = predicted_scores.max(1, keepdim=True)
+            image_anchor_point_candidates = confidence.view(-1) > conf_thres
+            selected_image_prediction = torch.cat((predicted_boxes, confidence, class_index.float(), predicted_masks), 1)[image_anchor_point_candidates]
             if return_idxs:
                 selected_xk = selected_xk[image_anchor_point_candidates]
 
@@ -179,34 +178,34 @@ def non_max_suppression(
                 selected_xk = selected_xk[image_anchor_point_candidates]
 
         # Check shape
-        n = selected_image_prediction.shape[0]  # number of boxes
-        if not n:  # no boxes
+        box_number = selected_image_prediction.shape[0]  # number of boxes
+        if not box_number:  # no boxes
             continue
-        if n > max_nms:  # excess boxes
+        if box_number > max_nms:  # excess boxes
             image_anchor_point_candidates = selected_image_prediction[:, 4].argsort(descending=True)[:max_nms]  # sort by confidence and remove excess boxes
             selected_image_prediction = selected_image_prediction[image_anchor_point_candidates]
             if return_idxs:
                 selected_xk = selected_xk[image_anchor_point_candidates]
 
-        c = selected_image_prediction[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
-        scores = selected_image_prediction[:, 4]  # scores de confiance pour chaque point
+        widened_class_indexes = selected_image_prediction[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
+        selected_image_scores = selected_image_prediction[:, 4]  # scores de confiance pour chaque point
         if rotated:
-            boxes = torch.cat((selected_image_prediction[:, :2] + c, selected_image_prediction[:, 2:4], selected_image_prediction[:, -1:]), dim=-1)  # xywhr
-            i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
+            candidate_boxes = torch.cat((selected_image_prediction[:, :2] + widened_class_indexes, selected_image_prediction[:, 2:4], selected_image_prediction[:, -1:]), dim=-1)  # xywhr
+            i = TorchNMS.fast_nms(candidate_boxes, selected_image_scores, iou_thres, iou_func=batch_probiou)
         else:
-            boxes = selected_image_prediction[:, :4] + c  # boxes (offset by class) 
+            candidate_boxes = selected_image_prediction[:, :4] + widened_class_indexes  # boxes (offset by class) 
             # Speed strategy: torchvision for val or already loaded (faster), TorchNMS for predict (lower latency)
             if "torchvision" in sys.modules:
                 import torchvision  # scope as slow import
 
-                i = torchvision.ops.nms(boxes, scores, iou_thres)
+                selected_indexes = torchvision.ops.nms(candidate_boxes, selected_image_scores, iou_thres)
             else:
-                i = TorchNMS.nms(boxes, scores, iou_thres)
-        i = i[:max_det]  # limit detections
+                selected_indexes = TorchNMS.nms(candidate_boxes, selected_image_scores, iou_thres)
+        selected_indexes = selected_indexes[:max_det]  # limit detections
 
-        output[image_index] = selected_image_prediction[i]
+        output[image_index] = selected_image_prediction[selected_indexes]
         if return_idxs:
-            keepi[image_index] = selected_xk[i].view(-1)
+            keepi[image_index] = selected_xk[selected_indexes].view(-1)
         if not __debug__ and (time.time() - t) > time_limit:
             LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded")
             break  # time limit exceeded
