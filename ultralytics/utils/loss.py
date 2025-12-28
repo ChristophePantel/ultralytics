@@ -200,13 +200,17 @@ class KnowledgeBasedLoss(nn.Module):
     
     # TODO (CP/IRIT): The model should carry all required data (inheritance and composition relations).
     def __init__(self, model, power = 3.0, 
-                 decomposition_weight = 1.0, composition_weight = 1.0, composition_exclusion_weight = 1.0,
-                 generalization_weight = 1.0, specialization_weight = 1.0, specialization_exclusion_weight = 1.0):
+                 decomposition_weight = 1.0, decomposition_exclusion_weight = 1.0, 
+                 composition_weight = 1.0, composition_exclusion_weight = 1.0,
+                 generalization_weight = 1.0, 
+                 specialization_weight = 1.0, specialization_exclusion_weight = 1.0,
+            ):
         """Initialize the KnowledgeModelLoss class."""
         super().__init__()
         self.model = model
         self.power = power
         self.decomposition_weight = decomposition_weight
+        self.decomposition_exclusion_weight = decomposition_exclusion_weight
         self.composition_weight = composition_weight
         self.composition_exclusion_weight = composition_exclusion_weight
         self.generalization_weight = generalization_weight
@@ -330,9 +334,11 @@ class KnowledgeBasedLoss(nn.Module):
             G_loss = self.conjunction_loss(norm_pred_scores, self.refinement_backward)
         if len(self.composition_backward) == 0:
             D_loss = 0.0
+            DE_loss = 0.0
         else:
             # Call conjunction_loss for refinement
-            D_loss = self.conjunction_loss(norm_pred_scores, self.composition_backward)
+            D_loss = self.disjunction_loss(norm_pred_scores, self.composition_backward)
+            DE_loss = self.exclusion_loss(norm_pred_scores, self.composition_backward)
         return self.specialization_weight * S_loss + self.composition_weight * C_loss + self.specialization_exclusion_weight * SE_loss + self.composition_exclusion_weight * CE_loss + self.generalization_weight * G_loss + self.decomposition_weight * D_loss
 
 class v8DetectionLoss:
@@ -356,7 +362,14 @@ class v8DetectionLoss:
 
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
-        self.km_loss = KnowledgeBasedLoss(model)
+        # TODO(CP/IRIT): Add knowledge model control
+        self.use_km = getattr( model, 'use_km', False)
+        if self.use_km:
+            self.use_refinement = getattr(model, 'use_refinement', False)
+            self.use_composition = getattr(model, 'use_composition', False)
+            self.km_loss = KnowledgeBasedLoss(model)
+        else:
+            km_loss = None
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -408,8 +421,15 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
+        loss_number = 4 if self.use_km else 3
+        box_index = 0
+        cls_index = 1
+        if self.use_km:
+            km_loss = 2
+        dfl_index = loss_number - 1
+        
         # TODO (CP/IRIT): Adding knowledge model loss
-        loss = torch.zeros(4, device=self.device)  # 3 loss items: box, cls, km, dfl
+        loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
         # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
         feats = preds[1] if isinstance(preds, tuple) else preds
         # merge all the prediction levels along dimension 2
@@ -475,17 +495,18 @@ class v8DetectionLoss:
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
-        loss[1] = bce_values.sum() / target_scores_sum  # BCE
+        loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
-        km_loss = self.km_loss(pred_scores,target_scores)
-        # print('Knowledge Model Loss = ',km_loss)
-        loss[2] = km_loss
+        if self.use_km:
+            km_loss = self.km_loss(pred_scores,target_scores)
+            # print('Knowledge Model Loss = ',km_loss)
+            loss[km_index] = km_loss
 
         # Bbox loss
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
-            loss[0], loss[3] = self.bbox_loss(
+            loss[box_index], loss[dfl_index] = self.bbox_loss(
                 pred_for_bboxes,
                 pred_bboxes,
                 anchor_points,
@@ -495,12 +516,16 @@ class v8DetectionLoss:
                 fg_mask,
             )
 
-        loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.cls  # cls gain
-        loss[2] *= self.hyp.km  # km gain
-        loss[3] *= self.hyp.dfl  # dfl gain
+        loss[box_index] *= self.hyp.box  # box gain
+        loss[cls_index] *= self.hyp.cls  # cls gain
+        if self.use_km:
+            loss[km_index] *= self.hyp.km  # km gain
+        loss[dfl_index] *= self.hyp.dfl  # dfl gain
         
-        if math.isnan(loss[0]) or math.isnan(loss[1]) or math.isnan(loss[2]) or math.isnan(loss[3]):
+        has_nan = math.isnan(loss[box_index]) or math.isnan(loss[cls_index]) or math.isnan(loss[dfl_index])
+        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km else has_nan
+        
+        if has_nan:
             print("NaN occured in loss computation.")
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)

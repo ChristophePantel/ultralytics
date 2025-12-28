@@ -4,67 +4,67 @@ import torch
 
 def get_class_names():
     class_names = frozenset({
-        'Aeroplane', 
-       'Animal_Wing', 
-       'Animals', 
-       'Arm', 
-       'Artifact_Wing', 
-       'Beak', 
-       'Bicycle', 
-       'Bird', 
-       'Boat', 
-       'Body', 
-       'Bodywork', 
-       'Bottle', 
-       'Bus', 
-       'Cap', 
-       'Car', 
-       'Cat', 
-       'Chain_Wheel', 
-       'Chair', 
-       'Coach', 
-       'Cow', 
-       'Dining_Table', 
-       'Dog', 
-       'Door', 
-       'Ear', 
-       'Eyebrow', 
-       'Engine', 
-       'Eye', 
-       'Foot', 
-       'Hair', 
-       'Hand', 
-       'Handlebar', 
-       'Head', 
-       'Headlight', 
-       'Hoof', 
-       'Horn', 
-       'Horse', 
-       'Leg', 
-       'License_Plate', 
-       'Locomotive', 
-       'Mirror', 
-       'Motorbike', 
-       'Mouth', 
-       'Muzzle', 
-       'Neck', 
-       'Nose', 
-       'Person', 
-       'Plant', 
-       'Pot', 
-       'Potted_Plant', 
-       'Saddle', 
-       'Screen', 
-       'Sheep', 
-       'Sofa', 
-       'Stern', 
-       'Tail', 
-       'Torso', 
-       'Train', 
-       'TV_Monitor', 
-       'Vehicle', 
-       'Wheel', 
-       'Window',
+        'Aeroplane', #00
+       'Animal_Wing', #01
+       'Animals', #02
+       'Arm', #03
+       'Artifact_Wing', #04
+       'Beak', #05
+       'Bicycle', #06
+       'Bird', #07
+       'Boat', #08
+       'Body', #09
+       'Bodywork', #10
+       'Bottle', #11
+       'Bus', #12
+       'Cap', #13
+       'Car', #14
+       'Cat', #15
+       'Chain_Wheel', #16
+       'Chair', #17
+       'Coach', #18
+       'Cow', #19
+       'Dining_Table', #20
+       'Dog', #21
+       'Door', #22
+       'Ear', #23
+       'Eyebrow', #24
+       'Engine', #25
+       'Eye', #26
+       'Foot', #27
+       'Hair', #28
+       'Hand', #29
+       'Handlebar', #30
+       'Head', #31
+       'Headlight', #32
+       'Hoof', #33
+       'Horn', #34
+       'Horse', #35
+       'Leg', #36
+       'License_Plate', #37
+       'Locomotive', #38
+       'Mirror', #39
+       'Motorbike', #40
+       'Mouth', #41
+       'Muzzle', #42
+       'Neck', #43
+       'Nose', #44
+       'Person', #45
+       'Plant', #46
+       'Pot', #47
+       'Potted_Plant', #48
+       'Saddle', #49
+       'Screen', #50
+       'Sheep', #51
+       'Sofa', #52
+       'Stern', #53
+       'Tail', #54
+       'Torso', #55
+       'Train', #56
+       'TV_Monitor', #57
+       'Vehicle', #58
+       'Wheel', #59
+       'Window', #60
     })
     return class_names
 

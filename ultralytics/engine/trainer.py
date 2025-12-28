@@ -122,6 +122,10 @@ class BaseTrainer:
         """
         self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
+        self.use_km = getattr(self.args, 'use_km', False)
+        if self.use_km:
+            self.use_refinement = getattr(self.args, 'use_refinement', False)
+            self.use_composition = getattr(self.args, 'use_composition', False)
         self.check_resume(overrides)
         self.device = select_device(self.args.device)
         # Update "-1" devices so post-training val does not repeat search
@@ -321,7 +325,7 @@ class BaseTrainer:
         # Dataloaders
         batch_size = self.batch_size // max(self.world_size, 1)
         self.train_loader = self.get_dataloader(
-            self.data["train"], batch_size=batch_size, rank=LOCAL_RANK, mode="train"
+            self.data["train"], batch_size=batch_size, rank=LOCAL_RANK, mode="train", model=self.model
         )
         # Note: When training DOTA dataset, double batch size could get OOM on images with >2000 objects.
         self.test_loader = self.get_dataloader(
@@ -329,6 +333,7 @@ class BaseTrainer:
             batch_size=batch_size if self.args.task == "obb" else batch_size * 2,
             rank=LOCAL_RANK,
             mode="val",
+            model=self.model
         )
         self.validator = self.get_validator()
         self.ema = ModelEMA(self.model)
@@ -720,7 +725,7 @@ class BaseTrainer:
         """Raise NotImplementedError (must be implemented by subclasses)."""
         raise NotImplementedError("get_validator function not implemented in trainer")
 
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
+    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train", model=None):
         """Raise NotImplementedError (must return a `torch.utils.data.DataLoader` in subclasses)."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")
 

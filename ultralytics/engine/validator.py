@@ -330,7 +330,7 @@ class BaseValidator:
         for callback in self.callbacks.get(event, []):
             callback(self)
 
-    def get_dataloader(self, dataset_path, batch_size):
+    def get_dataloader(self, dataset_path, batch_size, model):
         """Get data loader from dataset path and batch size."""
         raise NotImplementedError("get_dataloader function not implemented for this validator")
 

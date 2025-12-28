@@ -76,7 +76,7 @@ class DetectionTrainer(BaseTrainer):
         gs = max(int(unwrap_model(self.model).stride.max() if self.model else 0), 32)
         return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
 
-    def get_dataloader(self, dataset_path: str, batch_size: int = 16, rank: int = 0, mode: str = "train"):
+    def get_dataloader(self, dataset_path: str, batch_size: int = 16, rank: int = 0, mode: str = "train", model=None):
         """Construct and return dataloader for the specified mode.
 
         Args:
@@ -84,6 +84,7 @@ class DetectionTrainer(BaseTrainer):
             batch_size (int): Number of images per batch.
             rank (int): Process rank for distributed training.
             mode (str): 'train' for training dataloader, 'val' for validation dataloader.
+            model (???): model trained by the dataset
 
         Returns:
             (DataLoader): PyTorch dataloader object.
@@ -168,7 +169,10 @@ class DetectionTrainer(BaseTrainer):
     def get_validator(self):
         """Return a DetectionValidator for YOLO model validation."""
         # TODO (CP/IRIT): Adding knowledge model loss
-        self.loss_names = "box_loss", "cls_loss", "km_loss", "dfl_loss"
+        if self.use_km:
+            self.loss_names = "box_loss", "cls_loss", "km_loss", "dfl_loss"
+        else:
+            self.loss_names = "box_loss", "cls_loss", "dfl_loss"
         return yolo.detect.DetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )
