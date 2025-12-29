@@ -173,6 +173,7 @@ class TaskAlignedAssigner(nn.Module):
             pd_scores (torch.Tensor): Predicted classification scores with shape (bs, num_total_anchors, num_classes).
             pd_bboxes (torch.Tensor): Predicted bounding boxes with shape (bs, num_total_anchors, 4).
             # Why are the labels used if it relates to the boxes ?
+            # TODO (CP/IRIT): Use the gt_scores instead of the gt_labels
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
             mask_gt (torch.Tensor): Mask for valid ground truth boxes with shape (bs, n_max_boxes, h*w).
@@ -322,7 +323,7 @@ class TaskAlignedAssigner(nn.Module):
         target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         target_labels.clamp_(0)
 
-        # TODO (CP/IRIT): Do the same for scores (wrong)
+        # TODO (CP/IRIT): Do the same for scores (wrong) -- Why is it wrong ?
         # target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
         
         # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
@@ -345,6 +346,8 @@ class TaskAlignedAssigner(nn.Module):
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
         # Set to zero when fg_scores_mask is zero
         target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
+        compare_target_scores = torch.where((target_scores_km != target_scores))
+        image_indexes, anchor_point_indexes, class_indexes = compare_target_scores
         
         # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
         # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
@@ -353,6 +356,7 @@ class TaskAlignedAssigner(nn.Module):
         # save2debug( 'target_scores_base.txt', target_scores_base, True)
         # save2debug( 'target_scores.txt', target_scores, True)
         # save2debug( 'target_scores_km.txt', target_scores_km, True)
+        # TODO (CP/IRIT): use target_scores_km instead of target_scores built with a single 1 at the class position
         return target_labels, target_bboxes, target_scores
 
     @staticmethod
@@ -394,20 +398,29 @@ class TaskAlignedAssigner(nn.Module):
             fg_mask (torch.Tensor): Foreground mask, shape (b, h*w).
             mask_pos (torch.Tensor): Updated positive mask, shape (b, n_max_boxes, h*w).
         """
-        # Convert (b, n_max_boxes, h*w) -> (b, h*w)
+        # Convert (b, n_max_boxes, h*w) -> (b, h*w): sum along all boxes for a given anchor point in a given image, produce the number of boxes for a given point
         fg_mask = mask_pos.sum(-2)
-        if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes
+        if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes (sum along the boxes > 1)
+            # add a dimension between images and anchor points
+            # expand this dimension to size n_max_boxes
             mask_multi_gts = (fg_mask.unsqueeze(1) > 1).expand(-1, n_max_boxes, -1)  # (b, n_max_boxes, h*w)
+            # select the bounding box that maximize the overlap with ??? (according to IoU)
             max_overlaps_idx = overlaps.argmax(1)  # (b, h*w)
 
+            # creates a zero tensor with shape (b, n_max_boxes, h*w)
             is_max_overlaps = torch.zeros(mask_pos.shape, dtype=mask_pos.dtype, device=mask_pos.device)
+            # set to 1 the index of the box that maximizes overlap
             is_max_overlaps.scatter_(1, max_overlaps_idx.unsqueeze(1), 1)
 
+            # replace with the selected bounding box
             mask_pos = torch.where(mask_multi_gts, is_max_overlaps, mask_pos).float()  # (b, n_max_boxes, h*w)
             sz_mask_pos = torch.numel(mask_pos)
             nz_mask_pos = torch.count_nonzero(mask_pos)
+            # Convert (b, n_max_boxes, h*w) -> (b, h*w): sum along all boxes for a given anchor point in a given image, produce the number of boxes for a given point
             fg_mask = mask_pos.sum(-2)
+            # None should be > 1
         # Find each grid serve which gt(index)
+        # Select the bounding box with 1 (there should be a single one - all others should be 0)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
         return target_gt_idx, fg_mask, mask_pos
 
