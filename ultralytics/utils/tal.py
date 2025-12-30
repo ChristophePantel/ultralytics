@@ -129,6 +129,7 @@ class TaskAlignedAssigner(nn.Module):
 
         return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
 
+    # TODO (CP/IRIT): Is it meaningful to rely on predicted bounding boxes to select the positive mask for ground truth data ?
     def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anchor_points, mask_gt):
         """Get positive mask for each ground truth box.
 
@@ -151,6 +152,7 @@ class TaskAlignedAssigner(nn.Module):
         nz_mask_in_gts = torch.count_nonzero(mask_in_gts)
         # save2debug( 'mask_in_gts.txt', mask_in_gts, True)
         # Get anchor_align metric, (b, max_num_obj, h*w)
+        # TODO (CP/IRIT): Is it meaningful to rely on predicted bounding boxes to select the positive mask for ground truth data ?
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
         # save2debug( 'align_metric.txt', align_metric, True)
         # save2debug( 'overlaps.txt', overlaps, True)
@@ -378,13 +380,15 @@ class TaskAlignedAssigner(nn.Module):
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
-        anchors_lt = xy_centers[None] - lt
-        rb_anchors = rb - xy_centers[None]
+        anchors_lt = xy_centers[None] - lt # positive when center over left top 
+        rb_anchors = rb - xy_centers[None] # positive when center under right bottom
         bbox_deltas = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
-        bbox_deltas = bbox_deltas.amin(3)
-        return bbox_deltas.gt_(eps)
+        bbox_deltas = bbox_deltas.amin(3) 
+        return bbox_deltas.gt_(eps) # both are be positive iff the center is in the box
 
     @staticmethod
+    # TODO (CP/IRIT): Is it the best criteria when handling composition ?
+    # Should select the smallest box in the composition hierarchy ?
     def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
         """Select anchor boxes with highest IoU when assigned to multiple ground truths.
 
