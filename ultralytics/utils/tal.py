@@ -409,19 +409,26 @@ class TaskAlignedAssigner(nn.Module):
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
-        tl = torch.transpose(lt,-2,-1)
-        br = torch.transpose(rb,-2,-1)
         anchors_lt = xy_centers[None] - lt # positive when center over left top 
         rb_anchors = rb - xy_centers[None] # positive when center under right bottom
-        bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
-        bbox_deltas_min = bbox_deltas_base.amin(3) 
-        positive_anchor_points = bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
+        anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
+        anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 
+        positive_anchor_points = anchors_bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
         positive_anchor_points_count = positive_anchor_points.sum(1)
         image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)
         overlap_anchor_points = positive_anchor_points[image_indexes,:,anchor_point_indexes]
         overlap_anchor_point_indexes, overlap_box_indexes = torch.where(overlap_anchor_points == 1) 
         
         # TODO (CP/IRIT): Eliminate overlapping bounding boxes
+        gt_bboxes_unsqueeze = gt_bboxes.unsqueeze(2)
+        ult, urb = gt_bboxes_unsqueeze.chunk(2, 3)
+        utl = ult.transpose(1,2)
+        ubr = urb.transpose(1,2)
+        delta_lt = utl - ult
+        delta_rb = urb - ubr
+        delta_bbox =  torch.cat((delta_lt,delta_rb), dim=3)
+        delta_bbox_min = delta_bbox.amin(3)
+        positive_delta_bbox = delta_bbox_min.gt_(eps)
         
         
         return positive_anchor_points
