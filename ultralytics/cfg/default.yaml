@@ -40,12 +40,13 @@ multi_scale: False # (bool) multiscale training by varying image size
 compile: False # (bool | str) enable torch.compile() backend='inductor'; True="default", False=off, or "default|reduce-overhead|max-autotune-no-cudagraphs"
 
 # Knowledge model:
+use_scores: True # (bool) use class scores instead of class labels
 use_km: False # (bool) use knowledge model if available
-use_refinement: True # (bool) use refinement relation if available
+use_refinement: False # (bool) use refinement relation if available
 km_specialization_weight: 1.0 # (float) weight of the specialization loss
 km_specialization_exclusion_weight: 1.0 # (float) weight of the specialization exclusion loss
 km_generalization_weight: 1.0 # (float) weight of the generalization loss
-use_composition: True # (bool) use composition relation if available
+use_composition: False # (bool) use composition relation if available
 km_composition_weight: 1.0 # (float) weight of the composition loss
 km_composition_exclusion_weight: 1.0 # (float) weight of the composition exclusion loss
 km_decomposition_weight: 1.0 # (float) weight of the decomposition loss

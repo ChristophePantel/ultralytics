@@ -82,6 +82,10 @@ class YOLODataset(BaseDataset):
             *args (Any): Additional positional arguments for the parent class.
             **kwargs (Any): Additional keyword arguments for the parent class.
         """
+        self.use_scores = kwargs["hyp"].get("use_scores",False)
+        self.use_km = self.use_scores and kwargs["hyp"].get("use_km",False)
+        self.use_refinement = self.use_km and kwargs["hyp"].get("use_refinement",False)
+        self.use_composition = self.use_km and kwargs["hyp"].get("use_composition",False)
         self.use_segments = task == "segment"
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
@@ -120,6 +124,7 @@ class YOLODataset(BaseDataset):
                     repeat(nkpt),
                     repeat(ndim),
                     repeat(self.single_cls),
+                    repeat(self.use_km),
                 ),
             )
             pbar = TQDM(results, desc=desc, total=total)

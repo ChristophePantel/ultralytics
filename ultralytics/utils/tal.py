@@ -23,12 +23,16 @@ class TaskAlignedAssigner(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk: int = 13, num_classes: int = 80, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
+    def __init__(self, topk: int = 13, num_classes: int = 80, use_scores : bool = False, use_km : bool = False, use_composition : bool = False, use_refinement : bool = False, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
         Args:
             topk (int, optional): The number of top candidates to consider.
             num_classes (int, optional): The number of object classes.
+            use_scores (bool, optional): Use class scores instead of class labels.
+            use_km (bool, optional): Rely on the provided knowledge model.
+            use_composition (bool, optional): Rely on the composition relation from the provided knowledge model.
+            use_refinement (bool, optional): Rely on the refinement relation from the provided knowledge model.
             alpha (float, optional): The alpha parameter for the classification component of the task-aligned metric.
             beta (float, optional): The beta parameter for the localization component of the task-aligned metric.
             eps (float, optional): A small value to prevent division by zero.
@@ -36,6 +40,10 @@ class TaskAlignedAssigner(nn.Module):
         super().__init__()
         self.topk = topk
         self.num_classes = num_classes
+        self.use_scores = use_scores
+        self.use_km = use_km
+        self.use_composition = use_composition
+        self.use_refinement = use_refinement
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
@@ -110,20 +118,20 @@ class TaskAlignedAssigner(nn.Module):
             target_gt_idx (torch.Tensor): Target ground truth indices with shape (bs, num_total_anchors).
         """
         # TODO (CP/IRIT): Are the ground truth labels used ?
-        mask_pos, align_metric, overlaps = self.get_pos_mask(
+        pos_mask, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
         )
 
-        target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
+        target_gt_idx, fg_mask, single_pos_mask = self.select_highest_overlaps(pos_mask, overlaps, self.n_max_boxes)
 
         # Assigned target
         # TODO (CP/IRIT): Are the ground truth labels used ?
         target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
 
         # Normalize
-        align_metric *= mask_pos
+        align_metric *= single_pos_mask
         pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj
-        pos_overlaps = (overlaps * mask_pos).amax(dim=-1, keepdim=True)  # b, max_num_obj
+        pos_overlaps = (overlaps * single_pos_mask).amax(dim=-1, keepdim=True)  # b, max_num_obj
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         target_scores = target_scores * norm_align_metric
 
@@ -187,38 +195,47 @@ class TaskAlignedAssigner(nn.Module):
         try:
             sz_anchor_points = pd_bboxes.shape[-2] # number of anchor points h*w
             # TODO (CP/IRIT): Why not convert it earlier ?
-            mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+            mask_gt = mask_gt.bool()  # b, max_num_obj, h*w: is an anchor point in a given ground truth object from a given image
             sz_mask_gt = torch.numel(mask_gt)
             nz_mask_gt = torch.count_nonzero(mask_gt)
+            
             overlaps = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
             sz_overlaps = torch.numel(overlaps)
+            
             bbox_scores = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_scores.dtype, device=pd_scores.device)
     
             ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, bs, max_num_obj
-            # for each batch, vector of max_num_obj value of batch index
-            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj
+            # for each batch, vector of max_num_obj value of batch indexes
+            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj: image index for each gt bounding box in the image
             # TODO (CP/IRIT): Purpose of ind[1]
-            # for each batch, vector of max_num_obj class index
-            gt_labels_squeeze = gt_labels.squeeze(-1)
-            ind[1] =  gt_labels_squeeze # b, max_num_obj
+            # for each batch, vector of max_num_obj class indexes
+            gt_labels_squeeze = gt_labels.squeeze(-1) # suppress last unused dimension
+            ind[1] =  gt_labels_squeeze # bs, max_num_obj: class index for each gt bounding box in the image
             # Get the scores of each grid for each gt cls
             ind_0 = ind[0]
             ind_1 = ind[1]
-            pd_scores_ind = pd_scores[ind_0, :, ind_1]
+            # Select 
+            pd_scores_ind = pd_scores[ind_0, :, ind_1] # bs, max_num_obj, h * w: class score for each anchor point for each ground truth object in each image 
             sz_bbox_scores = torch.numel(bbox_scores)
             sz_pd_scores_ind = torch.numel(pd_scores_ind)
             nz_pd_scores_ind = torch.count_nonzero(pd_scores_ind)
             assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-            pd_scores_masked = pd_scores_ind[mask_gt]
+            
+            pd_scores_masked = pd_scores_ind[mask_gt] # Select the scores for the anchor points in a given ground truth object from a given image
             sz_pd_scores_masked = torch.numel(pd_scores_masked)
             nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
             assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-            bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w
+
+            # The score of the bounding box is the score of the class associated to the bounding box
+            # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
+            bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w: scores for the anchor points in a given ground truth object from a given image, others are 0
             nz_bbox_scores = torch.count_nonzero(bbox_scores)
+            
             # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
             pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
             gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, sz_anchor_points, -1)[mask_gt]
             
+            # Compare the bounding box
             iou_results = self.iou_calculation(gt_boxes, pd_boxes)
             sz_iou_results = torch.numel(iou_results)
             nz_iou_results = torch.count_nonzero(iou_results)
@@ -287,18 +304,18 @@ class TaskAlignedAssigner(nn.Module):
             gt_labels (torch.Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the batch size and
                 max_num_obj is the maximum number of objects.
             TODO (CP/IRIT): Make it optional
-            gt_scores (torch.Tensor): Ground truth probability of being in classes of shape (b, max_num_obj, num_class)
+            gt_scores (torch.Tensor): Ground truth probability of being in classes of shape (b, max_num_obj, classes_number).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 4).
             target_gt_idx (torch.Tensor): Indices of the assigned ground truth objects for positive anchor points, with
-                shape (b, h*w), where h*w is the total number of anchor points.
+                shape (b, h*w), where h*w is the total number of anchor points (0 <= value < max_num_obj, meaning full if mask is true).
             fg_mask (torch.Tensor): A boolean tensor of shape (b, h*w) indicating the positive (foreground) anchor
                 points.
 
         Returns:
             target_labels (torch.Tensor): Target labels for positive anchor points with shape (b, h*w).
-            TODO (CP/IRIT): What's the use as target_scores contains the information ?
+            TODO (CP/IRIT): What's the use of target_labels as target_scores contains the information ?
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
-            target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
+            target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, classes_number).
         """
         # save2debug( 'gt_labels.txt', gt_labels, True)
         # save2debug( 'gt_scores.txt', gt_scores, True)
@@ -306,24 +323,30 @@ class TaskAlignedAssigner(nn.Module):
         # save2debug( 'target_gt_idx_init.txt', target_gt_idx, True)
         # save2debug( 'fg_mask.txt', fg_mask, True)
         # Assigned target labels, (b, 1)
-        batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
-        target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
+        batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None] # image index for each image
+        target_gt_idx_offset = batch_ind * self.n_max_boxes # offset for ground truth object if batches are flattened
+        target_gt_idx_translated = target_gt_idx + target_gt_idx_offset # (b, h*w) # offset added to each ground truth object to compute object index in flattened batches
         # save2debug( 'target_gt_idx.txt', target_gt_idx, True)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         # Select the boxes associated to the indices
-        target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
+        gt_bbox_size = gt_bboxes.shape[-1]
+        gt_bboxes_view = gt_bboxes.view(-1, gt_bbox_size) # flatten the tensor to 2 dimension, first one is flattened image / ground truth object, last one is bounding box component index
+        target_bboxes = gt_bboxes_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
         
         # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
-        target_scores_km  = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
+        gt_score_size = gt_scores.shape[-1]
+        gt_scores_view = gt_scores.view(-1, gt_score_size)
+        target_scores_base_km  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
 
         # Assigned target scores, minimum is 0, maximum is positive
         # Convert to integers (TODO (CP/IRIT): Should it be done much earlier ?)
         # TODO (CP/IRIT): is the clamp_ needed ?
         # Select the labels associated to the indices
         # TODO (CP/IRIT): Are the ground truth labels used ?
-        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
-        target_labels.clamp_(0)
+        gt_labels_flattened = gt_labels.long().flatten()
+        target_labels = gt_labels_flattened[target_gt_idx_translated]  # (b, h*w)
+        target_labels.clamp_(0) # Set the minimum to 0
 
         # TODO (CP/IRIT): Do the same for scores (wrong) -- Why is it wrong ?
         # target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
@@ -334,22 +357,32 @@ class TaskAlignedAssigner(nn.Module):
         # TODO (CP/IRIT): Are the ground truth labels used ?
         # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
         batch_size =  target_labels.shape[0]
-        pred_size = target_labels.shape[1]
+        pred_size = target_labels.shape[1] # anchor points number
         target_scores_base = torch.zeros(
             (batch_size, pred_size, self.num_classes),
             dtype=torch.float32,
             device=target_labels.device,
-        )  # (b, h*w, 80)
+        )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
         # Adds a dimension at the end of target labels
         target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
         # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
         target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
+        
+        # neq_target_scores_base = torch.where((target_scores_base_km != target_scores_base))
+        # neq_image_indexes_base, neq_anchor_point_indexes_base, neq_class_indexes_base = neq_target_scores_base
+        # eq_target_scores_base = torch.where((target_scores_base_km == target_scores_base))
+        # eq_image_indexes_base, eq_anchor_point_indexes_base, eq_class_indexes_base = eq_target_scores_base
+        
         # Duplicate fg_mask class number times along the 3rd dimension
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
         # Set to zero when fg_scores_mask is zero
         target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
-        compare_target_scores = torch.where((target_scores_km != target_scores))
-        image_indexes, anchor_point_indexes, class_indexes = compare_target_scores
+        target_scores_km = torch.where(fg_scores_mask > 0, target_scores_base_km, 0)
+        
+        # neq_target_scores = torch.where((target_scores_km != target_scores))
+        # neq_image_indexes, neq_anchor_point_indexes, neq_class_indexes = neq_target_scores
+        # eq_target_scores = torch.where((target_scores_km == target_scores))
+        # eq_image_indexes, eq_anchor_point_indexes, eq_class_indexes = eq_target_scores
         
         # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
         # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
@@ -357,9 +390,13 @@ class TaskAlignedAssigner(nn.Module):
         # save2debug( 'target_bboxes.txt', target_bboxes)
         # save2debug( 'target_scores_base.txt', target_scores_base, True)
         # save2debug( 'target_scores.txt', target_scores, True)
+        # save2debug('target_scores_base.txt', target_scores_base, True)
         # save2debug( 'target_scores_km.txt', target_scores_km, True)
         # TODO (CP/IRIT): use target_scores_km instead of target_scores built with a single 1 at the class position
-        return target_labels, target_bboxes, target_scores
+        if self.use_scores:
+            return target_labels, target_bboxes, target_scores_km
+        else:
+            return target_labels, target_bboxes, target_scores
 
     @staticmethod
     def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):
@@ -382,9 +419,18 @@ class TaskAlignedAssigner(nn.Module):
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
         anchors_lt = xy_centers[None] - lt # positive when center over left top 
         rb_anchors = rb - xy_centers[None] # positive when center under right bottom
-        bbox_deltas = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
-        bbox_deltas = bbox_deltas.amin(3) 
-        return bbox_deltas.gt_(eps) # both are be positive iff the center is in the box
+        bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
+        bbox_deltas_min = bbox_deltas_base.amin(3) 
+        positive_anchor_points = bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
+        positive_anchor_points_count = positive_anchor_points.sum(1)
+        image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)
+        overlap_anchor_points = positive_anchor_points[image_indexes,:,anchor_point_indexes]
+        overlap_anchor_point_indexes, overlap_box_indexes = torch.where(overlap_anchor_points == 1) 
+        
+        # TODO (CP/IRIT): Eliminate overlapping bounding boxes
+        
+        
+        return positive_anchor_points
 
     @staticmethod
     # TODO (CP/IRIT): Is it the best criteria when handling composition ?
@@ -539,8 +585,8 @@ def save2debug(filename,tensor,nonzero=False):
     with open( filename, 'w') as f:
         if nonzero:
             aux1( f, tensor, False)
-            nonzeros = tensor.nonzero().tolist()
-            print(len(nonzeros), file=f)
-            print(nonzeros, file=f)
-        print(tensor.shape, file=f)
-        print(tensor.tolist(), file=f)
+            # nonzeros = tensor.nonzero().tolist()
+            # print(len(nonzeros), file=f)
+            # print(nonzeros, file=f)
+        # print(tensor.shape, file=f)
+        # print(tensor.tolist(), file=f)

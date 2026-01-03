@@ -183,7 +183,7 @@ def verify_image(args: tuple) -> tuple:
 # File structure depends on the task (classification, detection, obb, segmentation, pose)
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
+    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, use_km = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -270,8 +270,9 @@ def verify_image_label(args: tuple) -> list:
                 for cls in lb[i,0:-4]:
                     class_scores[i,int(cls)]=1.0
         # TODO(CP/IRIT): ignore knowledge model, uncomment to use knowledge model
-        #        for cls in km_lb[i]:
-        #            class_scores[i,int(cls)]=1.0
+                if use_km:
+                    for cls in km_lb[i]:
+                        class_scores[i,int(cls)]=1.0
         # TODO (CP/IRIT): Add Knowledge Model classes
         core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]

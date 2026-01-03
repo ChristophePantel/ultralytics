@@ -122,10 +122,10 @@ class BaseTrainer:
         """
         self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
-        self.use_km = getattr(self.args, 'use_km', False)
-        if self.use_km:
-            self.use_refinement = getattr(self.args, 'use_refinement', False)
-            self.use_composition = getattr(self.args, 'use_composition', False)
+        self.use_scores = getattr(self.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_refinement = self.use_km and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km and getattr(self.args, 'use_composition', False)
         self.check_resume(overrides)
         self.device = select_device(self.args.device)
         # Update "-1" devices so post-training val does not repeat search

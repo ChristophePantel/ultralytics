@@ -360,16 +360,27 @@ class v8DetectionLoss:
 
         self.use_dfl = m.reg_max > 1
 
-        self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
-        # TODO(CP/IRIT): Add knowledge model control
-        self.use_km = getattr( model, 'use_km', False)
+        self.use_scores = getattr( model, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( model, 'use_km', False)
+        self.use_refinement = self.use_km and getattr(model, 'use_refinement', False)
+        self.use_composition = self.use_km and getattr(model, 'use_composition', False)
         if self.use_km:
-            self.use_refinement = getattr(model, 'use_refinement', False)
-            self.use_composition = getattr(model, 'use_composition', False)
             self.km_loss = KnowledgeBasedLoss(model)
         else:
             km_loss = None
+
+        self.assigner = TaskAlignedAssigner(
+            topk=tal_topk, 
+            num_classes=self.nc, 
+            use_scores = self.use_scores,
+            use_km = self.use_km, 
+            use_composition = self.use_composition, 
+            use_refinement = self.use_refinement, 
+            alpha=0.5, 
+            beta=6.0,
+            )
+        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        # TODO(CP/IRIT): Add knowledge model control
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:

@@ -58,6 +58,8 @@ class DetectionPredictor(BasePredictor):
             self.args.classes,
             self.args.agnostic_nms,
             max_det=self.args.max_det,
+            # TODO (CP/IRIT): transmit the class variants from the model
+            # TODO (CP/IRIT): Why is nc set to 0 for detection ?
             nc=0 if self.args.task == "detect" else len(self.model.names),
             end2end=getattr(self.model, "end2end", False),
             rotated=self.args.task == "obb",
