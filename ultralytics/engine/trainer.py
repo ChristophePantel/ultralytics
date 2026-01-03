@@ -124,8 +124,10 @@ class BaseTrainer:
         self.args = get_cfg(cfg, overrides)
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
-        self.use_refinement = self.use_km and getattr(self.args, 'use_refinement', False)
-        self.use_composition = self.use_km and getattr(self.args, 'use_composition', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
         self.check_resume(overrides)
         self.device = select_device(self.args.device)
         # Update "-1" devices so post-training val does not repeat search

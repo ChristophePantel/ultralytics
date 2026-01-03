@@ -42,6 +42,8 @@ compile: False # (bool | str) enable torch.compile() backend='inductor'; True="d
 # Knowledge model:
 use_scores: True # (bool) use class scores instead of class labels
 use_km: False # (bool) use knowledge model if available
+use_km_scores: False # (bool) use knowledge model scores if available
+use_km_loss: False # (bool) use knowledge model losses if available
 use_refinement: False # (bool) use refinement relation if available
 km_specialization_weight: 1.0 # (float) weight of the specialization loss
 km_specialization_exclusion_weight: 1.0 # (float) weight of the specialization exclusion loss

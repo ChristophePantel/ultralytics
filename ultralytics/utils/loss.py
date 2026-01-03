@@ -362,9 +362,11 @@ class v8DetectionLoss:
 
         self.use_scores = getattr( model, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model, 'use_km', False)
-        self.use_refinement = self.use_km and getattr(model, 'use_refinement', False)
-        self.use_composition = self.use_km and getattr(model, 'use_composition', False)
-        if self.use_km:
+        self.use_km_scores = self.use_km and getattr( model, 'use_km_scores', False)
+        self.use_km_losses = self.use_km and getattr( model, 'use_km', False)
+        self.use_refinement = self.use_km_losses and getattr(model, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(model, 'use_composition', False)
+        if self.use_km_losses:
             self.km_loss = KnowledgeBasedLoss(model)
         else:
             km_loss = None
@@ -373,9 +375,7 @@ class v8DetectionLoss:
             topk=tal_topk, 
             num_classes=self.nc, 
             use_scores = self.use_scores,
-            use_km = self.use_km, 
-            use_composition = self.use_composition, 
-            use_refinement = self.use_refinement, 
+            use_km_scores = self.use_km_scores, 
             alpha=0.5, 
             beta=6.0,
             )
@@ -432,10 +432,10 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
-        loss_number = 4 if self.use_km else 3
+        loss_number = 4 if self.use_km_losses else 3
         box_index = 0
         cls_index = 1
-        if self.use_km:
+        if self.use_km_losses:
             km_loss = 2
         dfl_index = loss_number - 1
         
@@ -509,7 +509,7 @@ class v8DetectionLoss:
         loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
-        if self.use_km:
+        if self.use_km_losses:
             km_loss = self.km_loss(pred_scores,target_scores)
             # print('Knowledge Model Loss = ',km_loss)
             loss[km_index] = km_loss
@@ -529,12 +529,12 @@ class v8DetectionLoss:
 
         loss[box_index] *= self.hyp.box  # box gain
         loss[cls_index] *= self.hyp.cls  # cls gain
-        if self.use_km:
+        if self.use_km_losses:
             loss[km_index] *= self.hyp.km  # km gain
         loss[dfl_index] *= self.hyp.dfl  # dfl gain
         
         has_nan = math.isnan(loss[box_index]) or math.isnan(loss[cls_index]) or math.isnan(loss[dfl_index])
-        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km else has_nan
+        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km_losses else has_nan
         
         if has_nan:
             print("NaN occured in loss computation.")

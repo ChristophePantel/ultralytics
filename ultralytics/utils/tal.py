@@ -23,16 +23,14 @@ class TaskAlignedAssigner(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk: int = 13, num_classes: int = 80, use_scores : bool = False, use_km : bool = False, use_composition : bool = False, use_refinement : bool = False, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
+    def __init__(self, topk: int = 13, num_classes: int = 80, use_scores : bool = False, use_km_scores : bool = False, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
         Args:
             topk (int, optional): The number of top candidates to consider.
             num_classes (int, optional): The number of object classes.
             use_scores (bool, optional): Use class scores instead of class labels.
-            use_km (bool, optional): Rely on the provided knowledge model.
-            use_composition (bool, optional): Rely on the composition relation from the provided knowledge model.
-            use_refinement (bool, optional): Rely on the refinement relation from the provided knowledge model.
+            use_km_scores (bool, optional): Rely on the provided knowledge model.
             alpha (float, optional): The alpha parameter for the classification component of the task-aligned metric.
             beta (float, optional): The beta parameter for the localization component of the task-aligned metric.
             eps (float, optional): A small value to prevent division by zero.
@@ -41,9 +39,7 @@ class TaskAlignedAssigner(nn.Module):
         self.topk = topk
         self.num_classes = num_classes
         self.use_scores = use_scores
-        self.use_km = use_km
-        self.use_composition = use_composition
-        self.use_refinement = use_refinement
+        self.use_km_scores = use_km_scores
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
@@ -334,11 +330,6 @@ class TaskAlignedAssigner(nn.Module):
         gt_bboxes_view = gt_bboxes.view(-1, gt_bbox_size) # flatten the tensor to 2 dimension, first one is flattened image / ground truth object, last one is bounding box component index
         target_bboxes = gt_bboxes_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
         
-        # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
-        gt_score_size = gt_scores.shape[-1]
-        gt_scores_view = gt_scores.view(-1, gt_score_size)
-        target_scores_base_km  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
-
         # Assigned target scores, minimum is 0, maximum is positive
         # Convert to integers (TODO (CP/IRIT): Should it be done much earlier ?)
         # TODO (CP/IRIT): is the clamp_ needed ?
@@ -347,38 +338,44 @@ class TaskAlignedAssigner(nn.Module):
         gt_labels_flattened = gt_labels.long().flatten()
         target_labels = gt_labels_flattened[target_gt_idx_translated]  # (b, h*w)
         target_labels.clamp_(0) # Set the minimum to 0
-
-        # TODO (CP/IRIT): Do the same for scores (wrong) -- Why is it wrong ?
-        # target_scores_km = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx]
         
-        # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
-        # 10x faster than F.one_hot()
-        # Create an int64 zero tensor of dimension batch size * anchor point number * class number
-        # TODO (CP/IRIT): Are the ground truth labels used ?
-        # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
-        batch_size =  target_labels.shape[0]
-        pred_size = target_labels.shape[1] # anchor points number
-        target_scores_base = torch.zeros(
-            (batch_size, pred_size, self.num_classes),
-            dtype=torch.float32,
-            device=target_labels.device,
-        )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
-        # Adds a dimension at the end of target labels
-        target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
-        # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
-        target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
+        # Duplicate fg_mask class number times along the 3rd dimension
+        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
+
+        if self.use_km_scores:
+            # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
+            gt_score_size = gt_scores.shape[-1]
+            gt_scores_view = gt_scores.view(-1, gt_score_size)
+            target_scores_base_km  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
+            # Set to zero when fg_scores_mask is zero
+            target_scores_km = torch.where(fg_scores_mask > 0, target_scores_base_km, 0)
+            return target_labels, target_bboxes, target_scores_km
+        else:
+            # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
+            # 10x faster than F.one_hot()
+            # Create an int64 zero tensor of dimension batch size * anchor point number * class number
+            # TODO (CP/IRIT): Are the ground truth labels used ?
+            # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
+            batch_size =  target_labels.shape[0]
+            pred_size = target_labels.shape[1] # anchor points number
+            target_scores_base = torch.zeros(
+                (batch_size, pred_size, self.num_classes),
+                dtype=torch.float32,
+                device=target_labels.device,
+                )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
+            # Adds a dimension at the end of target labels
+            target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
+            # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
+            target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
+            # Set to zero when fg_scores_mask is zero
+            target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
+            return target_labels, target_bboxes, target_scores
         
         # neq_target_scores_base = torch.where((target_scores_base_km != target_scores_base))
         # neq_image_indexes_base, neq_anchor_point_indexes_base, neq_class_indexes_base = neq_target_scores_base
         # eq_target_scores_base = torch.where((target_scores_base_km == target_scores_base))
         # eq_image_indexes_base, eq_anchor_point_indexes_base, eq_class_indexes_base = eq_target_scores_base
-        
-        # Duplicate fg_mask class number times along the 3rd dimension
-        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
-        # Set to zero when fg_scores_mask is zero
-        target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
-        target_scores_km = torch.where(fg_scores_mask > 0, target_scores_base_km, 0)
-        
+
         # neq_target_scores = torch.where((target_scores_km != target_scores))
         # neq_image_indexes, neq_anchor_point_indexes, neq_class_indexes = neq_target_scores
         # eq_target_scores = torch.where((target_scores_km == target_scores))
@@ -392,11 +389,6 @@ class TaskAlignedAssigner(nn.Module):
         # save2debug( 'target_scores.txt', target_scores, True)
         # save2debug('target_scores_base.txt', target_scores_base, True)
         # save2debug( 'target_scores_km.txt', target_scores_km, True)
-        # TODO (CP/IRIT): use target_scores_km instead of target_scores built with a single 1 at the class position
-        if self.use_scores:
-            return target_labels, target_bboxes, target_scores_km
-        else:
-            return target_labels, target_bboxes, target_scores
 
     @staticmethod
     def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):
@@ -417,6 +409,8 @@ class TaskAlignedAssigner(nn.Module):
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
         lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
+        tl = torch.transpose(lt,-2,-1)
+        br = torch.transpose(rb,-2,-1)
         anchors_lt = xy_centers[None] - lt # positive when center over left top 
         rb_anchors = rb - xy_centers[None] # positive when center under right bottom
         bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
