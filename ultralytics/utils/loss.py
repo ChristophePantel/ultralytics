@@ -360,12 +360,12 @@ class v8DetectionLoss:
 
         self.use_dfl = m.reg_max > 1
 
-        self.use_scores = getattr( model, 'use_scores', False)
-        self.use_km = self.use_scores and getattr( model, 'use_km', False)
-        self.use_km_scores = self.use_km and getattr( model, 'use_km_scores', False)
-        self.use_km_losses = self.use_km and getattr( model, 'use_km', False)
-        self.use_refinement = self.use_km_losses and getattr(model, 'use_refinement', False)
-        self.use_composition = self.use_km_losses and getattr(model, 'use_composition', False)
+        self.use_scores = getattr( model.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
         if self.use_km_losses:
             self.km_loss = KnowledgeBasedLoss(model)
         else:
