@@ -49,7 +49,7 @@ from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data import load_inference_source
 from ultralytics.data.augment import LetterBox
 from ultralytics.nn.autobackend import AutoBackend
-from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, colorstr, ops
+from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, colorstr, ops, km
 from ultralytics.utils.checks import check_imgsz, check_imshow
 from ultralytics.utils.files import increment_path
 from ultralytics.utils.torch_utils import attempt_compile, select_device, smart_inference_mode
@@ -394,6 +394,23 @@ class BasePredictor:
             model (str | Path | torch.nn.Module, optional): Model to load or use.
             verbose (bool): Whether to print verbose output.
         """
+        self.nc = model.nc
+        if self.use_km:
+            if hasattr(model, 'refinement'):
+                self.refinement = model.refinement
+            else:
+                self.refinement = model.model.refinement
+            if hasattr(model, 'composition'):
+                self.composition = model.composition
+            else:
+                self.composition = model.model.composition
+            class_codes = frozenset(range(self.nc))
+            full_composition = km.resolve(class_codes,self.composition,self.refinement)
+            inverted_full_composition = km.invert_relation(full_composition)
+            class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
+            generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
+            self.class_variants = km.encode_variants(self.nc, generalized_class_variants)
+            self.variant_to_class = variant_to_class
         self.model = AutoBackend(
             model=model or self.args.model,
             device=select_device(self.args.device, verbose=verbose),
