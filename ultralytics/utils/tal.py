@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from . import LOGGER
 from .metrics import bbox_iou, probiou
-from .ops import xywhr2xyxyxyxy
+from .ops import xywhr2xyxyxyxy, xyxy2xywh
 from .torch_utils import TORCH_1_11
 
 
@@ -23,7 +23,7 @@ class TaskAlignedAssigner(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk: int = 13, num_classes: int = 80, use_scores : bool = False, use_km_scores : bool = False, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
+    def __init__(self, topk: int = 13, num_classes: int = 80, use_scores : bool = False, use_km_scores : bool = False, use_variant_selection : bool = False, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
         Args:
@@ -40,6 +40,7 @@ class TaskAlignedAssigner(nn.Module):
         self.num_classes = num_classes
         self.use_scores = use_scores
         self.use_km_scores = use_km_scores
+        self.use_variant_selection = use_variant_selection
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
@@ -420,6 +421,8 @@ class TaskAlignedAssigner(nn.Module):
         overlap_anchor_point_indexes, overlap_box_indexes = torch.where(overlap_anchor_points == 1) 
         
         # TODO (CP/IRIT): Eliminate overlapping bounding boxes
+        # Transform x_min y_min x_max y_max to x_c y_c w h to ensure that the center of the internal box is in the external box, and to introduce an error margin 
+        gt_bboxes_xywh = xyxy2xywh(gt_bboxes)
         gt_bboxes_unsqueeze = gt_bboxes.unsqueeze(2)
         ult, urb = gt_bboxes_unsqueeze.chunk(2, 3)
         utl = ult.transpose(1,2)

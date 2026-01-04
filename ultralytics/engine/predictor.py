@@ -122,6 +122,13 @@ class BasePredictor:
             _callbacks (dict, optional): Dictionary of callback functions.
         """
         self.args = get_cfg(cfg, overrides)
+        self.use_scores = getattr(self.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
         self.save_dir = get_save_dir(self.args)
         if self.args.conf is None:
             self.args.conf = 0.25  # default conf=0.25

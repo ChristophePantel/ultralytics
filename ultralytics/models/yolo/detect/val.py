@@ -100,22 +100,23 @@ class DetectionValidator(BaseValidator):
         self.names = model.names
         self.nc = len(model.names)
         # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
-        if hasattr(model, 'refinement'):
-            self.refinement = model.refinement
-        else:
-            self.refinement = model.model.refinement
-        if hasattr(model, 'composition'):
-            self.composition = model.composition
-        else:
-            self.composition = model.model.composition
+        if self.use_km:
+            if hasattr(model, 'refinement'):
+                self.refinement = model.refinement
+            else:
+                self.refinement = model.model.refinement
+            if hasattr(model, 'composition'):
+                self.composition = model.composition
+            else:
+                self.composition = model.model.composition
+            class_codes = frozenset(range(self.nc))
+            full_composition = km.resolve(class_codes,self.composition,self.refinement)
+            inverted_full_composition = km.invert_relation(full_composition)
+            class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
+            generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
+            self.class_variants = km.encode_variants(self.nc, generalized_class_variants)
+            self.variant_to_class = variant_to_class
         self.no_detection = []
-        class_codes = frozenset(range(self.nc))
-        full_composition = km.resolve(class_codes,self.composition,self.refinement)
-        inverted_full_composition = km.invert_relation(full_composition)
-        class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
-        generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
-        self.class_variants = km.encode_variants(self.nc, generalized_class_variants)
-        self.variant_to_class = variant_to_class
         self.end2end = getattr(model, "end2end", False)
         self.seen = 0
         self.jdict = []
@@ -141,15 +142,17 @@ class DetectionValidator(BaseValidator):
             preds,
             self.args.conf,
             self.args.iou,
-            # TODO (CP/IRIT): transmit the class variants from the model
             # TODO (CP/IRIT): Why is nc set to 0 for detection ?
             nc=0 if self.args.task == "detect" else self.nc,
             # TODO (CP/IRIT): Why is multi_label always set to True ?
             multi_label=True,
+            use_km_scores = self.use_km_scores,
+            use_variant_selection = self.use_variant_selection,
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
+            # TODO (CP/IRIT): transmit the class variants from the model
             class_variants=self.class_variants,
             variant_to_class=self.variant_to_class,
         )

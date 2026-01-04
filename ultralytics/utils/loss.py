@@ -363,6 +363,7 @@ class v8DetectionLoss:
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
         self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
@@ -376,6 +377,7 @@ class v8DetectionLoss:
             num_classes=self.nc, 
             use_scores = self.use_scores,
             use_km_scores = self.use_km_scores, 
+            use_variant_selection = self.use_variant_selection,
             alpha=0.5, 
             beta=6.0,
             )

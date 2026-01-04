@@ -114,9 +114,13 @@ class BaseValidator:
         self.stats = None
         self.confusion_matrix = None
         self.nc = None
-        # TODO (CP/IRIT): Adding knowledge model relations.
-        self.refinement = None
-        self.composition = None
+        self.use_scores = getattr(self.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
         # TODO (CP/IRIT): Adding no detection metrics
         self.no_detection = None
         self.iouv = None

@@ -59,11 +59,16 @@ class DetectionPredictor(BasePredictor):
             self.args.agnostic_nms,
             max_det=self.args.max_det,
             # TODO (CP/IRIT): transmit the class variants from the model
+            use_km_scores = self.use_km_scores,
+            use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): Why is nc set to 0 for detection ?
             nc=0 if self.args.task == "detect" else len(self.model.names),
             end2end=getattr(self.model, "end2end", False),
             rotated=self.args.task == "obb",
             return_idxs=save_feats,
+             # TODO (CP/IRIT): transmit the class variants from the model
+            class_variants=self.class_variants,
+            variant_to_class=self.variant_to_class,
         )
 
         if not isinstance(orig_imgs, list):  # input images are a torch.Tensor, not a list
