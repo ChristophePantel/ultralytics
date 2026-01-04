@@ -44,8 +44,8 @@ use_scores: True # (bool) use class scores instead of class labels
 use_km: True # (bool) use knowledge model if available
 use_km_scores: True # (bool) use knowledge model scores if available
 use_variant_selection: True # (bool) select main class based on knowledge model scores if available
-use_km_loss: False # (bool) use knowledge model losses if available
-use_refinement: False # (bool) use refinement relation if available
+use_km_losses: True # (bool) use knowledge model losses if available
+use_refinement: True # (bool) use refinement relation if available
 km_specialization_weight: 1.0 # (float) weight of the specialization loss
 km_specialization_exclusion_weight: 1.0 # (float) weight of the specialization exclusion loss
 km_generalization_weight: 1.0 # (float) weight of the generalization loss
@@ -116,7 +116,7 @@ warmup_momentum: 0.8 # (float) initial momentum during warmup
 warmup_bias_lr: 0.1 # (float) bias learning rate during warmup
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) classification loss gain
-km: 0.0 # 1000.0 # (float) knowledge model loss gain
+km: 1000.0 # 1000.0 # (float) knowledge model loss gain
 dfl: 1.5 # (float) distribution focal loss gain
 pose: 12.0 # (float) pose loss gain (pose tasks)
 kobj: 1.0 # (float) keypoint objectness loss gain (pose tasks)

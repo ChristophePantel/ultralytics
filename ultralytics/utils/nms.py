@@ -149,22 +149,25 @@ def non_max_suppression(
         predicted_boxes, predicted_scores, predicted_masks = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
-            # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants
+            # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants instead of simple predicted score
             i, j = torch.where(predicted_scores > conf_thres) # indices in predicted_scores where the values are over conf_thres, i: anchor point index, j: class index  
             # TODO (CP/IRIT): select the class based on BCE between class variants from the knowledge model and class predicted scores
             selected_boxes = predicted_boxes[i]
             selected_confidence = selected_image_prediction[i, 4 + j, None]
             selected_class = j[:, None].float()
             selected_scores = predicted_scores[i]
+            selected_mask = predicted_masks[i]
+            # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
             if use_variant_selection:
                 # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
                 bce = scores_bce(class_variants, selected_scores)
                 cpu = torch.device('cpu')
                 selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
-                selected_class = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
-            selected_mask = predicted_masks[i]
-            # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
-            selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
+                neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
+                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class_from_variant, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+            else:
+                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[i]
         else:  # best class only

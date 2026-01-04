@@ -209,6 +209,13 @@ class KnowledgeBasedLoss(nn.Module):
         super().__init__()
         self.model = model
         self.power = power
+        self.use_scores = getattr( model.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
         self.decomposition_weight = decomposition_weight
         self.decomposition_exclusion_weight = decomposition_exclusion_weight
         self.composition_weight = composition_weight
@@ -311,34 +318,45 @@ class KnowledgeBasedLoss(nn.Module):
         """Compute knowledge based loss for class predication score."""
         
         norm_pred_scores = pred_scores.sigmoid()
-        if len(self.refinement_forward) == 0:
+        if self.use_refinement:
+            if len(self.refinement_forward) == 0:
+                S_loss = 0.0
+                SE_loss = 0.0
+            else:
+                # Call disjunction_loss for refinement and composition
+                S_loss = self.disjunction_loss(norm_pred_scores, self.refinement_forward)
+                # Call exclusion_loss for refinement and composition
+                SE_loss = self.exclusion_loss(norm_pred_scores, self.refinement_forward)
+            if len(self.refinement_backward) == 0:
+                 G_loss = 0.0
+            else:
+                # Call conjunction_loss for refinement
+                G_loss = self.conjunction_loss(norm_pred_scores, self.refinement_backward)
+        else:
             S_loss = 0.0
             SE_loss = 0.0
+            G_loss = 0.0
+        if self.use_composition:
+            if len(self.composition_forward) == 0:
+                C_loss = 0.0
+                CE_loss = 0.0
+            else:
+                # Call disjunction_loss for refinement and composition
+                C_loss = self.disjunction_loss(norm_pred_scores, self.composition_forward)
+                # Call exclusion_loss for refinement and composition
+                CE_loss = self.exclusion_loss(norm_pred_scores, self.composition_forward)
+            if len(self.composition_backward) == 0:
+                D_loss = 0.0
+                DE_loss = 0.0
+            else:
+                # Call conjunction_loss for refinement
+                D_loss = self.disjunction_loss(norm_pred_scores, self.composition_backward)
+                DE_loss = self.exclusion_loss(norm_pred_scores, self.composition_backward)
         else:
-            # Call disjunction_loss for refinement and composition
-            S_loss = self.disjunction_loss(norm_pred_scores, self.refinement_forward)
-             # Call exclusion_loss for refinement and composition
-            SE_loss = self.exclusion_loss(norm_pred_scores, self.refinement_forward)
-        if len(self.composition_forward) == 0:
             C_loss = 0.0
             CE_loss = 0.0
-        else:
-            # Call disjunction_loss for refinement and composition
-            C_loss = self.disjunction_loss(norm_pred_scores, self.composition_forward)
-             # Call exclusion_loss for refinement and composition
-            CE_loss = self.exclusion_loss(norm_pred_scores, self.composition_forward)
-        if len(self.refinement_backward) == 0:
-            G_loss = 0.0
-        else:
-            # Call conjunction_loss for refinement
-            G_loss = self.conjunction_loss(norm_pred_scores, self.refinement_backward)
-        if len(self.composition_backward) == 0:
             D_loss = 0.0
             DE_loss = 0.0
-        else:
-            # Call conjunction_loss for refinement
-            D_loss = self.disjunction_loss(norm_pred_scores, self.composition_backward)
-            DE_loss = self.exclusion_loss(norm_pred_scores, self.composition_backward)
         return self.specialization_weight * S_loss + self.composition_weight * C_loss + self.specialization_exclusion_weight * SE_loss + self.composition_exclusion_weight * CE_loss + self.generalization_weight * G_loss + self.decomposition_weight * D_loss
 
 class v8DetectionLoss:
@@ -438,7 +456,7 @@ class v8DetectionLoss:
         box_index = 0
         cls_index = 1
         if self.use_km_losses:
-            km_loss = 2
+            km_index = 2
         dfl_index = loss_number - 1
         
         # TODO (CP/IRIT): Adding knowledge model loss
