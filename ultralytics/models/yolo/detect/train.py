@@ -148,7 +148,8 @@ class DetectionTrainer(BaseTrainer):
         self.model.refinement = self.data.get("refinement",{})
         self.model.composition = self.data.get("composition",{})
         self.model.variants = self.data.get("variants",{})
-        self.model.variant_to_class = self.data.get("variant_to_class",{})
+        variant_to_class_dictionnary = self.data.get("variant_to_class",{})
+        self.model.variant_to_class = torch.tensor([variant_to_class_dictionnary[i] for i in range(len(variant_to_class_dictionnary))])
         self.model.args = self.args  # attach hyperparameters to model
         # TODO: self.model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc
 

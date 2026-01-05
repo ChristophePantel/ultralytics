@@ -10,6 +10,22 @@ from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import batch_probiou, box_iou
 from ultralytics.utils.ops import xywh2xyxy
 
+def scores_fuzzy_equiv(batch_scores, prediction_scores):
+    """Compute fuzzy equivalence between expected scores and predicted scores.
+    
+    Args:
+    
+    Returns:
+    """
+    batch_range = batch_scores.shape[0]
+    prediction_range = prediction_scores.shape[0]
+    aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
+    aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
+    negated_aligned_batch_scores = 1.0 - aligned_batch_scores
+    negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
+    batch_prediction_equiv = aligned_batch_scores * aligned_prediction_scores + negated_aligned_batch_scores * negated_aligned_prediction_scores
+    return batch_prediction_equiv.mean(-1)
+
 def scores_bce(batch_scores, prediction_scores):
     """Compute binary cross entropy between expected scores and predicted scores.
     
@@ -26,7 +42,7 @@ def scores_bce(batch_scores, prediction_scores):
     aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
     bce_per_class = bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
     bce = torch.sum(bce_per_class,2) / batch_scores_sum
-    detected = torch.where(bce < 1)
+    # detected = torch.where(bce < 1)
     return bce
 
 def non_max_suppression(
@@ -86,6 +102,8 @@ def non_max_suppression(
         prediction = prediction[0]  # select only inference output (aggregated predictions for all anchor points)
     if class_variants is not None:
         class_variants = class_variants.to(device=prediction.device,dtype=prediction.dtype)
+    if variant_to_class is not None:
+        variant_to_class = variant_to_class.to(device=prediction.device)
     if classes is not None:
         classes = torch.tensor(classes, device=prediction.device)
     anchor_points_number = prediction.shape[-1]
@@ -160,11 +178,23 @@ def non_max_suppression(
             # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
             if use_variant_selection:
                 # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
+                # my_variants = class_variants.to(dtype=torch.float64)
+                # test_bce = scores_bce(my_variants, my_variants)
+                # selected_test_bce = torch.argmin(test_bce,1)
                 bce = scores_bce(class_variants, selected_scores)
-                cpu = torch.device('cpu')
-                selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
-                selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
-                neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
+                selected_variant_bce = torch.unsqueeze(torch.argmin(bce,1),1)
+                selected_class_from_variant_bce = variant_to_class[selected_variant_bce]
+                # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
+                # selected_test_sfe = torch.argmax(test_sfe,1)
+                # sfe = scores_fuzzy_equiv(class_variants, selected_scores)
+                # selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
+                # selected_class_from_variant_sfe = variant_to_class[selected_variant_sfe]
+                # cpu = torch.device('cpu')
+                # selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
+                # variant_to_class_decoder = torch.tensor([variant_to_class[i] for i in range(len(variant_to_class))],device=selected_variant.device)
+                selected_class_from_variant = selected_class_from_variant_bce
+                # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
+                # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
                 selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class_from_variant, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else:
                 selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
@@ -218,312 +248,6 @@ def non_max_suppression(
             break  # time limit exceeded
 
     return (output, keepi) if return_idxs else output
-
-def non_max_suppression_revised(
-    batch_predictions,
-    conf_thres: float = 0.25,
-    iou_thres: float = 0.45,
-    classes=None,
-    agnostic: bool = False,
-    multi_label: bool = False,
-    batch_labels=(),
-    max_det: int = 300,
-    nc: int = 0,  # number of classes (optional)
-    max_time_img: float = 0.05,
-    max_nms: int = 30000,
-    max_wh: int = 7680,
-    rotated: bool = False,
-    end2end: bool = False,
-    return_idxs: bool = False,
-):
-    """
-    Perform non-maximum suppression (NMS) on predictions results.
-
-    Applies NMS to filter overlapping bounding boxes based on confidence and IoU thresholds. Supports multiple
-    detection formats including standard boxes, rotated boxes, and masks.
-
-    Args:
-        batch_predictions (torch.Tensor): Predictions with shape (batch_size, num_classes + 4 + num_masks, num_boxes)
-            containing boxes, classes, and optional masks.
-        conf_thres (float): Confidence threshold for filtering detections. Valid values are between 0.0 and 1.0.
-        iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0.
-        classes (list[int], optional): List of class indices to consider. If None, all classes are considered.
-        agnostic (bool): Whether to perform class-agnostic NMS.
-        multi_label (bool): Whether each pred_bboxes can have multiple labels.
-        batch_labels (list[list[Union[int, float, torch.Tensor]]]): A priori labels for each image.
-        max_det (int): Maximum number of detections to keep per image.
-        number_classes (int): Number of classes. Indices after this are considered masks.
-        max_time_img (float): Maximum time in seconds for processing one image.
-        max_nms (int): Maximum number of boxes for NMS.
-        max_wh (int): Maximum pred_bboxes width and height in pixels.
-        rotated (bool): Whether to handle Oriented Bounding Boxes (OBB).
-        end2end (bool): Whether the model is end-to-end and doesn't require NMS.
-        return_idxs (bool): Whether to return the indices of kept detections.
-
-    Returns:
-        # TODO (CP/IRIT): adding class scores to the selected image / shape
-        output (list[torch.Tensor]): List of detections per image with shape (num_boxes, 6 + num_classes + num_masks)
-            containing (x1, y1, x2, y2, confidence, class, mask1, mask2, ...).
-        keepi (list[torch.Tensor]): Indices of kept detections if return_idxs=True.
-    """
-    # Checks
-    assert 0 <= conf_thres <= 1, f"Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0"
-    assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
-    
-#===============================================================================
-#     if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
-#         prediction = prediction[0]  # select only inference output
-#     if classes is not None:
-#         classes = torch.tensor(classes, device=prediction.device)
-    
-    if isinstance(batch_predictions, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
-        # TODO (CP/IRIT): Why is there two predictions, the first one is used there, the second one to compute loss
-        batch_predictions = batch_predictions[0]  # select only inference output
-
-    used_device = batch_predictions.device
-
-    batch_shape = batch_predictions.shape
-
-    if classes is not None:
-        classes = torch.tensor(classes, device=used_device)
-        
-# 
-#     if prediction.shape[-1] == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6)
-#         output = [pred[pred[:, 4] > conf_thres][:max_det] for pred in prediction]
-#         if classes is not None:
-#             output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
-#         return output
-
-    # TODO (CP/IRIT): Check that the changes are valid.
-    if batch_shape[-1] == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6)
-        outputs = [image_predictions[image_predictions[:, 4] > conf_thres][:max_det] for image_predictions in batch_predictions]
-        if classes is not None:
-            outputs = [image_predictions[(image_predictions[:, 5:6] == classes).any(1)] for image_predictions in outputs]
-        return outputs
-# 
-#     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
-#     nc = nc or (prediction.shape[1] - 4)  # number of classes
-#     extra = prediction.shape[1] - nc - 4  # number of extra info
-#     mi = 4 + nc  # mask start index
-#     xc = prediction[:, 4:mi].amax(1) > conf_thres  # candidates
-#     xinds = torch.arange(prediction.shape[-1], device=prediction.device).expand(bs, -1)[..., None]  # to track idxs
-# 
-
-    batch_size = batch_shape[0]  # batch size (BCN, i.e. 1,84,6300)
-    number_classes = nc or (batch_shape[1] - 4)  # number of classes
-    number_masks = batch_shape[1] - 4 - number_classes  # number of extra_size info
-    mask_start = 4 + number_classes  # pred_masks start index
-    
-    # TODO (CP/IRIT): also keep all class scores.
-    batch_prediction_scores = batch_predictions[:, 4:mask_start]
-    batch_candidate_anchor_points = batch_prediction_scores.amax(1) > conf_thres  # candidates
-    number_anchor_points = batch_shape[-1]
-    batch_anchor_point_indexes = torch.arange(number_anchor_points, device=used_device).expand(batch_size, -1)[..., None]  # to track idxs
-
-#     # Settings
-#     # min_wh = 2  # (pixels) minimum box width and height
-#     time_limit = 2.0 + max_time_img * bs  # seconds to quit after
-#     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
-# 
-#     prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
-#     if not rotated:
-#         prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
-
-    # Settings
-    # min_wh = 2  # (pixels) minimum pred_bboxes width and height
-    time_limit = 2.0 + max_time_img * batch_size  # seconds to quit after
-    multi_label &= number_classes > 1  # multiple labels per pred_bboxes (adds 0.5ms/img)
-
-    batch_predictions = batch_predictions.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
-    if not rotated:
-        batch_predictions[..., :4] = xywh2xyxy(batch_predictions[..., :4])  # xywh to xyxy
-        
-# 
-#     t = time.time()
-#     output = [torch.zeros((0, 6 + extra), device=prediction.device)] * bs
-#     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
-
-    t = time.time()
-    # An output per image that contains :
-    # - core predicted class: size 1
-    # - bounding pred_bboxes: size 4
-    # - class scores (added for multi-class by CP/IRIT): size classes_number
-    # - masks data: size masks_number
-    # TODO (CP/IRIT): where are the masks ? in extra_size ?
-    outputs = [torch.zeros((0, 6 + number_classes + number_masks), device=used_device)] * batch_size
-    keepi = [torch.zeros((0, 1), device=used_device)] * batch_size  # to store the kept idxs
-
-#     for xi, (x, xk) in enumerate(zip(prediction, xinds)):  # image index, (preds, preds indices)
-
-    for image_index, (image_predictions, image_anchor_point_indexes) in enumerate(zip(batch_predictions, batch_anchor_point_indexes)):  # image index, (preds, preds indices)
-
-#         # Apply constraints
-#         # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
-#         filt = xc[xi]  # confidence
-#         x = x[filt]
-
-        # Apply constraints
-        # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        image_candidate_anchor_points = batch_candidate_anchor_points[image_index]  # confidence
-        image_candidate_predictions = image_predictions[image_candidate_anchor_points]
-        
-#         if return_idxs:
-#             xk = xk[filt]
-# 
-        
-        if return_idxs:
-            image_candidate_anchor_point_indexes = image_anchor_point_indexes[image_candidate_anchor_points]
-
-#         # Cat apriori labels if autolabelling
-#         if labels and len(labels[xi]) and not rotated:
-#             lb = labels[xi]
-#             v = torch.zeros((len(lb), nc + extra + 4), device=x.device)
-#             v[:, :4] = xywh2xyxy(lb[:, 1:5])  # box
-#             v[range(len(lb)), lb[:, 0].long() + 4] = 1.0  # cls
-#             x = torch.cat((x, v), 0)
-# 
-
-        # Cat apriori labels if autolabelling
-        if batch_labels and len(batch_labels[image_index]) and not rotated:
-            image_labels = batch_labels[image_index]
-            results = torch.zeros((len(image_labels), number_classes + number_masks + 4), device=used_device)
-            results[:, :4] = xywh2xyxy(image_labels[:, 1:5])  # pred_bboxes
-            results[range(len(image_labels)), image_labels[:, 0].long() + 4] = 1.0  # pred_scores
-            image_candidate_predictions = torch.cat((image_candidate_predictions, results), 0)
-
-#         # If none remain process next image
-#         if not x.shape[0]:
-#             continue
-# 
-
-        # If none remain process next image
-        if not image_candidate_predictions.shape[0]:
-            continue
-
-#         # Detections matrix nx6 (xyxy, conf, cls)
-#         box, cls, mask = x.split((4, nc, extra), 1)
-# 
-
-        # Detections matrix nx6 (xyxy, conf, pred_scores)
-        image_bboxes, image_scores, image_masks = image_candidate_predictions.split((4, number_classes, number_masks), 1)
-
-
-#         if multi_label:
-#             i, j = torch.where(cls > conf_thres)
-#             x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), mask[i]), 1)
-#             if return_idxs:
-#                 xk = xk[i]
-#         else:  # best class only
-#             conf, j = cls.max(1, keepdim=True)
-#             filt = conf.view(-1) > conf_thres
-#             x = torch.cat((box, conf, j.float(), mask), 1)[filt]
-#             if return_idxs:
-#                 xk = xk[filt]
-# 
-        if multi_label:
-            image_candidate_elements = torch.where(image_scores > conf_thres)
-            # i, j = ...
-            image_candidate_anchor_points, image_candidate_classes = image_candidate_elements
-            image_candidate_bboxes = image_bboxes[image_candidate_anchor_points]
-            image_candidate_score = image_predictions[image_candidate_anchor_points, 4 + image_candidate_classes, None]
-            image_candidate_classes = image_candidate_classes[:, None].float()
-            image_candidate_masks = image_masks[image_candidate_anchor_points]
-            
-            image_candidate_predictions = torch.cat((image_candidate_bboxes, image_candidate_score, image_candidate_classes, image_candidate_masks), 1)
-            if return_idxs:
-                anchor_point_index = anchor_point_index[image_candidate_anchor_points]
-        else:  # best class only
-            candidate_confidences, candidate_classes = image_scores.max(1, keepdim=True)
-            candidate_filter = candidate_confidences.view(-1) > conf_thres
-            image_candidate_predictions = torch.cat((pred_bboxes, conf, candidate_classes.float(), image_masks), 1)[candidate_filter]
-            if return_idxs:
-                anchor_point_index = anchor_point_index[candidate_filter]
-
-#         # Filter by class
-#         if classes is not None:
-#             filt = (x[:, 5:6] == classes).any(1)
-#             x = x[filt]
-#             if return_idxs:
-#                 xk = xk[filt]
-# 
-        # Filter by class
-        if classes is not None:
-            candidate_filter = (image_predictions[:, 5:6] == classes).any(1)
-            resulting_predictions = image_predictions[candidate_filter]
-            if return_idxs:
-                anchor_point_index = anchor_point_index[candidate_filter]
-
-#         # Check shape
-#         n = x.shape[0]  # number of boxes
-#         if not n:  # no boxes
-#             continue
-#         if n > max_nms:  # excess boxes
-#             filt = x[:, 4].argsort(descending=True)[:max_nms]  # sort by confidence and remove excess boxes
-#             x = x[filt]
-#             if return_idxs:
-#                 xk = xk[filt]
-# 
-        # Check shape
-        candidate_number = resulting_predictions.shape[0]  # number of boxes
-        if not candidate_number:  # no boxes
-            continue
-        
-        if candidate_number > max_nms:  # excess boxes
-            candidate_filter = image_predictions[:, 4].argsort(descending=True)[:max_nms]  # sort by confidence and remove excess boxes
-            prediction = prediction[candidate_filter]
-            if return_idxs:
-                anchor_point_index = anchor_point_index[candidate_filter]
-
-#         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
-#         scores = x[:, 4]  # scores
-#         if rotated:
-#             boxes = torch.cat((x[:, :2] + c, x[:, 2:4], x[:, -1:]), dim=-1)  # xywhr
-#             i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
-#         else:
-#             boxes = x[:, :4] + c  # boxes (offset by class)
-#             # Speed strategy: torchvision for val or already loaded (faster), TorchNMS for predict (lower latency)
-#             if "torchvision" in sys.modules:
-#                 import torchvision  # scope as slow import
-# 
-#                 i = torchvision.ops.nms(boxes, scores, iou_thres)
-#             else:
-#                 i = TorchNMS.nms(boxes, scores, iou_thres)
-#         i = i[:max_det]  # limit detections
-# 
-        c = prediction[:, 5:6] * (0 if agnostic else max_wh)  # classes
-        scores = prediction[:, 4]  # scores
-        if rotated:
-            boxes = torch.cat((prediction[:, :2] + c, prediction[:, 2:4], prediction[:, -1:]), dim=-1)  # xywhr
-            selected_elements = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
-        else:
-            boxes = prediction[:, :4] + c  # boxes (offset by class)
-            # Speed strategy: torchvision for val or already loaded (faster), TorchNMS for predict (lower latency)
-            if "torchvision" in sys.modules:
-                import torchvision  # scope as slow import
-
-                selected_elements = torchvision.ops.nms(boxes, scores, iou_thres)
-            else:
-                selected_elements = TorchNMS.nms(boxes, scores, iou_thres)
-                
-        selected_elements = selected_elements[:max_det]  # limit detections
-
-#         output[xi] = x[i]
-#         if return_idxs:
-#             keepi[xi] = xk[i].view(-1)
-#         if (time.time() - t) > time_limit:
-#             LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded")
-#             break  # time limit exceeded
-# 
-#     return (output, keepi) if return_idxs else output
-
-        output[image_index] = resulting_predictions[selected_elements]
-        if return_idxs:
-            keepi[image_index] = anchor_point_index[selected_elements].view(-1)
-        if (time.time() - t) > time_limit:
-            LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded")
-            break  # time limit exceeded
-
-    return (outputs, keepi) if return_idxs else output
 
 #===============================================================================
 

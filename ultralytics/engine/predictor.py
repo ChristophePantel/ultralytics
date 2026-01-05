@@ -404,13 +404,20 @@ class BasePredictor:
                 self.composition = model.composition
             else:
                 self.composition = model.model.composition
-            class_codes = frozenset(range(self.nc))
-            full_composition = km.resolve(class_codes,self.composition,self.refinement)
-            inverted_full_composition = km.invert_relation(full_composition)
-            class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
-            generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
-            self.class_variants = km.encode_variants(self.nc, generalized_class_variants)
-            self.variant_to_class = variant_to_class
+            if hasattr(model, 'variants'):
+                self.variants = model.variants
+            else:
+                self.variants = model.model.variants
+            if hasattr(model, 'variant_to_class'):
+                self.variant_to_class = model.variant_to_class
+            else:
+                self.variant_to_class = model.model.variant_to_class
+            # class_codes = frozenset(range(self.nc))
+            # full_composition = km.resolve(class_codes,self.composition,self.refinement)
+            # inverted_full_composition = km.invert_relation(full_composition)
+            # class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
+            # generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
+            self.class_variants = km.encode_variants(self.nc, self.variants)
         self.model = AutoBackend(
             model=model or self.args.model,
             device=select_device(self.args.device, verbose=verbose),
