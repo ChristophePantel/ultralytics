@@ -22,13 +22,12 @@ def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
     prediction_range = prediction_scores.shape[0]
     aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
     aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
-    eq_scores = torch.where(aligned_batch_scores == aligned_prediction_scores)
     negated_aligned_batch_scores = 1.0 - aligned_batch_scores
     negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
     positive_component = aligned_batch_scores * aligned_prediction_scores
     negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
     batch_prediction_equiv = alpha *  positive_component + (1 - alpha) * negative_component
-    return batch_prediction_equiv.mean(-1)
+    return batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
 
 def scores_bce(batch_scores, prediction_scores):
     """Compute binary cross entropy between expected scores and predicted scores.
@@ -190,16 +189,22 @@ def non_max_suppression(
                 # selected_class_from_variant_bce = variant_to_class[selected_variant_bce]
                 # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
                 # selected_test_sfe = torch.argmax(test_sfe,1)
-                sfe = scores_fuzzy_equiv(class_variants, selected_scores)
-                selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
-                selected_class_from_variant_sfe = variant_to_class[selected_variant_sfe]
+                # Remove abstract variants
+                class_variants[3,2] = 0.0 # Animals
+                class_variants[156,58] = 0.0 # Vehicle
+                variants_scores = scores_fuzzy_equiv(class_variants, selected_scores)
+                selected_variants_scores, selected_variants = torch.max(variants_scores,1)
+                selected_variants = selected_variants.unsqueeze(1)
+                selected_variants_scores = selected_variants_scores.unsqueeze(1)
+                # selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
+                selected_classes_from_variants = variant_to_class[selected_variants]
                 # cpu = torch.device('cpu')
                 # selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
                 # variant_to_class_decoder = torch.tensor([variant_to_class[i] for i in range(len(variant_to_class))],device=selected_variant.device)
-                selected_class_from_variant = selected_class_from_variant_sfe
+                # selected_class_from_variant = selected_class_from_variant_sfe
                 # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
                 # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
-                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class_from_variant, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                selected_image_prediction = torch.cat((selected_boxes, selected_variants_scores, selected_classes_from_variants, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else:
                 selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
