@@ -23,13 +23,13 @@ def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
     aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
     aligned_batch_scores_sum = aligned_batch_scores.sum(-1)
     aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
-    negated_aligned_batch_scores = 1.0 - aligned_batch_scores
-    negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
+    # negated_aligned_batch_scores = 1.0 - aligned_batch_scores
+    # negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
     positive_component = aligned_batch_scores * aligned_prediction_scores
-    negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
-    positive_component_sum = positive_component.sum(-1)
-    batch_prediction_equiv = positive_component_sum  / aligned_batch_scores_sum # alpha *  positive_component + (1 - alpha) * negative_component
-    return batch_prediction_equiv # batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
+    # negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
+    # positive_component_sum = positive_component.sum(-1)
+    batch_prediction_equiv = positive_component  # alpha *  positive_component + (1 - alpha) * negative_component
+    return batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
 
 def scores_bce(batch_scores, prediction_scores):
     """Compute binary cross entropy between expected scores and predicted scores.
