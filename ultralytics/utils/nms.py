@@ -23,13 +23,13 @@ def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
     aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
     aligned_batch_scores_sum = aligned_batch_scores.sum(-1)
     aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
-    # negated_aligned_batch_scores = 1.0 - aligned_batch_scores
-    # negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
+    negated_aligned_batch_scores = 1.0 - aligned_batch_scores
+    negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
     positive_component = aligned_batch_scores * aligned_prediction_scores
-    # negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
-    # positive_component_sum = positive_component.sum(-1)
-    batch_prediction_equiv = positive_component  # alpha *  positive_component + (1 - alpha) * negative_component
-    return batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
+    negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
+    positive_component_sum = positive_component.sum(-1)
+    batch_prediction_equiv = positive_component_sum  / aligned_batch_scores_sum # alpha *  positive_component + (1 - alpha) * negative_component
+    return batch_prediction_equiv # batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
 
 def scores_bce(batch_scores, prediction_scores):
     """Compute binary cross entropy between expected scores and predicted scores.
@@ -183,14 +183,14 @@ def non_max_suppression(
             # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
             if use_variant_selection:
                 # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
-                my_variants = class_variants
+                # my_variants = class_variants
                 # test_bce = scores_bce(my_variants, my_variants)
                 # selected_test_bce = torch.argmin(test_bce,1)
                 # bce = scores_bce(class_variants, selected_scores)
                 # selected_variant_bce = torch.unsqueeze(torch.argmin(bce,1),1)
                 # selected_class_from_variant_bce = variant_to_class[selected_variant_bce]
-                test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
-                selected_test_sfe = torch.argmax(test_sfe,1)
+                # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
+                # selected_test_sfe = torch.argmax(test_sfe,1)
                 # Remove abstract variants
                 class_variants[3,2] = 0.0 # Animals
                 class_variants[156,58] = 0.0 # Vehicle
@@ -206,6 +206,7 @@ def non_max_suppression(
                 # selected_class_from_variant = selected_class_from_variant_sfe
                 # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
                 # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
+                # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
                 selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_classes_from_variants, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else:
                 selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
@@ -249,6 +250,7 @@ def non_max_suppression(
                 selected_indexes = torchvision.ops.nms(candidate_boxes, selected_image_scores, iou_thres)
             else:
                 selected_indexes = TorchNMS.nms(candidate_boxes, selected_image_scores, iou_thres)
+        # TODO (CP/IRIT): variant fusion 
         selected_indexes = selected_indexes[:max_det]  # limit detections
 
         output[image_index] = selected_image_prediction[selected_indexes]
