@@ -33,9 +33,9 @@ def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
     # Version Balanced Mean of positive and negative contribution
     batch_prediction_equiv = alpha *  positive_component + (1 - alpha) * negative_component
     # Version enhanced power mean
-    batch_prediction_equiv_mean = batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
+    # batch_prediction_equiv_mean = batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
     # Version linear mean
-    # batch_prediction_equiv_mean = batch_prediction_equiv.mean(-1)
+    batch_prediction_equiv_mean = batch_prediction_equiv.mean(-1)
     return batch_prediction_equiv_mean
 
 def scores_bce(batch_scores, prediction_scores):
