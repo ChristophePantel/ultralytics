@@ -2,6 +2,13 @@
 
 import torch
 
+class KnowledgeModel:
+    
+    def __init__(self, _class, _refinement, _composition):
+        self.classes = _classes
+        self.refinement = _refinement
+        self.composition = _composition
+
 def get_class_names():
     class_names = frozenset({
         'Aeroplane', #00
