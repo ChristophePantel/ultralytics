@@ -581,9 +581,7 @@ class v8DetectionLoss:
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
-# <<<<<<< HEAD
     def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
-    # def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size.
         TODO (CP/IRIT): Should all tensors be on the same device there ?
         Args:
@@ -605,31 +603,30 @@ class v8DetectionLoss:
         loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
         
         # new
-        pred_distri, pred_scores = (
-            preds["boxes"].permute(0, 2, 1).contiguous(),
-            preds["scores"].permute(0, 2, 1).contiguous(),
-        )
+        # reorganize dimensions for future operations
+        pred_for_bboxes = preds["boxes"].permute(0, 2, 1).contiguous()
+        pred_scores = preds["scores"].permute(0, 2, 1).contiguous()
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
         # end new
         
         # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
         # feats = preds[1] if isinstance(preds, tuple) else preds
         # merge all the prediction levels along dimension 2
-        pred_merged = torch.cat( [xi.view(preds["feats"][0].shape[0], self.no, -1) for xi in preds["feats"]], 2)
+        # pred_merged = torch.cat( [xi.view(preds["feats"][0].shape[0], self.no, -1) for xi in preds["feats"]], 2)
         # split between bounding box and class score features
-        pred_for_bboxes, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
+        # pred_for_bboxes, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
 
-        # reorganize dimensions for future operations
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        
+        # pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
-        pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
+        # pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
 
         imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
         # anchor points from the first stride, then the second, etc
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        # anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
         # Targets
         
@@ -652,17 +649,15 @@ class v8DetectionLoss:
         # Bounding boxes
         # Compute predicted bounding boxes according to anchor points
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
-        # dfl_conf = pred_for_bboxes.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
-        # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
-
+        
         smoothed_pred_scores = pred_scores.detach().sigmoid()
+        
         # Scale predicted bounding boxes along the pyramid (stride values)
         scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
         scaled_anchor_points = anchor_points * stride_tensor
 
         # Computer the ground truth for the bounding boxes and class scores
-        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
-            # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
+        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
             smoothed_pred_scores,
             scaled_pred_boxes,
             scaled_anchor_points,
@@ -679,25 +674,6 @@ class v8DetectionLoss:
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
         loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
-        # new
-        # Pboxes
-        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
-
-        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
-            pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-            anchor_points * stride_tensor,
-            gt_labels,
-            gt_bboxes,
-            mask_gt,
-        )
-
-        target_scores_sum = max(target_scores.sum(), 1)
-
-        # Cls loss
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
-        # end new
-        
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
             km_loss = self.km_loss(pred_scores,target_scores)
@@ -708,7 +684,7 @@ class v8DetectionLoss:
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[box_index], loss[dfl_index] = self.bbox_loss(
-                pred_for_bboxes,
+                pred_for_bboxes, # new pred_distri
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,
@@ -718,22 +694,6 @@ class v8DetectionLoss:
                 imgsz,
                 stride_tensor,
             )
-        
-        # new
-        # Bbox loss
-        if fg_mask.sum():
-            loss[0], loss[2] = self.bbox_loss(
-                pred_distri,
-                pred_bboxes,
-                anchor_points,
-                target_bboxes / stride_tensor,
-                target_scores,
-                target_scores_sum,
-                fg_mask,
-                imgsz,
-                stride_tensor,
-            )
-        # end new
 
         loss[box_index] *= self.hyp.box  # box gain
         loss[cls_index] *= self.hyp.cls  # cls gain
@@ -747,15 +707,11 @@ class v8DetectionLoss:
         if has_nan:
             print("NaN occured in loss computation.")
 
-        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
-    
-        # new
         return (
             (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
             loss,
             loss.detach(),
         )  # loss(box, cls, dfl)
-        # end new
 
     def parse_output(
         self, preds: dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]]
