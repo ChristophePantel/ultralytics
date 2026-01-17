@@ -269,25 +269,6 @@ def non_max_suppression(
 
     return (output, keepi) if return_idxs else output
 
-#===============================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 class TorchNMS:
     """Ultralytics custom NMS implementation optimized for YOLO.

@@ -530,9 +530,9 @@ class v8DetectionLoss:
             km_loss = None
 
         self.assigner = TaskAlignedAssigner(
-            topk=tal_topk, 
-            num_classes=self.nc, 
-            alpha=0.5, 
+            topk=tal_topk,
+            num_classes=self.nc,
+            alpha=0.5,
             beta=6.0,
             stride=self.stride.tolist(),
             topk2=tal_topk2,
@@ -603,24 +603,12 @@ class v8DetectionLoss:
         # TODO (CP/IRIT): Adding knowledge model loss
         loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
         
-        # new
         # reorganize dimensions for future operations
         pred_for_bboxes = preds["boxes"].permute(0, 2, 1).contiguous()
         pred_scores = preds["scores"].permute(0, 2, 1).contiguous()
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
-        # end new
-        
-        # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
-        # feats = preds[1] if isinstance(preds, tuple) else preds
-        # merge all the prediction levels along dimension 2
-        # pred_merged = torch.cat( [xi.view(preds["feats"][0].shape[0], self.no, -1) for xi in preds["feats"]], 2)
-        # split between bounding box and class score features
-        # pred_for_bboxes, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
 
-        
-        # pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
-        # pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
@@ -671,7 +659,6 @@ class v8DetectionLoss:
         target_scores_sum = max(target_scores.sum(), 1)
 
         # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
         loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
@@ -733,6 +720,7 @@ class v8DetectionLoss:
         batch_size = preds["boxes"].shape[0]
         loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
         return loss * batch_size, loss_detach
+
 
 class v8SegmentationLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 segmentation."""
