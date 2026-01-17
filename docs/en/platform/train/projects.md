@@ -140,3 +140,4 @@ Yes, deleted projects go to Trash and can be restored within 30 days:
 1. Go to Settings > Trash
 2. Find the project
 3. Click **Restore**
+

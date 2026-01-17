@@ -613,6 +613,7 @@ def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):
     xy = torch.cat([x, y], dim=dim) + anchor_points
     return torch.cat([xy, lt + rb], dim=dim)
 
+
 def rbox2dist(
     target_bboxes: torch.Tensor,
     anchor_points: torch.Tensor,
