@@ -43,10 +43,10 @@ Together, these innovations deliver a model family that achieves higher accuracy
   Introduces semantic segmentation loss to improve model convergence and an upgraded proto module that leverages multi-scale information for superior mask quality.
 
 - **Precision Pose Estimation**  
-  Integrates Residual Log-Likelihood Estimation (RLE) for more accurate keypoint localization and optimizes the decoding process for increased inference speed.
+  Integrates [Residual Log-Likelihood Estimation](https://arxiv.org/abs/2107.11291) (RLE) for more accurate keypoint localization and optimizes the decoding process for increased inference speed.
 
 - **Refined OBB Decoding**  
-  Introduces a specialized angle loss to improve detection accuracy for square-shaped objects and optimizes OBB decoding to resolve boundary discontinuity issues and introduces a specialized angle loss to improve detection accuracy for square-shaped objects.
+  Introduces a specialized angle loss to improve detection accuracy for square-shaped objects and optimizes OBB decoding to resolve boundary discontinuity issues.
 
 ---
 
@@ -74,62 +74,31 @@ This unified framework ensures YOLO26 is applicable across real-time detection, 
 
         See [Detection Docs](../tasks/detect.md) for usage examples with these models trained on [COCO](../datasets/detect/coco.md), which include 80 pretrained classes.
 
-        | Model   | size<br><sup>(pixels)</sup> | mAP<sup>val<br>50-95(e2e)</sup> | mAP<sup>val<br>50-95</sup> | Speed<br><sup>CPU ONNX<br>(ms)</sup> | Speed<br><sup>T4 TensorRT10<br>(ms)</sup> | params<br><sup>(M)</sup> | FLOPs<br><sup>(B)</sup> |
-        |---------|-----------------------------|---------------------------------|----------------------------|--------------------------------------|-------------------------------------------|--------------------------|-------------------------|
-        | YOLO26n | 640                         | 40.1                            | 40.9                       | 38.9 ± 0.7                           | 1.7 ± 0.0                                 | 2.4                      | 5.4                     |
-        | YOLO26s | 640                         | 47.8                            | 48.6                       | 87.2 ± 0.9                           | 2.5 ± 0.0                                 | 9.5                      | 20.7                    |
-        | YOLO26m | 640                         | 52.5                            | 53.1                       | 220.0 ± 1.4                          | 4.7 ± 0.1                                 | 20.4                     | 68.2                    |
-        | YOLO26l | 640                         | 54.4                            | 55.0                       | 286.2 ± 2.0                          | 6.2 ± 0.2                                 | 24.8                     | 86.4                    |
-        | YOLO26x | 640                         | 56.9                            | 57.5                       | 525.8 ± 4.0                         | 11.8 ± 0.2                                | 55.7                    | 193.9                  |
-
+        --8<-- "docs/macros/yolo-det-perf.md"
 
     === "Segmentation (COCO)"
 
         See [Segmentation Docs](../tasks/segment.md) for usage examples with these models trained on [COCO](../datasets/segment/coco.md), which include 80 pretrained classes.
 
-        | Model       | size<br><sup>(pixels) | mAP<sup>val<br>50-95(e2e) | mAP<sup>mask<br>50-95(e2e) | Speed<br><sup>CPU ONNX<br>(ms) | Speed<br><sup>T4 TensorRT10<br>(ms) | params<br><sup>(M) | FLOPs<br><sup>(B) |
-        |-------------|-----------------------|---------------------------|----------------------------|--------------------------------|-------------------------------------|--------------------|-------------------|
-        | YOLO26n-seg | 640                   | 39.6                      | 33.9                       | 53.3 ± 0.5                     | 2.1 ± 0.0                           | 2.8                | 9.1               |
-        | YOLO26s-seg | 640                   | 47.3                      | 40.0                       | 118.4 ± 0.9                    | 3.3 ± 0.0                           | 10.7               | 34.2              |
-        | YOLO26m-seg | 640                   | 52.5                      | 44.1                       | 328.2 ± 2.4                    | 6.7 ± 0.1                           | 24.8               | 121.5             |
-        | YOLO26l-seg | 640                   | 54.4                      | 45.5                       | 387.0 ± 3.7                    | 8.0 ± 0.1                           | 29.2               | 139.8             |
-        | YOLO26x-seg | 640                   | 56.5                      | 47.0                       | 787.0 ± 6.8                    | 16.4 ± 0.1                          | 65.5               | 313.5             |
+        --8<-- "docs/macros/yolo-seg-perf.md"
 
     === "Classification (ImageNet)"
 
         See [Classification Docs](../tasks/classify.md) for usage examples with these models trained on [ImageNet](../datasets/classify/imagenet.md), which include 1000 pretrained classes.
 
-        | Model       | size<br><sup>(pixels) | acc<br><sup>top1 | acc<br><sup>top5 | Speed<br><sup>CPU ONNX<br>(ms) | Speed<br><sup>T4 TensorRT10<br>(ms) | params<br><sup>(M) | FLOPs<br><sup>(B) at 224 |
-        |-------------|-----------------------|------------------|------------------|--------------------------------|-------------------------------------|--------------------|--------------------------|
-        | YOLO26n-cls | 224                   | 71.4             | 90.1             | 5.0 ± 0.3                      | 1.1 ± 0.0                           | 2.8                | 0.5                      |
-        | YOLO26s-cls | 224                   | 76.0             | 92.9             | 7.9 ± 0.2                      | 1.3 ± 0.0                           | 6.7                | 1.6                      |
-        | YOLO26m-cls | 224                   | 78.1             | 94.2             | 17.2 ± 0.4                     | 2.0 ± 0.0                           | 11.6               | 4.9                      |
-        | YOLO26l-cls | 224                   | 79.0             | 94.6             | 23.2 ± 0.3                     | 2.8 ± 0.0                           | 14.1               | 6.2                      |
-        | YOLO26x-cls | 224                   | 79.9             | 95.0             | 41.4 ± 0.9                     | 3.8 ± 0.0                           | 29.6               | 13.6                     |
+        --8<-- "docs/macros/yolo-cls-perf.md"
 
     === "Pose (COCO)"
 
         See [Pose Estimation Docs](../tasks/pose.md) for usage examples with these models trained on [COCO](../datasets/pose/coco.md), which include 1 pretrained class, 'person'.
 
-        | Model        | size<br><sup>(pixels) | mAP<sup>val<br>50-95(e2e) | mAP<sup>pose<br>50(e2e) | Speed<br><sup>CPU ONNX<br>(ms) | Speed<br><sup>T4 TensorRT10<br>(ms) | params<br><sup>(M) | FLOPs<br><sup>(B) |
-        |--------------|-----------------------|---------------------------|-------------------------|--------------------------------|-------------------------------------|--------------------|-------------------|
-        | YOLO26n-pose | 640                   | 56.9                      | 83.0                    | 40.3 ± 0.5                     | 1.8 ± 0.0                           | 2.9                | 7.5               |
-        | YOLO26s-pose | 640                   | 63.1                      | 86.8                    | 85.3 ± 0.9                     | 2.7 ± 0.0                           | 10.4               | 23.9              |
-        | YOLO26m-pose | 640                   | 68.8                      | 89.9                    | 218.0 ± 1.5                    | 5.0 ± 0.1                           | 21.5               | 73.1              |
-        | YOLO26l-pose | 640                   | 70.4                      | 90.8                    | 275.4 ± 2.4                    | 6.5 ± 0.1                           | 25.9               | 91.3              |
-        | YOLO26x-pose | 640                   | 71.7                      | 91.6                    | 565.4 ± 3.0                    | 12.2 ± 0.2                          | 57.6               | 201.7             |
+        --8<-- "docs/macros/yolo-pose-perf.md"
 
     === "OBB (DOTAv1)"
 
         See [Oriented Detection Docs](../tasks/obb.md) for usage examples with these models trained on [DOTAv1](../datasets/obb/dota-v2.md#dota-v10), which include 15 pretrained classes.
 
-        | Model       | size<br><sup>(pixels) | mAP<sup>test<br>50-95(e2e)</sup> | mAP<sup>test<br>50(e2e) | Speed<br><sup>CPU ONNX<br>(ms) | Speed<br><sup>T4 TensorRT10<br>(ms) | params<br><sup>(M) | FLOPs<br><sup>(B) |
-        |-------------|-----------------------|---------------------------------|-------------------------|--------------------------------|-------------------------------------|--------------------|-------------------|
-        | YOLO26n-obb | 1024                  | 52.4                            | 78.9                    | 97.7 ± 0.9                     | 2.8 ± 0.0                           | 2.5               | 14.0              |
-        | YOLO26s-obb | 1024                  | 54.8                            | 79.8                    | 218.0 ± 1.4                    | 4.9 ± 0.1                           | 9.8               | 55.1              |
-        | YOLO26m-obb | 1024                  | 55.3                            | 81.0                    | 579.2 ± 3.8                    | 10.2 ± 0.3                          | 21.2              | 183.3             |
-        | YOLO26l-obb | 1024                  | 56.0                            | 81.4                    | 735.6 ± 3.1                    | 13.0 ± 0.2                          | 25.6              | 230.0             |
-        | YOLO26x-obb | 1024                  | 56.7                            | 82.1                    | 1485.7 ± 11.5                  | 30.5 ± 0.9                          | 57.6              | 516.5             |
+        --8<-- "docs/macros/yolo-obb-perf.md"
 
 ---
 
@@ -184,11 +153,11 @@ By leveraging YOLO26's **NMS-free, end-to-end design**, YOLOE-26 delivers fast o
 
         | Model         | size<br><sup>(pixels)</sup> | Prompt Type | mAP<sup>minival<br>50-95(e2e)</sup> | mAP<sup>minival<br>50-95</sup> | mAP<sub>r</sub> | mAP<sub>c</sub> | mAP<sub>f</sub> | params<br><sup>(M)</sup> | FLOPs<br><sup>(B)</sup> |
         |---------------|-----------------------------|-------------|-------------------------------------|----------------------------|-----------------|-----------------|-----------------|--------------------------|-------------------------|
-        | YOLOE-26n-seg | 640                         | Text/Visual | 23.7 / 20.9                         | 24.7 / 21.9                | 20.5 / 17.6     | 24.1 / 22.3     | 26.1 / 22.4     | 4.8                      | 6.0                     |
-        | YOLOE-26s-seg | 640                         | Text/Visual | 29.9 / 27.1                         | 30.8 / 28.6                | 23.9 / 25.1     | 29.6 / 27.8     | 33.0 / 29.9     | 13.1                     | 21.7                    |
-        | YOLOE-26m-seg | 640                         | Text/Visual | 35.4 / 31.3                         | 35.4 / 33.9                | 31.1 / 33.4     | 34.7 / 34.0     | 36.9 / 33.8     | 27.9                     | 70.1                    |
-        | YOLOE-26l-seg | 640                         | Text/Visual | 36.8 / 33.7                         | 37.8 / 36.3                | 35.1 / 37.6     | 37.6 / 36.2     | 38.5 / 36.1     | 32.3                     | 88.3                    |
-        | YOLOE-26x-seg | 640                         | Text/Visual | 39.5 / 36.2                         | 40.6 / 38.5                | 37.4 / 35.3     | 40.9 / 38.8     | 41.0 / 38.8     | 69.9                     | 196.7                   |
+        | [YOLOE-26n-seg](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26n-seg.pt) | 640                         | Text/Visual | 23.7 / 20.9                         | 24.7 / 21.9                | 20.5 / 17.6     | 24.1 / 22.3     | 26.1 / 22.4     | 4.8                      | 6.0                     |
+        | [YOLOE-26s-seg](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26s-seg.pt) | 640                         | Text/Visual | 29.9 / 27.1                         | 30.8 / 28.6                | 23.9 / 25.1     | 29.6 / 27.8     | 33.0 / 29.9     | 13.1                     | 21.7                    |
+        | [YOLOE-26m-seg](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26m-seg.pt) | 640                         | Text/Visual | 35.4 / 31.3                         | 35.4 / 33.9                | 31.1 / 33.4     | 34.7 / 34.0     | 36.9 / 33.8     | 27.9                     | 70.1                    |
+        | [YOLOE-26l-seg](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26l-seg.pt) | 640                         | Text/Visual | 36.8 / 33.7                         | 37.8 / 36.3                | 35.1 / 37.6     | 37.6 / 36.2     | 38.5 / 36.1     | 32.3                     | 88.3                    |
+        | [YOLOE-26x-seg](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt) | 640                         | Text/Visual | 39.5 / 36.2                         | 40.6 / 38.5                | 37.4 / 35.3     | 40.9 / 38.8     | 41.0 / 38.8     | 69.9                     | 196.7                   |
 
 
     === "Prompt-free"
@@ -197,11 +166,11 @@ By leveraging YOLO26's **NMS-free, end-to-end design**, YOLOE-26 delivers fast o
 
         | Model            | size<br><sup>(pixels)</sup> | mAP<sup>minival<br>50-95(e2e)</sup> | mAP<sup>minival<br>50(e2e)</sup> | params<br><sup>(M)</sup> | FLOPs<br><sup>(B)</sup> |
         |------------------|-----------------------------|-------------------------------------|------------------------------|--------------------------|-------------------------|
-        | YOLOE-26n-seg-pf | 640                         | 16.6                                | 22.7                         | 6.5                      | 15.8                    |
-        | YOLOE-26s-seg-pf | 640                         | 21.4                                | 28.6                         | 16.2                     | 35.5                    |
-        | YOLOE-26m-seg-pf | 640                         | 25.7                                | 33.6                         | 36.2                     | 122.1                   |
-        | YOLOE-26l-seg-pf | 640                         | 27.2                                | 35.4                         | 40.6                     | 140.4                   |
-        | YOLOE-26x-seg-pf | 640                         | 29.9                                | 38.7                         | 86.3                     | 314.4                   |
+        | [YOLOE-26n-seg-pf](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26n-seg-pf.pt) | 640                         | 16.6                                | 22.7                         | 6.5                      | 15.8                    |
+        | [YOLOE-26s-seg-pf](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26s-seg-pf.pt) | 640                         | 21.4                                | 28.6                         | 16.2                     | 35.5                    |
+        | [YOLOE-26m-seg-pf](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26m-seg-pf.pt) | 640                         | 25.7                                | 33.6                         | 36.2                     | 122.1                   |
+        | [YOLOE-26l-seg-pf](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26l-seg-pf.pt) | 640                         | 27.2                                | 35.4                         | 40.6                     | 140.4                   |
+        | [YOLOE-26x-seg-pf](https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg-pf.pt) | 640                         | 29.9                                | 38.7                         | 86.3                     | 314.4                   |
 
 ### Usage Example
 
@@ -238,7 +207,7 @@ YOLOE-26 supports both text-based and visual prompting. Using prompts is straigh
         import numpy as np
 
         from ultralytics import YOLO
-        from ultralytics.models.yolo.yoloe import YOLOVPSegPredictor
+        from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 
         # Initialize model
         model = YOLO("yoloe-26l-seg.pt")
@@ -264,7 +233,7 @@ YOLOE-26 supports both text-based and visual prompting. Using prompts is straigh
         results = model.predict(
             "ultralytics/assets/bus.jpg",
             visual_prompts=visual_prompts,
-            predictor=YOLOVPSegPredictor,
+            predictor=YOLOEVPSegPredictor,
         )
 
         # Show results
