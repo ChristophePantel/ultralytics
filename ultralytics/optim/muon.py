@@ -35,6 +35,7 @@ def zeropower_via_newtonschulz5(G: torch.Tensor, eps: float = 1e-7) -> torch.Ten
         - Does not produce exact UV^T but works well empirically for neural network optimization.
     """
     assert len(G.shape) == 2
+    G_dtype = G.dtype
     X = G.bfloat16()
     X /= X.norm() + eps  # ensure top singular value <= 1
     if G.size(0) > G.size(1):
@@ -53,7 +54,8 @@ def zeropower_via_newtonschulz5(G: torch.Tensor, eps: float = 1e-7) -> torch.Ten
         X = a * X + B @ X
     if G.size(0) > G.size(1):
         X = X.T
-    return X
+    # TODO (CP/IRIT): Bug on MPS if return type is bfloat16 instead of original type
+    return X.to(dtype=G_dtype)
 
 
 def muon_update(grad: torch.Tensor, momentum: torch.Tensor, beta: float = 0.95, nesterov: bool = True) -> torch.Tensor:
@@ -88,11 +90,15 @@ def muon_update(grad: torch.Tensor, momentum: torch.Tensor, beta: float = 0.95, 
         - Final update is scaled by sqrt(max(dim[-2], dim[-1])) to account for parameter dimensions.
     """
     momentum.lerp_(grad, 1 - beta)
-    update = grad.lerp(momentum, beta) if nesterov else momentum
-    if update.ndim == 4:  # for the case of conv filters
-        update = update.view(len(update), -1)
-    update = zeropower_via_newtonschulz5(update)
+    update_initial = grad.lerp(momentum, beta) if nesterov else momentum
+    if update_initial.ndim == 4:  # for the case of conv filters
+        update_initial = update_initial.view(len(update_initial), -1)
+    update = zeropower_via_newtonschulz5(update_initial)
     update *= max(1, grad.size(-2) / grad.size(-1)) ** 0.5
+    # TODO (CP/IRIT): Debug traces to find MPS type issue
+    # print(update.dtype)
+    # if (update.dtype != torch.float32):
+     #    pass
     return update
 
 
@@ -200,7 +206,8 @@ class MuSGD(optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
+        # TODO (CP/IRIT): Debug traces to find MPS type issue
+        # step = 0
         for group in self.param_groups:
             # Muon
             if group["use_muon"]:
@@ -215,9 +222,18 @@ class MuSGD(optim.Optimizer):
                         state["momentum_buffer"] = torch.zeros_like(p)
                         state["momentum_buffer_SGD"] = torch.zeros_like(p)
 
+                    # TODO (CP/IRIT): Debug traces to find MPS type issue
+                    # step += 1
+                    # if (step == 169):
+                    #     pass
+                    # print( step, state["momentum_buffer"].dtype, group["momentum"].dtype)
+
                     update = muon_update(
                         grad, state["momentum_buffer"], beta=group["momentum"], nesterov=group["nesterov"]
                     )
+
+                    update_reshaped = update.reshape(p.shape)
+                    alpha_value = -(lr * self.muon)
                     p.add_(update.reshape(p.shape), alpha=-(lr * self.muon))
 
                     # SGD update
@@ -241,6 +257,18 @@ class MuSGD(optim.Optimizer):
                     state = self.state[p]
                     if len(state) == 0:
                         state["momentum_buffer"] = torch.zeros_like(p)
+                    # TODO (CP/IRIT): Debug traces to find MPS type issue
+                    # step += 1
+                    # if (step == 168):
+                    #     pass
+                    # state_var = state["momentum_buffer"]
+                    # group_var = group["momentum"]
+                    # print(step,state_var.dtype,state_var.shape,group_var.dtype,group_var.shape)
+                    # mul_result = state_var.mul(group_var)
+                    # print(step,mul_result.dtype,mul_result.shape)
+                    # add_result = mul_result.add(grad)
+                    # print(step,mul_result.dtype,mul_result.shape
+                    # state["momentum_buffer"] = add_result
                     state["momentum_buffer"].mul_(group["momentum"]).add_(grad)
                     update = (
                         grad.add(state["momentum_buffer"], alpha=group["momentum"])
