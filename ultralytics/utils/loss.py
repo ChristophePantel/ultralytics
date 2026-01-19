@@ -558,6 +558,7 @@ class v8DetectionLoss:
                 matches = i == j
                 if n := matches.sum():
                     out[j, :n] = targets[matches, 1:]
+            # DONE (CP/IRIT): Bounding boxes are at the end of the out tensor.
             out[..., -4:] = xywh2xyxy(out[..., -4:].mul_(scale_tensor))
         return out
 
@@ -583,7 +584,8 @@ class v8DetectionLoss:
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size.
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size and return foreground mask and
+        target indices.
         TODO (CP/IRIT): Should all tensors be on the same device there ?
         Args:
             preds (Union[ Tuple( Tensor, ...), Tensor]) : prediction computed by the trainee network to compute the loss with respect to the ground truth
@@ -602,20 +604,22 @@ class v8DetectionLoss:
         
         # TODO (CP/IRIT): Adding knowledge model loss
         loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
-        
+
         # reorganize dimensions for future operations
-        pred_for_bboxes = preds["boxes"].permute(0, 2, 1).contiguous()
-        pred_scores = preds["scores"].permute(0, 2, 1).contiguous()
+        # rename pred_distri to pred_for_bboxes
+        pred_for_bboxes, pred_scores = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+        )
+        # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
 
         # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
-
-        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        # anchor points from the first stride, then the second, etc
-        # anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        # image size (h,w)
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
 
         # Targets
         
@@ -628,6 +632,7 @@ class v8DetectionLoss:
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT) : are the ground truth labels used ?
         gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
+
         # Identify future positive anchor points
         # Sum the components of each bounding boxes
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
@@ -637,6 +642,7 @@ class v8DetectionLoss:
 
         # Bounding boxes
         # Compute predicted bounding boxes according to anchor points
+        # rename pred_distri to pred_for_bboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
         
         smoothed_pred_scores = pred_scores.detach().sigmoid()
@@ -672,7 +678,7 @@ class v8DetectionLoss:
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
             loss[box_index], loss[dfl_index] = self.bbox_loss(
-                pred_for_bboxes, # new pred_distri
+                pred_for_bboxes, rename pred_distri to pred_for_bboxes
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,

@@ -1755,6 +1755,7 @@ class CopyPaste(BaseMixTransform):
 
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels1["cls"]
+        scores = labels1["scores"]
         h, w = im.shape[:2]
         instances = labels1.pop("instances")
         instances.convert_bbox(format="xyxy")
@@ -1772,6 +1773,7 @@ class CopyPaste(BaseMixTransform):
         indexes = indexes[sorted_idx]
         for j in indexes[: round(self.p * n)]:
             cls = np.concatenate((cls, labels2.get("cls", cls)[[j]]), axis=0)
+            scores = np.concatenate((scores, labels2.get("scores", scores)[[j]]), axis=0)
             instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
             cv2.drawContours(im_new, instances2.segments[[j]].astype(np.int32), -1, (1, 1, 1), cv2.FILLED)
 
@@ -1784,6 +1786,7 @@ class CopyPaste(BaseMixTransform):
         labels1["img"] = im
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels1["cls"] = cls
+        labels1["scores"] = scores
         labels1["instances"] = instances
         return labels1
 

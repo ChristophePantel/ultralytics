@@ -263,7 +263,7 @@ def verify_image_label(args: tuple) -> list:
             if ndim == 2:
                 kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
-        # TODO (CP/IRIT): 
+        # TODO (CP/IRIT): Class scores management.
         lb = lb[:, :5]
         class_scores = np.zeros((nl,num_cls),dtype=np.float32)
         for i in range(nl):

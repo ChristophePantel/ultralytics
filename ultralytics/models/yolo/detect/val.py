@@ -153,12 +153,12 @@ class DetectionValidator(BaseValidator):
             nc=0 if self.args.task == "detect" else self.nc,
             # TODO (CP/IRIT): Why is multi_label always set to True ?
             multi_label=True,
-            use_km_scores = self.use_km_scores,
-            use_variant_selection = self.use_variant_selection,
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
+            use_km_scores = self.use_km_scores,
+            use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): transmit the class variants from the model
             class_variants=self.class_variants,
             variant_to_class=self.variant_to_class,
@@ -184,7 +184,7 @@ class DetectionValidator(BaseValidator):
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
         if cls.shape[0]:
-            bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=bbox.device)[[1, 0, 1, 0]]  # target boxes
+            bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
         return {
             "cls": cls,
             "bboxes": bbox,
