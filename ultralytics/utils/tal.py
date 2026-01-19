@@ -117,6 +117,7 @@ class TaskAlignedAssigner(nn.Module):
                 return tuple(t.to(device) for t in result)
             raise
 
+    # DONE (CP/IRIT): Add class scores ground truth (variant scores)
     def _forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt):
         """Compute the task-aligned assignment.
 
@@ -215,64 +216,57 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric combining classification and localization.
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
-        try:
-            sz_anchor_points = pd_bboxes.shape[-2] # number of anchor points h*w
-            # TODO (CP/IRIT): Why not convert it earlier ?
-            mask_gt = mask_gt.bool()  # b, max_num_obj, h*w: is an anchor point in a given ground truth object from a given image
-            sz_mask_gt = torch.numel(mask_gt)
-            nz_mask_gt = torch.count_nonzero(mask_gt)
-            
-            overlaps = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
-            sz_overlaps = torch.numel(overlaps)
-            
-            bbox_scores = torch.zeros([self.bs, self.n_max_boxes, sz_anchor_points], dtype=pd_scores.dtype, device=pd_scores.device)
-    
-            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, bs, max_num_obj
-            # for each batch, vector of max_num_obj value of batch indexes
-            ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj: image index for each gt bounding box in the image
-            # TODO (CP/IRIT): Purpose of ind[1]
-            # for each batch, vector of max_num_obj class indexes
-            gt_labels_squeeze = gt_labels.squeeze(-1) # suppress last unused dimension
-            ind[1] =  gt_labels_squeeze # bs, max_num_obj: class index for each gt bounding box in the image
-            # Get the scores of each grid for each gt cls
-            ind_0 = ind[0]
-            ind_1 = ind[1]
-            # Select 
-            pd_scores_ind = pd_scores[ind_0, :, ind_1] # bs, max_num_obj, h * w: class score for each anchor point for each ground truth object in each image 
-            sz_bbox_scores = torch.numel(bbox_scores)
-            sz_pd_scores_ind = torch.numel(pd_scores_ind)
-            nz_pd_scores_ind = torch.count_nonzero(pd_scores_ind)
-            assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-            
-            pd_scores_masked = pd_scores_ind[mask_gt] # Select the scores for the anchor points in a given ground truth object from a given image
-            sz_pd_scores_masked = torch.numel(pd_scores_masked)
-            nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
-            assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        anchor_point_number = pd_bboxes.shape[-2] # number of anchor points h*w
+        # TODO (CP/IRIT): Why not convert it earlier ?
+        # Indicates if an anchor point is in a given ground truth object from a given image
+        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+        sz_mask_gt = torch.numel(mask_gt)
+        # nz_mask_gt = torch.count_nonzero(mask_gt)
+        overlaps = torch.zeros([self.bs, self.n_max_boxes, anchor_point_number], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+        sz_overlaps = torch.numel(overlaps)
+        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, anchor_point_number], dtype=pd_scores.dtype, device=pd_scores.device)
 
-            # The score of the bounding box is the score of the class associated to the bounding box
-            # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
-            bbox_scores[mask_gt] =  pd_scores_masked # b, max_num_obj, h*w: scores for the anchor points in a given ground truth object from a given image, others are 0
-            nz_bbox_scores = torch.count_nonzero(bbox_scores)
-            
-            # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
-            pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
-            gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, sz_anchor_points, -1)[mask_gt]
-            
-            # Compare the bounding box
-            iou_results = self.iou_calculation(gt_boxes, pd_boxes)
-            sz_iou_results = torch.numel(iou_results)
-            nz_iou_results = torch.count_nonzero(iou_results)
-            
-            assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-            overlaps[mask_gt] = iou_results
-            nz_overlaps = torch.count_nonzero(overlaps)
-            align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
-            sz_align_metrics = torch.numel(align_metric)
-            nz_align_metrics = torch.count_nonzero(align_metric)
-            
-            return align_metric, overlaps
-        except Exception as e:
-            return None, None
+        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, bs, max_num_obj
+        # for each batch, vector of max_num_obj value of batch indexes
+        # image index for each gt bounding box in the image
+        ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj
+        # TODO (CP/IRIT): Purpose of ind[1]
+        # for each batch, vector of max_num_obj class indexes
+        # suppress last unused dimension
+        # class index for each gt bounding box in the image
+        ind[1] = gt_labels.squeeze(-1) # bs, max_num_obj
+        # Get the scores of each grid for each gt cls
+        # Class score for each anchor point for each ground truth object in each image 
+        selected_pd_scores = pd_scores[ind[0], :, ind[1]] # bs, max_num_obj, h*w
+        sz_bbox_scores = torch.numel(bbox_scores)
+        sz_pd_scores_ind = torch.numel(selected_pd_scores)
+        nz_pd_scores_ind = torch.count_nonzero(selected_pd_scores)
+        assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        # Select the scores for the anchor points in a given ground truth object from a given image
+        pd_scores_masked = selected_pd_scores[mask_gt]
+        sz_pd_scores_masked = torch.numel(pd_scores_masked)
+        nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
+        assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        # The score of the bounding box is the score of the class associated to the bounding box
+        # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
+        # scores for the anchor points in a given ground truth object from a given image, others are 0
+        bbox_scores[mask_gt] = pd_scores_masked # b, max_num_obj, h*w
+        # nz_bbox_scores = torch.count_nonzero(bbox_scores)
+        
+        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
+        pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
+        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, anchor_point_number, -1)[mask_gt]
+        
+        # Compare the bounding box
+        iou_results = self.iou_calculation(gt_boxes, pd_boxes)
+        sz_iou_results = torch.numel(iou_results)
+        nz_iou_results = torch.count_nonzero(iou_results)
+        assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
+        overlaps[mask_gt] = iou_results
+        # nz_overlaps = torch.count_nonzero(overlaps)
+
+        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+        return align_metric, overlaps
 
     def iou_calculation(self, gt_bboxes, pd_bboxes):
         """Calculate IoU for horizontal bounding boxes.
@@ -445,10 +439,11 @@ class TaskAlignedAssigner(nn.Module):
         anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
         anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 
         positive_anchor_points = anchors_bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
-        positive_anchor_points_count = positive_anchor_points.sum(1)
-        image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)
-        overlap_anchor_points = positive_anchor_points[image_indexes,:,anchor_point_indexes]
-        overlap_anchor_point_indexes, overlap_box_indexes = torch.where(overlap_anchor_points == 1) 
+
+        # positive_anchor_points_count = positive_anchor_points.sum(1)
+        # image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)
+        # overlap_anchor_points = positive_anchor_points[image_indexes,:,anchor_point_indexes]
+        # overlap_anchor_point_indexes, overlap_box_indexes = torch.where(overlap_anchor_points == 1) 
         
         # TODO (CP/IRIT): Eliminate overlapping bounding boxes
         # Transform x_min y_min x_max y_max to x_c y_c w h to ensure that the center of the internal box is in the external box, and to introduce an error margin 
@@ -462,7 +457,6 @@ class TaskAlignedAssigner(nn.Module):
         delta_bbox =  torch.cat((delta_lt,delta_rb), dim=3)
         delta_bbox_min = delta_bbox.amin(3)
         positive_delta_bbox = delta_bbox_min.gt_(eps)
-        
         
         return positive_anchor_points
 
@@ -482,7 +476,8 @@ class TaskAlignedAssigner(nn.Module):
             fg_mask (torch.Tensor): Foreground mask, shape (b, h*w).
             mask_pos (torch.Tensor): Updated positive mask, shape (b, n_max_boxes, h*w).
         """
-        # Convert (b, n_max_boxes, h*w) -> (b, h*w): sum along all boxes for a given anchor point in a given image, produce the number of boxes for a given point
+        # Convert (b, n_max_boxes, h*w) -> (b, h*w)
+        # Sum along all boxes for a given anchor point in a given image, produce the number of boxes for a given point
         fg_mask = mask_pos.sum(-2)
         if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes (sum along the boxes > 1)
             # add a dimension between images and anchor points
@@ -491,27 +486,24 @@ class TaskAlignedAssigner(nn.Module):
 
             # select the bounding box that maximize the overlap with ??? (according to IoU)
             max_overlaps_idx = overlaps.argmax(1)  # (b, h*w)
-
             # creates a zero tensor with shape (b, n_max_boxes, h*w)
             is_max_overlaps = torch.zeros(mask_pos.shape, dtype=mask_pos.dtype, device=mask_pos.device)
             # set to 1 the index of the box that maximizes overlap
             is_max_overlaps.scatter_(1, max_overlaps_idx.unsqueeze(1), 1)
-
             # replace with the selected bounding box
             mask_pos = torch.where(mask_multi_gts, is_max_overlaps, mask_pos).float()  # (b, n_max_boxes, h*w)
-            sz_mask_pos = torch.numel(mask_pos)
-            nz_mask_pos = torch.count_nonzero(mask_pos)
+            # sz_mask_pos = torch.numel(mask_pos)
+            # nz_mask_pos = torch.count_nonzero(mask_pos)
             
-            # Convert (b, n_max_boxes, h*w) -> (b, h*w): sum along all boxes for a given anchor point in a given image, produce the number of boxes for a given point
             fg_mask = mask_pos.sum(-2)
-            
+
         if self.topk2 != self.topk:
             align_metric = align_metric * mask_pos  # update overlaps
             max_overlaps_idx = torch.topk(align_metric, self.topk2, dim=-1, largest=True).indices  # (b, n_max_boxes)
             topk_idx = torch.zeros(mask_pos.shape, dtype=mask_pos.dtype, device=mask_pos.device)  # update mask_pos
             topk_idx.scatter_(-1, max_overlaps_idx, 1.0)
             mask_pos *= topk_idx
-            # None should be > 1
+            fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
         # Select the bounding box with 1 (there should be a single one - all others should be 0)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
