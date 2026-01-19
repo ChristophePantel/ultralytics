@@ -148,7 +148,7 @@ class TaskAlignedAssigner(nn.Module):
         # TODO (CP/IRIT): Are the ground truth labels used ?
         target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
 
-        # Normalize
+        # Normalize : TODO (CP/IRIT): There is probably an issue there...
         align_metric *= single_pos_mask
         pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj
         pos_overlaps = (overlaps * single_pos_mask).amax(dim=-1, keepdim=True)  # b, max_num_obj
