@@ -157,11 +157,11 @@ class DetectionValidator(BaseValidator):
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
-            use_km_scores = self.use_km_scores,
+            use_km_scores = getattr(self, 'use_km_scores', None),
             use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): transmit the class variants from the model
-            class_variants=self.class_variants,
-            variant_to_class=self.variant_to_class,
+            class_variants=getattr(self, 'class_variants',None),
+            variant_to_class=getattr(self, 'variant_to_class',None),
         )
         return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "extra": x[:, 6+self.nc:]} for x in outputs]
 

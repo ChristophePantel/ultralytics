@@ -139,6 +139,7 @@ class TaskAlignedAssigner(nn.Module):
             fg_mask (torch.Tensor): Foreground mask with shape (bs, num_total_anchors).
             target_gt_idx (torch.Tensor): Target ground truth indices with shape (bs, num_total_anchors).
         """
+        # TODO (CP/IRIT): Are adaptation needed for multi label prediction ?
         # TODO (CP/IRIT): Are the ground truth labels used ?
         pos_mask, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
@@ -157,6 +158,7 @@ class TaskAlignedAssigner(nn.Module):
         pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj
         pos_overlaps = (overlaps * single_pos_mask).amax(dim=-1, keepdim=True)  # b, max_num_obj
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
+        # TODO (CP/IRIT): Are the scores between 0 and 1 ?
         target_scores = target_scores * norm_align_metric
 
         return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
@@ -178,6 +180,7 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric with shape (bs, max_num_obj, h*w).
             overlaps (torch.Tensor): Overlaps between predicted and ground truth boxes with shape (bs, max_num_obj, h*w).
         """
+        # TODO (CP/IRIT): Are adaptation needed for multi label prediction ?
         # Positive anchor points (included in bounding boxes) for all strides  
         mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes, mask_gt)
         # sz_mask_in_gts = torch.numel(mask_in_gts)
@@ -216,6 +219,7 @@ class TaskAlignedAssigner(nn.Module):
             align_metric (torch.Tensor): Alignment metric combining classification and localization.
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
+        # TODO (CP/IRIT): Are adaptation needed for multi label prediction ?
         anchor_point_number = pd_bboxes.shape[-2] # number of anchor points h*w
         # TODO (CP/IRIT): Why not convert it earlier ?
         # Indicates if an anchor point is in a given ground truth object from a given image
