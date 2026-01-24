@@ -394,7 +394,8 @@ class BasePredictor:
             model (str | Path | torch.nn.Module, optional): Model to load or use.
             verbose (bool): Whether to print verbose output.
         """
-        self.nc = model.nc
+        if hasattr(model, "end2end") and self.args.end2end is not None:
+            model.end2end = self.args.end2end
         if self.use_km:
             if hasattr(model, 'refinement'):
                 self.refinement = model.refinement
@@ -418,6 +419,7 @@ class BasePredictor:
             # class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
             # generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
             self.class_variants = km.encode_variants(self.nc, self.variants)
+
         self.model = AutoBackend(
             model=model or self.args.model,
             device=select_device(self.args.device, verbose=verbose),
