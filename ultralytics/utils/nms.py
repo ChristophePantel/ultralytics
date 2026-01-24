@@ -204,8 +204,8 @@ def non_max_suppression(
                 # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
                 # selected_test_sfe = torch.argmax(test_sfe,1)
                 # Remove abstract variants (without abstract variant version).
-                class_variants[3,2] = 0.0 # Animals
-                class_variants[156,58] = 0.0 # Vehicle
+                class_variants[2,2] = 0.0 # Animals
+                class_variants[119,58] = 0.0 # Vehicle
                 variants_scores = scores_fuzzy_equiv(class_variants, selected_scores)
                 selected_variants_scores, selected_variants = torch.max(variants_scores,1)
                 selected_variants = selected_variants.unsqueeze(1)

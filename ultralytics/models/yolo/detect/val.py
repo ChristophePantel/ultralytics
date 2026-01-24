@@ -63,6 +63,7 @@ class DetectionValidator(BaseValidator):
         self.niou = self.iouv.numel()
         self.metrics = DetMetrics()
         self.bce_calculator = nn.BCELoss(reduction="none")
+        self.count = 0
 
     def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
         """Preprocess batch of images for YOLO validation.
@@ -217,6 +218,7 @@ class DetectionValidator(BaseValidator):
             preds (list[dict[str, torch.Tensor]]): List of predictions from the model.
             batch (dict[str, Any]): Batch data containing ground truth.
         """
+        self.count += 1
         for si, pred in enumerate(preds):
             self.seen += 1
             pbatch = self._prepare_batch(si, batch)
@@ -228,6 +230,8 @@ class DetectionValidator(BaseValidator):
             no_pred = predn["cls"].shape[0] == 0
             # if no_pred:
             #    print("No prediction has been produced.")
+            if self.count >= 115:
+                pass
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),
