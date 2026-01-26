@@ -364,6 +364,9 @@ class KnowledgeBasedLoss(nn.Module):
         self.specialization_exclusion_weight = specialization_exclusion_weight
         self.refinement = model.refinement
         self.composition = model.composition
+        self.variants = model.variants
+        self.variant_to_class = model.variant_to_class
+        self.class_variants = km.encode_variants(model.nc, self.variants)
         self.classes = set(range(model.nc))
         self.refinement_forward = self.refinement # TODO (CP/IRIT)
         self.refinement_backward = km.invert_relation( self.refinement ) # TODO (CP/IRIT)
@@ -455,22 +458,21 @@ class KnowledgeBasedLoss(nn.Module):
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
-        
-        norm_pred_scores = pred_scores.sigmoid()
+
         if self.use_refinement:
             if len(self.refinement_forward) == 0:
                 S_loss = 0.0
                 SE_loss = 0.0
             else:
                 # Call disjunction_loss for refinement and composition
-                S_loss = self.disjunction_loss(norm_pred_scores, self.refinement_forward)
+                S_loss = self.disjunction_loss(pred_scores, self.refinement_forward)
                 # Call exclusion_loss for refinement and composition
-                SE_loss = self.exclusion_loss(norm_pred_scores, self.refinement_forward)
+                SE_loss = self.exclusion_loss(pred_scores, self.refinement_forward)
             if len(self.refinement_backward) == 0:
                  G_loss = 0.0
             else:
                 # Call conjunction_loss for refinement
-                G_loss = self.conjunction_loss(norm_pred_scores, self.refinement_backward)
+                G_loss = self.conjunction_loss(pred_scores, self.refinement_backward)
         else:
             S_loss = 0.0
             SE_loss = 0.0
@@ -481,22 +483,27 @@ class KnowledgeBasedLoss(nn.Module):
                 CE_loss = 0.0
             else:
                 # Call disjunction_loss for refinement and composition
-                C_loss = self.disjunction_loss(norm_pred_scores, self.composition_forward)
+                C_loss = self.disjunction_loss(pred_scores, self.composition_forward)
                 # Call exclusion_loss for refinement and composition
-                CE_loss = self.exclusion_loss(norm_pred_scores, self.composition_forward)
+                CE_loss = self.exclusion_loss(pred_scores, self.composition_forward)
             if len(self.composition_backward) == 0:
                 D_loss = 0.0
                 DE_loss = 0.0
             else:
                 # Call conjunction_loss for refinement
-                D_loss = self.disjunction_loss(norm_pred_scores, self.composition_backward)
-                DE_loss = self.exclusion_loss(norm_pred_scores, self.composition_backward)
+                D_loss = self.disjunction_loss(pred_scores, self.composition_backward)
+                DE_loss = self.exclusion_loss(pred_scores, self.composition_backward)
         else:
             C_loss = 0.0
             CE_loss = 0.0
             D_loss = 0.0
             DE_loss = 0.0
-        return self.specialization_weight * S_loss + self.composition_weight * C_loss + self.specialization_exclusion_weight * SE_loss + self.composition_exclusion_weight * CE_loss + self.generalization_weight * G_loss + self.decomposition_weight * D_loss
+        return (self.specialization_weight * S_loss
+            + self.composition_weight * C_loss 
+            + self.specialization_exclusion_weight * SE_loss 
+            + self.composition_exclusion_weight * CE_loss 
+            + self.generalization_weight * G_loss 
+            + self.decomposition_weight * D_loss)
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
@@ -645,7 +652,7 @@ class v8DetectionLoss:
         # rename pred_distri to pred_for_bboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
         
-        smoothed_pred_scores = pred_scores.detach().sigmoid()
+        smoothed_pred_scores = pred_scores.detach().softmax(2)
         
         # Scale predicted bounding boxes along the pyramid (stride values)
         scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
@@ -670,7 +677,8 @@ class v8DetectionLoss:
         
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
-            km_loss = self.km_loss(pred_scores,target_scores)
+            norm_pred_scores = pred_scores.softmax(2)
+            km_loss = self.km_loss(norm_pred_scores,target_scores)
             # print('Knowledge Model Loss = ',km_loss)
             loss[km_index] = km_loss
 
@@ -719,6 +727,9 @@ class v8DetectionLoss:
         batch: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        if (self.km_loss.class_variants != None):
+            test_data = self.km_loss.class_variants.unsqueeze(0) / 2 + 1 / 4
+            test = self.km_loss( test_data, test_data)
         return self.loss(self.parse_output(preds), batch)
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
