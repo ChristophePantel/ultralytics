@@ -394,8 +394,11 @@ class BasePredictor:
             model (str | Path | torch.nn.Module, optional): Model to load or use.
             verbose (bool): Whether to print verbose output.
         """
-        if hasattr(model, "end2end") and self.args.end2end is not None:
-            model.end2end = self.args.end2end
+        if hasattr(model, "end2end"):
+            if self.args.end2end is not None:
+                model.end2end = self.args.end2end
+            if model.end2end:
+                model.set_head_attr(max_det=self.args.max_det, agnostic_nms=self.args.agnostic_nms)
         if self.use_km:
             if hasattr(model, 'refinement'):
                 self.refinement = model.refinement
