@@ -652,7 +652,7 @@ class v8DetectionLoss:
         # rename pred_distri to pred_for_bboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
         
-        smoothed_pred_scores = pred_scores.detach().softmax(2)
+        smoothed_pred_scores = pred_scores.detach().sigmoid()
         
         # Scale predicted bounding boxes along the pyramid (stride values)
         scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
@@ -677,7 +677,12 @@ class v8DetectionLoss:
         
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
-            norm_pred_scores = pred_scores.softmax(2)
+            # KM loss takes as inputs probability that an object is an instance of a class to enforce the consistency w.r.t. the knowledge model.
+            # Should be 0 when there is no object and 1 when there is an object of a given class.
+            # But scores express confidence that there is an object (a bounding box) of a given class. 
+            # If an object is expected to be present, its main class score should be scaled to 1 and the other scores should be consistent.
+            # If no object are expected, no constraints should be enforced
+            norm_pred_scores = pred_scores.sigmoid()
             km_loss = self.km_loss(norm_pred_scores,target_scores)
             # print('Knowledge Model Loss = ',km_loss)
             loss[km_index] = km_loss
@@ -727,9 +732,10 @@ class v8DetectionLoss:
         batch: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
-        if (self.km_loss.class_variants != None):
-            test_data = self.km_loss.class_variants.unsqueeze(0) / 2 + 1 / 4
-            test = self.km_loss( test_data, test_data)
+        # DONE (CP/IRIT): Test the loss functions using variant data. Results should be 0.
+        # if (self.km_loss.class_variants != None):
+        #     test_data = self.km_loss.class_variants.unsqueeze(0)
+        #     test = self.km_loss( test_data, test_data)
         return self.loss(self.parse_output(preds), batch)
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
