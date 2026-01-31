@@ -128,13 +128,16 @@ def non_max_suppression(
 
     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
     # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
-    nc = nc or (prediction.shape[1] - 4)  # number of classes
-    extra = prediction.shape[1] - nc - 4  # number of extra info
+    nc = nc or ((prediction.shape[1] - 4))//2  # number of classes
+    extra = prediction.shape[1] - 2 * nc - 4  # number of extra info
     # mask start index / end of scores
-    mi = 4 + nc  # mask start index
+    mk = 4 + nc # start km scores index
+    mi = mk + nc  # mask start index
+    
     # TODO (CP/IRIT): Confidence is more complex when using knowledge models. A confidence should be computed for class variants (BCE with scores).
     # requires to have access to the class variants and not only the predictions
-    pred_scores = prediction[:, 4:mi] # extract the score for each raw class
+    pred_scores = prediction[:, 4:mk] # extract the score for each raw class
+    pred_km_scores = prediction[:, mk:mi]
     
     max_pred_scores = pred_scores.amax(1) # maximum only makes sense for a single class prediction
     # Maximum of scores over confidence threshold
@@ -180,7 +183,7 @@ def non_max_suppression(
             continue
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        predicted_boxes, predicted_scores, predicted_masks = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
+        predicted_boxes, predicted_scores, predicted_km_scores, predicted_masks = selected_image_prediction.split((4, nc, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
             # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants instead of simple predicted score
@@ -191,6 +194,7 @@ def non_max_suppression(
             selected_confidence = selected_image_prediction[selected_anchor_points, 4 + selected_classes, None]
             selected_class = selected_classes[:, None].float()
             selected_scores = predicted_scores[selected_anchor_points]
+            selected_km_scores = predicted_km_scores[selected_anchor_points]
             selected_mask = predicted_masks[selected_anchor_points]
             # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
             if use_variant_selection:
@@ -206,7 +210,7 @@ def non_max_suppression(
                 # Remove abstract variants (without abstract variant version).
                 class_variants[2,2] = 0.0 # Animals
                 class_variants[119,58] = 0.0 # Vehicle
-                variants_scores = scores_fuzzy_equiv(class_variants, selected_scores)
+                variants_scores = scores_fuzzy_equiv(class_variants, selected_km_scores)
                 selected_variants_scores, selected_variants = torch.max(variants_scores,1)
                 selected_variants = selected_variants.unsqueeze(1)
                 selected_variants_scores = selected_variants_scores.unsqueeze(1)

@@ -614,9 +614,10 @@ class v8DetectionLoss:
 
         # reorganize dimensions for future operations
         # rename pred_distri to pred_for_bboxes
-        pred_for_bboxes, pred_scores = (
+        pred_for_bboxes, pred_scores, pred_km_scores = (
             preds["boxes"].permute(0, 2, 1).contiguous(),
             preds["scores"].permute(0, 2, 1).contiguous(),
+            preds["km_scores"].permute(0, 2, 1).contiguous(),
         )
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
@@ -659,7 +660,7 @@ class v8DetectionLoss:
         scaled_anchor_points = anchor_points * stride_tensor
 
         # Computer the ground truth for the bounding boxes and class scores
-        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
+        _, target_bboxes, target_scores, target_km_scores, fg_mask, target_gt_idx = self.assigner(
             smoothed_pred_scores,
             scaled_pred_boxes,
             scaled_anchor_points,
@@ -682,8 +683,8 @@ class v8DetectionLoss:
             # But scores express confidence that there is an object (a bounding box) of a given class. 
             # If an object is expected to be present, its main class score should be scaled to 1 and the other scores should be consistent.
             # If no object are expected, no constraints should be enforced
-            norm_pred_scores = pred_scores.sigmoid()
-            km_loss = self.km_loss(norm_pred_scores,target_scores)
+            norm_pred_km_scores = pred_km_scores.sigmoid()
+            km_loss = self.km_loss(norm_pred_km_scores, target_km_scores)
             # print('Knowledge Model Loss = ',km_loss)
             loss[km_index] = km_loss
 

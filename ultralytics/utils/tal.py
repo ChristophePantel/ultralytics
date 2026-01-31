@@ -171,9 +171,10 @@ class TaskAlignedAssigner(nn.Module):
         pos_overlaps = (overlaps * single_pos_mask).amax(dim=-1, keepdim=True)  # b, max_num_obj
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         # TODO (CP/IRIT): Are the scores between 0 and 1 ?
+        target_km_scores = target_scores
         target_scores = target_scores * norm_align_metric
 
-        return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
+        return target_labels, target_bboxes, target_scores, target_km_scores, fg_mask.bool(), target_gt_idx
 
     # TODO (CP/IRIT): Is it meaningful to rely on predicted bounding boxes to select the positive mask for ground truth data ?
     def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):

@@ -106,6 +106,8 @@ def bbox_iou(
     Returns:
         (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
     """
+    if (box1.shape != box2.shape):
+        pass
     assert (box1.shape == box2.shape), ("box1 and box2 must have the same shape.")
     # Get the coordinates of bounding boxes
     if xywh:  # transform from xywh to xyxy
