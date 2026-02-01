@@ -164,7 +164,7 @@ class DetectionValidator(BaseValidator):
             class_variants=getattr(self, 'class_variants',None),
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
-        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "extra": x[:, 6+self.nc:]} for x in outputs]
+        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "km_scores":x[6+self.nc:6+2*self.nc], "extra": x[:, 6+2*self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:

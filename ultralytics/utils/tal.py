@@ -269,6 +269,8 @@ class TaskAlignedAssigner(nn.Module):
         # The score of the bounding box is the score of the class associated to the bounding box
         # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
         # Predicted scores for the anchor points in a given ground truth object from a given image, others are 0
+        if bbox_scores.shape != mask_gt.shape:
+            pass
         bbox_scores[mask_gt] = pd_scores_masked # b, max_num_obj, h*w
         # nz_bbox_scores = torch.count_nonzero(bbox_scores)
         

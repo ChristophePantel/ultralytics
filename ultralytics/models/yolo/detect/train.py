@@ -177,10 +177,13 @@ class DetectionTrainer(BaseTrainer):
     def get_validator(self):
         """Return a DetectionValidator for YOLO model validation."""
         # TODO (CP/IRIT): Adding knowledge model loss
-        if self.use_km_losses:
-            self.loss_names = "box_loss", "cls_loss", "km_loss", "dfl_loss"
+        if self.use_km_scores:
+            if self.use_km_losses:
+                self.loss_names = "box_loss", "conf_loss", "cls_loss", "km_loss", "dfl_loss"
+            else:
+                self.loss_names = "box_loss", "conf_loss", "cls_loss", "dfl_loss"
         else:
-            self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+            self.loss_names = "box_loss", "conf_loss", "dfl_loss"
         return yolo.detect.DetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )

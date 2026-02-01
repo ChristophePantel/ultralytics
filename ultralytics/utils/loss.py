@@ -602,11 +602,17 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
-        loss_number = 4 if self.use_km_losses else 3
+        if self.use_km_scores:
+            score_index = 2
+            if self.use_km_losses:
+                loss_number = 5
+                km_index = 3
+            else:
+                loss_number =4
+        else:
+            loss_number = 3
         box_index = 0
         cls_index = 1
-        if self.use_km_losses:
-            km_index = 2
         dfl_index = loss_number - 1
         
         # TODO (CP/IRIT): Adding knowledge model loss
@@ -676,6 +682,11 @@ class v8DetectionLoss:
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
         loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
+        if self.use_km_scores:
+            target_km_scores_sum = max(target_km_scores.sum(), 1)
+            km_bce_values = self.bce(pred_km_scores, target_scores.to(dtype))
+            loss[score_index] = km_bce_values.sum() / target_km_scores_sum  # BCE
+        
         # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
             # KM loss takes as inputs probability that an object is an instance of a class to enforce the consistency w.r.t. the knowledge model.
@@ -705,6 +716,8 @@ class v8DetectionLoss:
 
         loss[box_index] *= self.hyp.box  # box gain
         loss[cls_index] *= self.hyp.cls  # cls gain
+        if self.use_km_scores:
+            loss[score_index] *= self.hyp.cls 
         if self.use_km_losses:
             loss[km_index] *= self.hyp.km  # km gain
         loss[dfl_index] *= self.hyp.dfl  # dfl gain
