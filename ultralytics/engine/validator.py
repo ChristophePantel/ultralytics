@@ -277,6 +277,7 @@ class BaseValidator:
                 LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}")
             return stats
 
+    # TODO (CP/IRIT): Adapt to use knowledge model.
     def match_predictions(
         self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False
     ) -> torch.Tensor:

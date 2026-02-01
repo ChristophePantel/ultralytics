@@ -159,7 +159,8 @@ def non_max_suppression(
 
     t = time.time()
     # 6 = bounding box & class & confidence
-    output = [torch.zeros((0, 6 + extra), device=prediction.device)] * bs
+    # TODO (CP/IRIT): Too small for later extraction when there are no results.
+    output = [torch.zeros((0, 7 + 2 * nc + extra), device=prediction.device)] * bs
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
     # Rename xi as image_index, x as image_prediction, xk as image_anchor_point_indexes
     for image_index, (image_prediction, image_anchor_point_indexes) in enumerate(zip(prediction, anchor_point_indexes)):
@@ -223,9 +224,10 @@ def non_max_suppression(
                 # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
                 # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
                 # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
-                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_classes_from_variants, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_classes_from_variants, selected_scores, selected_variants, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else:
-                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                # TODO (CP/IRIT): When variants are not in use, the class index is returned as variant index
+                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[selected_anchor_points]
         else:  # best class only

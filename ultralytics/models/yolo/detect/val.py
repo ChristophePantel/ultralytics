@@ -164,7 +164,7 @@ class DetectionValidator(BaseValidator):
             class_variants=getattr(self, 'class_variants',None),
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
-        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "km_scores":x[6+self.nc:6+2*self.nc], "extra": x[:, 6+2*self.nc:]} for x in outputs]
+        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
@@ -240,7 +240,9 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy()
+                    "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy(),
+                    "pred_variant": np.zeros(0) if no_pred else predn["variant"].cpu().numpy(),
+                    "pred_km_scores": np.zeros((0,class_number)) if no_pred else predn["km_scores"].cpu().numpy()
                 }
             )
             # Evaluate
@@ -363,7 +365,7 @@ class DetectionValidator(BaseValidator):
         aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
         bce_per_class = self.bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
         bce = torch.sum(bce_per_class,2) / batch_scores_sum
-        detected = torch.where(bce < 1)
+        # detected = torch.where(bce < 1)
         return bce
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
