@@ -92,9 +92,12 @@ class Detect(nn.Module):
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
+        # cv2 predicts the bounding boxes coordinates
         self.cv2 = nn.ModuleList(
             nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
         )
+        # cv3 predicts the confidence scores for the bounding boxes and each of their class nature
+        # this confidence combines both results 
         self.cv3 = (
             nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
             if self.legacy
@@ -107,12 +110,17 @@ class Detect(nn.Module):
                 for x in ch
             )
         )
+        # DONE (CP/IRIT): Add the variant score prediction in Head
+        # this confidence excludes bounding boxes confidences
         self.cv3_km = copy.deepcopy(self.cv3)
+        
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
         if end2end:
             self.one2one_cv2 = copy.deepcopy(self.cv2)
             self.one2one_cv3 = copy.deepcopy(self.cv3)
+            
+            # DONE (CP/IRIT): Add the variant score prediction in Head 
             self.one2one_cv3_km = copy.deepcopy(self.cv3_km)
 
     @property

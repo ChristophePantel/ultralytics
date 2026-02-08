@@ -78,6 +78,7 @@ class DetectionValidator(BaseValidator):
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
+        
         # TODO(CP/IRIT): manage "scores" in the same way
         for k in {"batch_idx", "cls", "scores", "bboxes"}:
             batch[k] = batch[k].to(self.device, non_blocking=True)
@@ -100,6 +101,7 @@ class DetectionValidator(BaseValidator):
         self.args.save_json |= self.args.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
         self.names = model.names
         self.nc = len(model.names)
+        
         # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
         if self.use_km:
             if hasattr(model, 'refinement'):
