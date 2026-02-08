@@ -3,7 +3,7 @@
 Train a model on a dataset.
 
 Usage:
-    $ yolo mode=train model=yolo11n.pt data=coco8.yaml imgsz=640 epochs=100 batch=16
+    $ yolo mode=train model=yolo26n.pt data=coco8.yaml imgsz=640 epochs=100 batch=16
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import time
 import warnings
 from copy import copy, deepcopy
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,7 @@ from ultralytics import __version__
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.nn.tasks import load_checkpoint
+from ultralytics.optim import MuSGD
 from ultralytics.utils import (
     DEFAULT_CFG,
     GIT,
@@ -63,8 +65,7 @@ from ultralytics.utils.torch_utils import (
 
 
 class BaseTrainer:
-    """
-    A base class for creating trainers.
+    """A base class for creating trainers.
 
     This class provides the foundation for training YOLO models, handling the training loop, validation, checkpointing,
     and various training utilities. It supports both single-GPU and multi-GPU distributed training.
@@ -114,8 +115,7 @@ class BaseTrainer:
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
-        """
-        Initialize the BaseTrainer class.
+        """Initialize the BaseTrainer class.
 
         Args:
             cfg (str, optional): Path to a configuration file.
@@ -124,6 +124,13 @@ class BaseTrainer:
         """
         self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
+        self.use_scores = getattr(self.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
         self.check_resume(overrides)
         self.device = select_device(self.args.device)
         # Update "-1" devices so post-training val does not repeat search
@@ -140,7 +147,12 @@ class BaseTrainer:
         if RANK in {-1, 0}:
             self.wdir.mkdir(parents=True, exist_ok=True)  # make dir
             self.args.save_dir = str(self.save_dir)
-            YAML.save(self.save_dir / "args.yaml", vars(self.args))  # save run args
+            # Save run args, serializing augmentations as reprs for resume compatibility
+            args_dict = vars(self.args).copy()
+            if args_dict.get("augmentations") is not None:
+                # Serialize Albumentations transforms as their repr strings for checkpoint compatibility
+                args_dict["augmentations"] = [repr(t) for t in args_dict["augmentations"]]
+            YAML.save(self.save_dir / "args.yaml", args_dict)  # save run args
         self.last, self.best = self.wdir / "last.pt", self.wdir / "best.pt"  # checkpoint paths
         self.save_period = self.args.save_period
 
@@ -154,8 +166,29 @@ class BaseTrainer:
         if self.device.type in {"cpu", "mps"}:
             self.args.workers = 0  # faster CPU training as time dominated by inference, not dataloading
 
+        # Callbacks - initialize early so on_pretrain_routine_start can capture original args.data
+        self.callbacks = _callbacks or callbacks.get_default_callbacks()
+
+        if isinstance(self.args.device, str) and len(self.args.device):  # i.e. device='0' or device='0,1,2,3'
+            world_size = len(self.args.device.split(","))
+        elif isinstance(self.args.device, (tuple, list)):  # i.e. device=[0, 1, 2, 3] (multi-GPU from CLI is list)
+            world_size = len(self.args.device)
+        elif self.args.device in {"cpu", "mps"}:  # i.e. device='cpu' or 'mps'
+            world_size = 0
+        elif torch.cuda.is_available():  # i.e. device=None or device='' or device=number
+            world_size = 1  # default to device 0
+        else:  # i.e. device=None or device=''
+            world_size = 0
+
+        self.ddp = world_size > 1 and "LOCAL_RANK" not in os.environ
+        self.world_size = world_size
+        # Run on_pretrain_routine_start before get_dataset() to capture original args.data (e.g., ul:// URIs)
+        if RANK in {-1, 0} and not self.ddp:
+            callbacks.add_integration_callbacks(self)
+            self.run_callbacks("on_pretrain_routine_start")
+
         # Model and Dataset
-        self.model = check_model_file_from_stem(self.args.model)  # add suffix, i.e. yolo11n -> yolo11n.pt
+        self.model = check_model_file_from_stem(self.args.model)  # add suffix, i.e. yolo26n -> yolo26n.pt
         with torch_distributed_zero_first(LOCAL_RANK):  # avoid auto-downloading dataset multiple times
             self.data = self.get_dataset()
 
@@ -176,28 +209,6 @@ class BaseTrainer:
             self.csv.unlink()
         self.plot_idx = [0, 1, 2]
         self.nan_recovery_attempts = 0
-
-        # Callbacks
-        self.callbacks = _callbacks or callbacks.get_default_callbacks()
-
-        if isinstance(self.args.device, str) and len(self.args.device):  # i.e. device='0' or device='0,1,2,3'
-            world_size = len(self.args.device.split(","))
-        elif isinstance(self.args.device, (tuple, list)):  # i.e. device=[0, 1, 2, 3] (multi-GPU from CLI is list)
-            world_size = len(self.args.device)
-        elif self.args.device in {"cpu", "mps"}:  # i.e. device='cpu' or 'mps'
-            world_size = 0
-        elif torch.cuda.is_available():  # i.e. device=None or device='' or device=number
-            world_size = 1  # default to device 0
-        else:  # i.e. device=None or device=''
-            world_size = 0
-
-        self.ddp = world_size > 1 and "LOCAL_RANK" not in os.environ
-        self.world_size = world_size
-        # Run subprocess if DDP training, else train normally
-        if RANK in {-1, 0} and not self.ddp:
-            callbacks.add_integration_callbacks(self)
-            # Start console logging immediately at trainer initialization
-            self.run_callbacks("on_pretrain_routine_start")
 
     def add_callback(self, event: str, callback):
         """Append the given callback to the event's callback list."""
@@ -318,7 +329,7 @@ class BaseTrainer:
         # Dataloaders
         batch_size = self.batch_size // max(self.world_size, 1)
         self.train_loader = self.get_dataloader(
-            self.data["train"], batch_size=batch_size, rank=LOCAL_RANK, mode="train"
+            self.data["train"], batch_size=batch_size, rank=LOCAL_RANK, mode="train", model=self.model
         )
         # Note: When training DOTA dataset, double batch size could get OOM on images with >2000 objects.
         self.test_loader = self.get_dataloader(
@@ -326,6 +337,7 @@ class BaseTrainer:
             batch_size=batch_size if self.args.task == "obb" else batch_size * 2,
             rank=LOCAL_RANK,
             mode="val",
+            model=self.model
         )
         self.validator = self.get_validator()
         self.ema = ModelEMA(self.model)
@@ -405,10 +417,15 @@ class BaseTrainer:
                 if ni <= nw:
                     xi = [0, nw]  # x interp
                     self.accumulate = max(1, int(np.interp(ni, xi, [1, self.args.nbs / self.batch_size]).round()))
-                    for j, x in enumerate(self.optimizer.param_groups):
+                    for x in self.optimizer.param_groups:
                         # Bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
                         x["lr"] = np.interp(
-                            ni, xi, [self.args.warmup_bias_lr if j == 0 else 0.0, x["initial_lr"] * self.lf(epoch)]
+                            ni,
+                            xi,
+                            [
+                                self.args.warmup_bias_lr if x.get("param_group") == "bias" else 0.0,
+                                x["initial_lr"] * self.lf(epoch),
+                            ],
                         )
                         if "momentum" in x:
                             x["momentum"] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
@@ -462,14 +479,17 @@ class BaseTrainer:
 
                 self.run_callbacks("on_train_batch_end")
 
+            if hasattr(unwrap_model(self.model).criterion, "update"):
+                unwrap_model(self.model).criterion.update()
+
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
 
             self.run_callbacks("on_train_epoch_end")
             if RANK in {-1, 0}:
-                final_epoch = epoch + 1 >= self.epochs
                 self.ema.update_attr(self.model, include=["yaml", "nc", "args", "names", "stride", "class_weights"])
 
             # Validation
+            final_epoch = epoch + 1 >= self.epochs
             if self.args.val or final_epoch or self.stopper.possible_stop or self.stop:
                 self._clear_memory(threshold=0.5)  # prevent VRAM spike
                 self.metrics, self.fitness = self.validate()
@@ -620,25 +640,26 @@ class BaseTrainer:
             (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
 
     def get_dataset(self):
-        """
-        Get train and validation datasets from data dictionary.
+        """Get train and validation datasets from data dictionary.
 
         Returns:
             (dict): A dictionary containing the training/validation/test dataset and category names.
         """
         try:
-            if self.args.task == "classify":
-                data = check_cls_dataset(self.args.data)
-            elif self.args.data.rsplit(".", 1)[-1] == "ndjson":
-                # Convert NDJSON to YOLO format
+            # Convert ul:// platform URIs and NDJSON files to local dataset format first
+            data_str = str(self.args.data)
+            if data_str.endswith(".ndjson") or (data_str.startswith("ul://") and "/datasets/" in data_str):
                 import asyncio
 
                 from ultralytics.data.converter import convert_ndjson_to_yolo
+                from ultralytics.utils.checks import check_file
 
-                yaml_path = asyncio.run(convert_ndjson_to_yolo(self.args.data))
-                self.args.data = str(yaml_path)
-                data = check_det_dataset(self.args.data)
-            elif self.args.data.rsplit(".", 1)[-1] in {"yaml", "yml"} or self.args.task in {
+                self.args.data = str(asyncio.run(convert_ndjson_to_yolo(check_file(self.args.data))))
+
+            # Task-specific dataset checking
+            if self.args.task == "classify":
+                data = check_cls_dataset(self.args.data)
+            elif str(self.args.data).rsplit(".", 1)[-1] in {"yaml", "yml"} or self.args.task in {
                 "detect",
                 "segment",
                 "pose",
@@ -656,8 +677,7 @@ class BaseTrainer:
         return data
 
     def setup_model(self):
-        """
-        Load, create, or download model for any task.
+        """Load, create, or download model for any task.
 
         Returns:
             (dict): Optional checkpoint to resume training from.
@@ -690,8 +710,7 @@ class BaseTrainer:
         return batch
 
     def validate(self):
-        """
-        Run validation on val set using self.validator.
+        """Run validation on val set using self.validator.
 
         Returns:
             metrics (dict): Dictionary of validation metrics.
@@ -714,11 +733,11 @@ class BaseTrainer:
         raise NotImplementedError("This task trainer doesn't support loading cfg files")
 
     def get_validator(self):
-        """Return a NotImplementedError when the get_validator function is called."""
+        """Raise NotImplementedError (must be implemented by subclasses)."""
         raise NotImplementedError("get_validator function not implemented in trainer")
 
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
-        """Return dataloader derived from torch.data.Dataloader."""
+    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train", model=None):
+        """Raise NotImplementedError (must return a `torch.utils.data.DataLoader` in subclasses)."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")
 
     def build_dataset(self, img_path, mode="train", batch=None):
@@ -726,8 +745,7 @@ class BaseTrainer:
         raise NotImplementedError("build_dataset function not implemented in trainer")
 
     def label_loss_items(self, loss_items=None, prefix="train"):
-        """
-        Return a loss dict with labeled training loss items tensor.
+        """Return a loss dict with labeled training loss items tensor.
 
         Notes:
             This is not needed for classification but necessary for segmentation & detection
@@ -761,9 +779,9 @@ class BaseTrainer:
         n = len(metrics) + 2  # number of cols
         t = time.time() - self.train_time_start
         self.csv.parent.mkdir(parents=True, exist_ok=True)  # ensure parent directory exists
-        s = "" if self.csv.exists() else (("%s," * n % tuple(["epoch", "time", *keys])).rstrip(",") + "\n")  # header
+        s = "" if self.csv.exists() else ("%s," * n % ("epoch", "time", *keys)).rstrip(",") + "\n"
         with open(self.csv, "a", encoding="utf-8") as f:
-            f.write(s + ("%.6g," * n % tuple([self.epoch + 1, t, *vals])).rstrip(",") + "\n")
+            f.write(s + ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",") + "\n")
 
     def plot_metrics(self):
         """Plot metrics from a CSV file."""
@@ -812,9 +830,28 @@ class BaseTrainer:
                     "batch",
                     "device",
                     "close_mosaic",
+                    "augmentations",
+                    "save_period",
+                    "workers",
+                    "cache",
+                    "patience",
+                    "time",
+                    "freeze",
+                    "val",
+                    "plots",
                 ):  # allow arg updates to reduce memory or update device on resume
                     if k in overrides:
                         setattr(self.args, k, overrides[k])
+
+                # Handle augmentations parameter for resume: check if user provided custom augmentations
+                if ckpt_args.get("augmentations") is not None:
+                    # Augmentations were saved in checkpoint as reprs but can't be restored automatically
+                    LOGGER.warning(
+                        "Custom Albumentations transforms were used in the original training run but are not "
+                        "being restored. To preserve custom augmentations when resuming, you need to pass the "
+                        "'augmentations' parameter again to get expected results. Example: \n"
+                        f"model.train(resume=True, augmentations={ckpt_args['augmentations']})"
+                    )
 
             except Exception as e:
                 raise FileNotFoundError(
@@ -895,23 +932,21 @@ class BaseTrainer:
             self.train_loader.dataset.close_mosaic(hyp=copy(self.args))
 
     def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5, iterations=1e5):
-        """
-        Construct an optimizer for the given model.
+        """Construct an optimizer for the given model.
 
         Args:
             model (torch.nn.Module): The model for which to build an optimizer.
-            name (str, optional): The name of the optimizer to use. If 'auto', the optimizer is selected
-                based on the number of iterations.
+            name (str, optional): The name of the optimizer to use. If 'auto', the optimizer is selected based on the
+                number of iterations.
             lr (float, optional): The learning rate for the optimizer.
             momentum (float, optional): The momentum factor for the optimizer.
             decay (float, optional): The weight decay for the optimizer.
-            iterations (float, optional): The number of iterations, which determines the optimizer if
-                name is 'auto'.
+            iterations (float, optional): The number of iterations, which determines the optimizer if name is 'auto'.
 
         Returns:
             (torch.optim.Optimizer): The constructed optimizer.
         """
-        g = [], [], []  # optimizer parameter groups
+        g = [{}, {}, {}, {}]  # optimizer parameter groups
         bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
         if name == "auto":
             LOGGER.info(
@@ -921,38 +956,62 @@ class BaseTrainer:
             )
             nc = self.data.get("nc", 10)  # number of classes
             lr_fit = round(0.002 * 5 / (4 + nc), 6)  # lr0 fit equation to 6 decimal places
-            name, lr, momentum = ("SGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
+            name, lr, momentum = ("MuSGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
             self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
 
-        for module_name, module in model.named_modules():
+        use_muon = name == "MuSGD"
+        for module_name, module in unwrap_model(model).named_modules():
             for param_name, param in module.named_parameters(recurse=False):
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
-                if "bias" in fullname:  # bias (no decay)
-                    g[2].append(param)
+                if param.ndim >= 2 and use_muon:
+                    g[3][fullname] = param  # muon params
+                elif "bias" in fullname:  # bias (no decay)
+                    g[2][fullname] = param
                 elif isinstance(module, bn) or "logit_scale" in fullname:  # weight (no decay)
                     # ContrastiveHead and BNContrastiveHead included here with 'logit_scale'
-                    g[1].append(param)
+                    g[1][fullname] = param
                 else:  # weight (with decay)
-                    g[0].append(param)
+                    g[0][fullname] = param
+        if not use_muon:
+            g = [x.values() for x in g[:3]]  # convert to list of params
 
-        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "auto"}
+        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "MuSGD", "auto"}
         name = {x.lower(): x for x in optimizers}.get(name.lower())
         if name in {"Adam", "Adamax", "AdamW", "NAdam", "RAdam"}:
-            optimizer = getattr(optim, name, optim.Adam)(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+            optim_args = dict(lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
         elif name == "RMSProp":
-            optimizer = optim.RMSprop(g[2], lr=lr, momentum=momentum)
-        elif name == "SGD":
-            optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
+            optim_args = dict(lr=lr, momentum=momentum)
+        elif name == "SGD" or name == "MuSGD":
+            optim_args = dict(lr=lr, momentum=momentum, nesterov=True)
         else:
             raise NotImplementedError(
                 f"Optimizer '{name}' not found in list of available optimizers {optimizers}. "
                 "Request support for addition optimizers at https://github.com/ultralytics/ultralytics."
             )
 
-        optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
-        optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
+        num_params = [len(g[0]), len(g[1]), len(g[2])]  # number of param groups
+        g[2] = {"params": g[2], **optim_args, "param_group": "bias"}
+        g[0] = {"params": g[0], **optim_args, "weight_decay": decay, "param_group": "weight"}
+        g[1] = {"params": g[1], **optim_args, "weight_decay": 0.0, "param_group": "bn"}
+        muon, sgd = (0.2, 1.0)
+        if use_muon:
+            num_params[0] = len(g[3])  # update number of params
+            g[3] = {"params": g[3], **optim_args, "weight_decay": decay, "use_muon": True, "param_group": "muon"}
+            import re
+
+            # higher lr for certain parameters in MuSGD when funetuning
+            pattern = re.compile(r"(?=.*23)(?=.*cv3)|proto\.semseg")
+            g_ = []  # new param groups
+            for x in g:
+                p = x.pop("params")
+                p1 = [v for k, v in p.items() if pattern.search(k)]
+                p2 = [v for k, v in p.items() if not pattern.search(k)]
+                g_.extend([{"params": p1, **x, "lr": lr * 3}, {"params": p2, **x}])
+            g = g_
+        optimizer = getattr(optim, name, partial(MuSGD, muon=muon, sgd=sgd))(params=g)
+
         LOGGER.info(
             f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}, momentum={momentum}) with parameter groups "
-            f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
+            f"{num_params[1]} weight(decay=0.0), {num_params[0]} weight(decay={decay}), {num_params[2]} bias(decay=0.0)"
         )
         return optimizer

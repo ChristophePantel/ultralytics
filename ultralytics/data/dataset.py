@@ -47,8 +47,7 @@ DATASET_CACHE_VERSION = "1.0.3"
 
 
 class YOLODataset(BaseDataset):
-    """
-    Dataset class for loading object detection and/or segmentation labels in YOLO format.
+    """Dataset class for loading object detection and/or segmentation labels in YOLO format.
 
     This class supports loading data for object detection, segmentation, pose estimation, and oriented bounding box
     (OBB) tasks using the YOLO format.
@@ -75,8 +74,7 @@ class YOLODataset(BaseDataset):
     """
 
     def __init__(self, *args, data: dict | None = None, task: str = "detect", **kwargs):
-        """
-        Initialize the YOLODataset.
+        """Initialize the YOLODataset.
 
         Args:
             data (dict, optional): Dataset configuration dictionary.
@@ -84,6 +82,13 @@ class YOLODataset(BaseDataset):
             *args (Any): Additional positional arguments for the parent class.
             **kwargs (Any): Additional keyword arguments for the parent class.
         """
+        self.use_scores = kwargs["hyp"].get("use_scores",False)
+        self.use_km = self.use_scores and kwargs["hyp"].get("use_km",False)
+        self.use_km_scores = self.use_km and kwargs["hyp"].get("use_km_scores",False)
+        self.use_variant_selection = self.use_km_scores and kwargs["hyp"].get("use_variant_selection",False)
+        self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_scores",False)
+        self.use_refinement = self.use_km_losses and kwargs["hyp"].get("use_refinement",False)
+        self.use_composition = self.use_km_losses and kwargs["hyp"].get("use_composition",False)
         self.use_segments = task == "segment"
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
@@ -92,8 +97,7 @@ class YOLODataset(BaseDataset):
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
-        """
-        Cache dataset labels, check images and read shapes.
+        """Cache dataset labels, check images and read shapes.
 
         Args:
             path (Path): Path where to save the cache file.
@@ -123,6 +127,7 @@ class YOLODataset(BaseDataset):
                     repeat(nkpt),
                     repeat(ndim),
                     repeat(self.single_cls),
+                    repeat(self.use_km_scores),
                 ),
             )
             pbar = TQDM(results, desc=desc, total=total)
@@ -168,8 +173,7 @@ class YOLODataset(BaseDataset):
         return x
 
     def get_labels(self) -> list[dict]:
-        """
-        Return dictionary of labels for YOLO training.
+        """Return dictionary of labels for YOLO training.
 
         This method loads labels from disk or cache, verifies their integrity, and prepares them for training.
 
@@ -218,8 +222,7 @@ class YOLODataset(BaseDataset):
         return labels
 
     def build_transforms(self, hyp: dict | None = None) -> Compose:
-        """
-        Build and append transforms to the list.
+        """Build and append transforms to the list.
 
         Args:
             hyp (dict, optional): Hyperparameters for transforms.
@@ -250,8 +253,7 @@ class YOLODataset(BaseDataset):
         return transforms
 
     def close_mosaic(self, hyp: dict) -> None:
-        """
-        Disable mosaic, copy_paste, mixup and cutmix augmentations by setting their probabilities to 0.0.
+        """Disable mosaic, copy_paste, mixup and cutmix augmentations by setting their probabilities to 0.0.
 
         Args:
             hyp (dict): Hyperparameters for transforms.
@@ -263,8 +265,7 @@ class YOLODataset(BaseDataset):
         self.transforms = self.build_transforms(hyp)
 
     def update_labels_info(self, label: dict) -> dict:
-        """
-        Update label format for different tasks.
+        """Update label format for different tasks.
 
         Args:
             label (dict): Label dictionary containing bboxes, segments, keypoints, etc.
@@ -297,8 +298,7 @@ class YOLODataset(BaseDataset):
 
     @staticmethod
     def collate_fn(batch: list[dict]) -> dict:
-        """
-        Collate data samples into batches.
+        """Collate data samples into batches.
 
         Args:
             batch (list[dict]): List of dictionaries containing sample data.
@@ -312,11 +312,11 @@ class YOLODataset(BaseDataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in {"img", "text_feats"}:
+            if k in {"img", "text_feats", "sem_masks"}:
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb"}:
+            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb", "sem_masks"}:
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
@@ -327,8 +327,7 @@ class YOLODataset(BaseDataset):
 
 
 class YOLOMultiModalDataset(YOLODataset):
-    """
-    Dataset class for loading object detection and/or segmentation labels in YOLO format with multi-modal support.
+    """Dataset class for loading object detection and/or segmentation labels in YOLO format with multi-modal support.
 
     This class extends YOLODataset to add text information for multi-modal model training, enabling models to process
     both image and text data.
@@ -344,8 +343,7 @@ class YOLOMultiModalDataset(YOLODataset):
     """
 
     def __init__(self, *args, data: dict | None = None, task: str = "detect", **kwargs):
-        """
-        Initialize a YOLOMultiModalDataset.
+        """Initialize a YOLOMultiModalDataset.
 
         Args:
             data (dict, optional): Dataset configuration dictionary.
@@ -356,8 +354,7 @@ class YOLOMultiModalDataset(YOLODataset):
         super().__init__(*args, data=data, task=task, **kwargs)
 
     def update_labels_info(self, label: dict) -> dict:
-        """
-        Add text information for multi-modal model training.
+        """Add text information for multi-modal model training.
 
         Args:
             label (dict): Label dictionary containing bboxes, segments, keypoints, etc.
@@ -373,8 +370,7 @@ class YOLOMultiModalDataset(YOLODataset):
         return labels
 
     def build_transforms(self, hyp: dict | None = None) -> Compose:
-        """
-        Enhance data transformations with optional text augmentation for multi-modal training.
+        """Enhance data transformations with optional text augmentation for multi-modal training.
 
         Args:
             hyp (dict, optional): Hyperparameters for transforms.
@@ -389,7 +385,7 @@ class YOLOMultiModalDataset(YOLODataset):
             # the strategy of selecting negative is restricted in one dataset,
             # while official pre-saved neg embeddings from all datasets at once.
             transform = RandomLoadText(
-                # TODO (CP/IRIT): which is there an 80 limit ?
+                # TODO (CP/IRIT): why is there an 80 limit ?
                 max_samples=min(self.data["nc"], 80),
                 padding=True,
                 padding_value=self._get_neg_texts(self.category_freq),
@@ -399,8 +395,7 @@ class YOLOMultiModalDataset(YOLODataset):
 
     @property
     def category_names(self):
-        """
-        Return category names for the dataset.
+        """Return category names for the dataset.
 
         Returns:
             (set[str]): List of class names.
@@ -431,8 +426,7 @@ class YOLOMultiModalDataset(YOLODataset):
 
 
 class GroundingDataset(YOLODataset):
-    """
-    Dataset class for object detection tasks using annotations from a JSON file in grounding format.
+    """Dataset class for object detection tasks using annotations from a JSON file in grounding format.
 
     This dataset is designed for grounding tasks where annotations are provided in a JSON file rather than the standard
     YOLO format text files.
@@ -451,8 +445,7 @@ class GroundingDataset(YOLODataset):
     """
 
     def __init__(self, *args, task: str = "detect", json_file: str = "", max_samples: int = 80, **kwargs):
-        """
-        Initialize a GroundingDataset for object detection.
+        """Initialize a GroundingDataset for object detection.
 
         Args:
             json_file (str): Path to the JSON file containing annotations.
@@ -467,8 +460,7 @@ class GroundingDataset(YOLODataset):
         super().__init__(*args, task=task, data={"channels": 3}, **kwargs)
 
     def get_img_files(self, img_path: str) -> list:
-        """
-        The image files would be read in `get_labels` function, return empty list here.
+        """The image files would be read in `get_labels` function, return empty list here.
 
         Args:
             img_path (str): Path to the directory containing images.
@@ -479,21 +471,19 @@ class GroundingDataset(YOLODataset):
         return []
 
     def verify_labels(self, labels: list[dict[str, Any]]) -> None:
-        """
-        Verify the number of instances in the dataset matches expected counts.
+        """Verify the number of instances in the dataset matches expected counts.
 
         This method checks if the total number of bounding box instances in the provided labels matches the expected
         count for known datasets. It performs validation against a predefined set of datasets with known instance
         counts.
 
         Args:
-            labels (list[dict[str, Any]]): List of label dictionaries, where each dictionary
-                contains dataset annotations. Each label dict must have a 'bboxes' key with a numpy array or tensor
-                containing bounding box coordinates.
+            labels (list[dict[str, Any]]): List of label dictionaries, where each dictionary contains dataset
+                annotations. Each label dict must have a 'bboxes' key with a numpy array or tensor containing bounding
+                box coordinates.
 
         Raises:
-            AssertionError: If the actual instance count doesn't match the expected count
-                for a recognized dataset.
+            AssertionError: If the actual instance count doesn't match the expected count for a recognized dataset.
 
         Notes:
             For unrecognized datasets (those not in the predefined expected_counts),
@@ -514,8 +504,7 @@ class GroundingDataset(YOLODataset):
         LOGGER.warning(f"Skipping instance count verification for unrecognized dataset '{self.json_file}'")
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict[str, Any]:
-        """
-        Load annotations from a JSON file, filter, and normalize bounding boxes for each image.
+        """Load annotations from a JSON file, filter, and normalize bounding boxes for each image.
 
         Args:
             path (Path): Path where to save the cache file.
@@ -606,8 +595,7 @@ class GroundingDataset(YOLODataset):
         return x
 
     def get_labels(self) -> list[dict]:
-        """
-        Load labels from cache or generate them from JSON file.
+        """Load labels from cache or generate them from JSON file.
 
         Returns:
             (list[dict]): List of label dictionaries, each containing information about an image and its annotations.
@@ -628,8 +616,7 @@ class GroundingDataset(YOLODataset):
         return labels
 
     def build_transforms(self, hyp: dict | None = None) -> Compose:
-        """
-        Configure augmentations for training with optional text loading.
+        """Configure augmentations for training with optional text loading.
 
         Args:
             hyp (dict, optional): Hyperparameters for transforms.
@@ -676,8 +663,7 @@ class GroundingDataset(YOLODataset):
 
 
 class YOLOConcatDataset(ConcatDataset):
-    """
-    Dataset as a concatenation of multiple datasets.
+    """Dataset as a concatenation of multiple datasets.
 
     This class is useful to assemble different existing datasets for YOLO training, ensuring they use the same collation
     function.
@@ -693,8 +679,7 @@ class YOLOConcatDataset(ConcatDataset):
 
     @staticmethod
     def collate_fn(batch: list[dict]) -> dict:
-        """
-        Collate data samples into batches.
+        """Collate data samples into batches.
 
         Args:
             batch (list[dict]): List of dictionaries containing sample data.
@@ -705,8 +690,7 @@ class YOLOConcatDataset(ConcatDataset):
         return YOLODataset.collate_fn(batch)
 
     def close_mosaic(self, hyp: dict) -> None:
-        """
-        Set mosaic, copy_paste and mixup options to 0.0 and build transformations.
+        """Set mosaic, copy_paste and mixup options to 0.0 and build transformations.
 
         Args:
             hyp (dict): Hyperparameters for transforms.
@@ -727,8 +711,7 @@ class SemanticDataset(BaseDataset):
 
 
 class ClassificationDataset:
-    """
-    Dataset class for image classification tasks extending torchvision ImageFolder functionality.
+    """Dataset class for image classification tasks extending torchvision ImageFolder functionality.
 
     This class offers functionalities like image augmentation, caching, and verification. It's designed to efficiently
     handle large datasets for training deep learning models, with optional image transformations and caching mechanisms
@@ -750,8 +733,7 @@ class ClassificationDataset:
     """
 
     def __init__(self, root: str, args, augment: bool = False, prefix: str = ""):
-        """
-        Initialize YOLO classification dataset with root directory, arguments, augmentations, and cache settings.
+        """Initialize YOLO classification dataset with root directory, arguments, augmentations, and cache settings.
 
         Args:
             root (str): Path to the dataset directory where images are stored in a class-specific folder structure.
@@ -802,8 +784,7 @@ class ClassificationDataset:
         )
 
     def __getitem__(self, i: int) -> dict:
-        """
-        Return subset of data and targets corresponding to given indices.
+        """Return subset of data and targets corresponding to given indices.
 
         Args:
             i (int): Index of the sample to retrieve.
@@ -832,8 +813,7 @@ class ClassificationDataset:
         return len(self.samples)
 
     def verify_images(self) -> list[tuple]:
-        """
-        Verify all images in dataset.
+        """Verify all images in dataset.
 
         Returns:
             (list): List of valid samples after verification.

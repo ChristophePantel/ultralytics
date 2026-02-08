@@ -19,10 +19,10 @@ from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import plot_images
 
+from ultralytics.utils import km
 
 class DetectionValidator(BaseValidator):
-    """
-    A class extending the BaseValidator class for validation based on a detection model.
+    """A class extending the BaseValidator class for validation based on a detection model.
 
     This class implements validation functionality specific to object detection tasks, including metrics calculation,
     prediction processing, and visualization of results.
@@ -40,17 +40,16 @@ class DetectionValidator(BaseValidator):
 
     Examples:
         >>> from ultralytics.models.yolo.detect import DetectionValidator
-        >>> args = dict(model="yolo11n.pt", data="coco8.yaml")
+        >>> args = dict(model="yolo26n.pt", data="coco8.yaml")
         >>> validator = DetectionValidator(args=args)
         >>> validator()
     """
 
     def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None) -> None:
-        """
-        Initialize detection validator with necessary variables and settings.
+        """Initialize detection validator with necessary variables and settings.
 
         Args:
-            dataloader (torch.utils.data.DataLoader, optional): Dataloader to use for validation.
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
             save_dir (Path, optional): Directory to save results.
             args (dict[str, Any], optional): Arguments for the validator.
             _callbacks (list[Any], optional): List of callback functions.
@@ -64,10 +63,10 @@ class DetectionValidator(BaseValidator):
         self.niou = self.iouv.numel()
         self.metrics = DetMetrics()
         self.bce_calculator = nn.BCELoss(reduction="none")
+        self.count = 0
 
     def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
-        """
-        Preprocess batch of images for YOLO validation.
+        """Preprocess batch of images for YOLO validation.
 
         Args:
             batch (dict[str, Any]): Batch containing images and annotations.
@@ -79,14 +78,14 @@ class DetectionValidator(BaseValidator):
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
+        
         # TODO(CP/IRIT): manage "scores" in the same way
         for k in {"batch_idx", "cls", "scores", "bboxes"}:
             batch[k] = batch[k].to(self.device, non_blocking=True)
         return batch
 
     def init_metrics(self, model: torch.nn.Module) -> None:
-        """
-        Initialize evaluation metrics for YOLO detection validation.
+        """Initialize evaluation metrics for YOLO detection validation.
 
         Args:
             model (torch.nn.Module): Model to validate.
@@ -102,6 +101,32 @@ class DetectionValidator(BaseValidator):
         self.args.save_json |= self.args.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
         self.names = model.names
         self.nc = len(model.names)
+        
+        # TODO (CP/IRIT): compute class variants from composition and refinement data available in the model
+        if self.use_km:
+            if hasattr(model, 'refinement'):
+                self.refinement = model.refinement
+            else:
+                self.refinement = model.model.refinement
+            if hasattr(model, 'composition'):
+                self.composition = model.composition
+            else:
+                self.composition = model.model.composition
+            if hasattr(model, 'variants'):
+                self.variants = model.variants
+            else:
+                self.variants = model.model.variants
+            if hasattr(model, 'variant_to_class'):
+                self.variant_to_class = model.variant_to_class
+            else:
+                self.variant_to_class = model.model.variant_to_class
+            # class_codes = frozenset(range(self.nc))
+            # full_composition = km.resolve(class_codes,self.composition,self.refinement)
+            # inverted_full_composition = km.invert_relation(full_composition)
+            # class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
+            # generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
+            self.class_variants = km.encode_variants(self.nc, self.variants)
+        self.no_detection = []
         self.end2end = getattr(model, "end2end", False)
         self.seen = 0
         self.jdict = []
@@ -114,15 +139,14 @@ class DetectionValidator(BaseValidator):
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def postprocess(self, preds: torch.Tensor) -> list[dict[str, torch.Tensor]]:
-        """
-        Apply Non-maximum suppression to prediction outputs.
+        """Apply Non-maximum suppression to prediction outputs.
 
         Args:
             preds (torch.Tensor): Raw predictions from the model.
 
         Returns:
-            (list[dict[str, torch.Tensor]]): Processed predictions after NMS, where each dict contains
-                'bboxes', 'conf', 'cls', and 'extra' tensors.
+            (list[dict[str, torch.Tensor]]): Processed predictions after NMS, where each dict contains 'bboxes', 'conf',
+                'cls', and 'extra' tensors.
         """
         outputs = nms.non_max_suppression(
             preds,
@@ -136,13 +160,17 @@ class DetectionValidator(BaseValidator):
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
+            use_km_scores = getattr(self, 'use_km_scores', None),
+            use_variant_selection = self.use_variant_selection,
+            # TODO (CP/IRIT): transmit the class variants from the model
+            class_variants=getattr(self, 'class_variants',None),
+            variant_to_class=getattr(self, 'variant_to_class',None),
         )
-        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "extra": x[:, 6+self.nc:]} for x in outputs]
+        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
-        """
-        Prepare a batch of images and annotations for validation.
+        """Prepare a batch of images and annotations for validation.
 
         Args:
             si (int): Batch index.
@@ -159,7 +187,7 @@ class DetectionValidator(BaseValidator):
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
         if cls.shape[0]:
-            bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=bbox.device)[[1, 0, 1, 0]]  # target boxes
+            bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
         return {
             "cls": cls,
             "bboxes": bbox,
@@ -172,8 +200,7 @@ class DetectionValidator(BaseValidator):
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_pred(self, pred: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        Prepare predictions for evaluation against ground truth.
+        """Prepare predictions for evaluation against ground truth.
 
         Args:
             pred (dict[str, torch.Tensor]): Post-processed predictions from the model.
@@ -187,13 +214,13 @@ class DetectionValidator(BaseValidator):
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def update_metrics(self, preds: list[dict[str, torch.Tensor]], batch: dict[str, Any]) -> None:
-        """
-        Update metrics with new predictions and ground truth.
+        """Update metrics with new predictions and ground truth.
 
         Args:
             preds (list[dict[str, torch.Tensor]]): List of predictions from the model.
             batch (dict[str, Any]): Batch data containing ground truth.
         """
+        self.count += 1
         for si, pred in enumerate(preds):
             self.seen += 1
             pbatch = self._prepare_batch(si, batch)
@@ -201,7 +228,12 @@ class DetectionValidator(BaseValidator):
 
             cls = pbatch["cls"].cpu().numpy()
             scores = pbatch["scores"].cpu().numpy()
+            class_number = scores.shape[1]
             no_pred = predn["cls"].shape[0] == 0
+            # if no_pred:
+            #    print("No prediction has been produced.")
+            if self.count >= 115:
+                pass
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),
@@ -210,7 +242,9 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": np.zeros(0) if no_pred else predn["scores"].cpu().numpy()
+                    "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy(),
+                    "pred_variant": np.zeros(0) if no_pred else predn["variant"].cpu().numpy(),
+                    "pred_km_scores": np.zeros((0,class_number)) if no_pred else predn["km_scores"].cpu().numpy()
                 }
             )
             # Evaluate
@@ -251,7 +285,7 @@ class DetectionValidator(BaseValidator):
             dist.gather_object(self.metrics.stats, gathered_stats, dst=0)
             merged_stats = {key: [] for key in self.metrics.stats.keys()}
             for stats_dict in gathered_stats:
-                for key in merged_stats.keys():
+                for key in merged_stats:
                     merged_stats[key].extend(stats_dict[key])
             gathered_jdict = [None] * dist.get_world_size()
             dist.gather_object(self.jdict, gathered_jdict, dst=0)
@@ -267,8 +301,7 @@ class DetectionValidator(BaseValidator):
             self.metrics.clear_stats()
 
     def get_stats(self) -> dict[str, Any]:
-        """
-        Calculate and return metrics statistics.
+        """Calculate and return metrics statistics.
 
         Returns:
             (dict[str, Any]): Dictionary containing metrics results.
@@ -282,7 +315,7 @@ class DetectionValidator(BaseValidator):
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.metrics.nt_per_class.sum(), *self.metrics.mean_results()))
         if self.metrics.nt_per_class.sum() == 0:
-            LOGGER.warning(f"no labels found in {self.args.task} set, can not compute metrics without labels")
+            LOGGER.warning(f"no labels found in {self.args.task} set, cannot compute metrics without labels")
 
         # Print results per class
         if self.args.verbose and not self.training and self.nc > 1 and len(self.metrics.stats):
@@ -298,8 +331,7 @@ class DetectionValidator(BaseValidator):
                 )
 
     def _process_batch(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> dict[str, np.ndarray]:
-        """
-        Return correct prediction matrix.
+        """Return correct prediction matrix.
 
         Args:
             preds (dict[str, torch.Tensor]): Dictionary containing prediction data with 'bboxes' and 'cls' keys.
@@ -312,10 +344,21 @@ class DetectionValidator(BaseValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        bce = self.scores_bce(batch["scores"], preds["scores"])
+        device = preds["scores"].device
+        dtype = preds["scores"].dtype
+        batch_scores = batch["scores"].to( device = device, dtype = dtype)
+        pred_scores = preds["scores"]
+        bce = self.scores_bce( batch_scores, pred_scores)
+        # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
         return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
 
     def scores_bce(self, batch_scores, prediction_scores):
+        """Compute binary cross entropy between expected scores and predicted scores.
+        
+        Args:
+        
+        Returns:
+        """
         batch_range = batch_scores.shape[0]
         prediction_range = prediction_scores.shape[0]
         batch_scores_sum = torch.sum(batch_scores,1)
@@ -324,12 +367,11 @@ class DetectionValidator(BaseValidator):
         aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
         bce_per_class = self.bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
         bce = torch.sum(bce_per_class,2) / batch_scores_sum
-        detected = torch.where(bce < 1)
+        # detected = torch.where(bce < 1)
         return bce
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
-        """
-        Build YOLO Dataset.
+        """Build YOLO Dataset.
 
         Args:
             img_path (str): Path to the folder containing images.
@@ -342,15 +384,14 @@ class DetectionValidator(BaseValidator):
         return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, stride=self.stride)
 
     def get_dataloader(self, dataset_path: str, batch_size: int) -> torch.utils.data.DataLoader:
-        """
-        Construct and return dataloader.
+        """Construct and return dataloader.
 
         Args:
             dataset_path (str): Path to the dataset.
             batch_size (int): Size of each batch.
 
         Returns:
-            (torch.utils.data.DataLoader): Dataloader for validation.
+            (torch.utils.data.DataLoader): DataLoader for validation.
         """
         dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
         return build_dataloader(
@@ -364,8 +405,7 @@ class DetectionValidator(BaseValidator):
         )
 
     def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
-        """
-        Plot validation image samples.
+        """Plot validation image samples.
 
         Args:
             batch (dict[str, Any]): Batch containing images and annotations.
@@ -382,8 +422,7 @@ class DetectionValidator(BaseValidator):
     def plot_predictions(
         self, batch: dict[str, Any], preds: list[dict[str, torch.Tensor]], ni: int, max_det: int | None = None
     ) -> None:
-        """
-        Plot predicted bounding boxes on input images and save the result.
+        """Plot predicted bounding boxes on input images and save the result.
 
         Args:
             batch (dict[str, Any]): Batch containing images and annotations.
@@ -391,14 +430,14 @@ class DetectionValidator(BaseValidator):
             ni (int): Batch index.
             max_det (Optional[int]): Maximum number of detections to plot.
         """
-        # TODO: optimize this
+        if not preds:
+            return
         for i, pred in enumerate(preds):
             pred["batch_idx"] = torch.ones_like(pred["conf"]) * i  # add batch index to predictions
         keys = preds[0].keys()
         max_det = max_det or self.args.max_det
         batched_preds = {k: torch.cat([x[k][:max_det] for x in preds], dim=0) for k in keys}
-        # TODO: fix this
-        batched_preds["bboxes"][:, :4] = ops.xyxy2xywh(batched_preds["bboxes"][:, :4])  # convert to xywh format
+        batched_preds["bboxes"] = ops.xyxy2xywh(batched_preds["bboxes"])  # convert to xywh format
         plot_images(
             images=batch["img"],
             labels=batched_preds,
@@ -409,8 +448,7 @@ class DetectionValidator(BaseValidator):
         )  # pred
 
     def save_one_txt(self, predn: dict[str, torch.Tensor], save_conf: bool, shape: tuple[int, int], file: Path) -> None:
-        """
-        Save YOLO detections to a txt file in normalized coordinates in a specific format.
+        """Save YOLO detections to a txt file in normalized coordinates in a specific format.
 
         Args:
             predn (dict[str, torch.Tensor]): Dictionary containing predictions with keys 'bboxes', 'conf', and 'cls'.
@@ -428,12 +466,11 @@ class DetectionValidator(BaseValidator):
         ).save_txt(file, save_conf=save_conf)
 
     def pred_to_json(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> None:
-        """
-        Serialize YOLO predictions to COCO json format.
+        """Serialize YOLO predictions to COCO json format.
 
         Args:
-            predn (dict[str, torch.Tensor]): Predictions dictionary containing 'bboxes', 'conf', and 'cls' keys
-                with bounding box coordinates, confidence scores, and class predictions.
+            predn (dict[str, torch.Tensor]): Predictions dictionary containing 'bboxes', 'conf', and 'cls' keys with
+                bounding box coordinates, confidence scores, and class predictions.
             pbatch (dict[str, Any]): Batch dictionary containing 'imgsz', 'ori_shape', 'ratio_pad', and 'im_file'.
 
         Examples:
@@ -474,8 +511,7 @@ class DetectionValidator(BaseValidator):
         }
 
     def eval_json(self, stats: dict[str, Any]) -> dict[str, Any]:
-        """
-        Evaluate YOLO output in JSON format and return performance statistics.
+        """Evaluate YOLO output in JSON format and return performance statistics.
 
         Args:
             stats (dict[str, Any]): Current statistics dictionary.
@@ -499,8 +535,7 @@ class DetectionValidator(BaseValidator):
         iou_types: str | list[str] = "bbox",
         suffix: str | list[str] = "Box",
     ) -> dict[str, Any]:
-        """
-        Evaluate COCO/LVIS metrics using faster-coco-eval library.
+        """Evaluate COCO/LVIS metrics using faster-coco-eval library.
 
         Performs evaluation using the faster-coco-eval library to compute mAP metrics for object detection. Updates the
         provided stats dictionary with computed metrics including mAP50, mAP50-95, and LVIS-specific metrics if
@@ -508,12 +543,12 @@ class DetectionValidator(BaseValidator):
 
         Args:
             stats (dict[str, Any]): Dictionary to store computed metrics and statistics.
-            pred_json (str | Path]): Path to JSON file containing predictions in COCO format.
-            anno_json (str | Path]): Path to JSON file containing ground truth annotations in COCO format.
-            iou_types (str | list[str]]): IoU type(s) for evaluation. Can be single string or list of strings.
-                Common values include "bbox", "segm", "keypoints". Defaults to "bbox".
-            suffix (str | list[str]]): Suffix to append to metric names in stats dictionary. Should correspond
-                to iou_types if multiple types provided. Defaults to "Box".
+            pred_json (str | Path): Path to JSON file containing predictions in COCO format.
+            anno_json (str | Path): Path to JSON file containing ground truth annotations in COCO format.
+            iou_types (str | list[str]): IoU type(s) for evaluation. Can be single string or list of strings. Common
+                values include "bbox", "segm", "keypoints". Defaults to "bbox".
+            suffix (str | list[str]): Suffix to append to metric names in stats dictionary. Should correspond to
+                iou_types if multiple types provided. Defaults to "Box".
 
         Returns:
             (dict[str, Any]): Updated stats dictionary containing the computed COCO/LVIS evaluation metrics.
@@ -542,6 +577,12 @@ class DetectionValidator(BaseValidator):
                     # update mAP50-95 and mAP50
                     stats[f"metrics/mAP50({suffix[i][0]})"] = val.stats_as_dict["AP_50"]
                     stats[f"metrics/mAP50-95({suffix[i][0]})"] = val.stats_as_dict["AP_all"]
+                    # record mAP for small, medium, large objects as well
+                    stats["metrics/mAP_small(B)"] = val.stats_as_dict["AP_small"]
+                    stats["metrics/mAP_medium(B)"] = val.stats_as_dict["AP_medium"]
+                    stats["metrics/mAP_large(B)"] = val.stats_as_dict["AP_large"]
+                    # update fitness
+                    stats["fitness"] = 0.9 * val.stats_as_dict["AP_all"] + 0.1 * val.stats_as_dict["AP_50"]
 
                     if self.is_lvis:
                         stats[f"metrics/APr({suffix[i][0]})"] = val.stats_as_dict["APr"]

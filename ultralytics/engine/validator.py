@@ -3,24 +3,24 @@
 Check a model's accuracy on a test or val split of a dataset.
 
 Usage:
-    $ yolo mode=val model=yolo11n.pt data=coco8.yaml imgsz=640
+    $ yolo mode=val model=yolo26n.pt data=coco8.yaml imgsz=640
 
 Usage - formats:
-    $ yolo mode=val model=yolo11n.pt                 # PyTorch
-                          yolo11n.torchscript        # TorchScript
-                          yolo11n.onnx               # ONNX Runtime or OpenCV DNN with dnn=True
-                          yolo11n_openvino_model     # OpenVINO
-                          yolo11n.engine             # TensorRT
-                          yolo11n.mlpackage          # CoreML (macOS-only)
-                          yolo11n_saved_model        # TensorFlow SavedModel
-                          yolo11n.pb                 # TensorFlow GraphDef
-                          yolo11n.tflite             # TensorFlow Lite
-                          yolo11n_edgetpu.tflite     # TensorFlow Edge TPU
-                          yolo11n_paddle_model       # PaddlePaddle
-                          yolo11n.mnn                # MNN
-                          yolo11n_ncnn_model         # NCNN
-                          yolo11n_imx_model          # Sony IMX
-                          yolo11n_rknn_model         # Rockchip RKNN
+    $ yolo mode=val model=yolo26n.pt                 # PyTorch
+                          yolo26n.torchscript        # TorchScript
+                          yolo26n.onnx               # ONNX Runtime or OpenCV DNN with dnn=True
+                          yolo26n_openvino_model     # OpenVINO
+                          yolo26n.engine             # TensorRT
+                          yolo26n.mlpackage          # CoreML (macOS-only)
+                          yolo26n_saved_model        # TensorFlow SavedModel
+                          yolo26n.pb                 # TensorFlow GraphDef
+                          yolo26n.tflite             # TensorFlow Lite
+                          yolo26n_edgetpu.tflite     # TensorFlow Edge TPU
+                          yolo26n_paddle_model       # PaddlePaddle
+                          yolo26n.mnn                # MNN
+                          yolo26n_ncnn_model         # NCNN
+                          yolo26n_imx_model          # Sony IMX
+                          yolo26n_rknn_model         # Rockchip RKNN
 """
 
 import json
@@ -34,22 +34,21 @@ import torch.distributed as dist
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.nn.autobackend import AutoBackend
-from ultralytics.utils import LOGGER, RANK, TQDM, callbacks, colorstr, emojis
+from ultralytics.utils import LOGGER, LOCAL_RANK, RANK, TQDM, callbacks, colorstr, emojis
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.utils.ops import Profile
 from ultralytics.utils.torch_utils import attempt_compile, select_device, smart_inference_mode, unwrap_model
 
 # TODO (CP/IRIT): Adapt to multi class prediction
 class BaseValidator:
-    """
-    A base class for creating validators.
+    """A base class for creating validators.
 
     This class provides the foundation for validation processes, including model evaluation, metric computation, and
     result visualization.
 
     Attributes:
         args (SimpleNamespace): Configuration for the validator.
-        dataloader (DataLoader): Dataloader to use for validation.
+        dataloader (DataLoader): DataLoader to use for validation.
         model (nn.Module): Model to validate.
         data (dict): Data dictionary containing dataset information.
         device (torch.device): Device to use for validation.
@@ -62,8 +61,8 @@ class BaseValidator:
         nc (int): Number of classes.
         iouv (torch.Tensor): IoU thresholds from 0.50 to 0.95 in spaces of 0.05.
         jdict (list): List to store JSON validation results.
-        speed (dict): Dictionary with keys 'preprocess', 'inference', 'loss', 'postprocess' and their respective
-            batch processing times in milliseconds.
+        speed (dict): Dictionary with keys 'preprocess', 'inference', 'loss', 'postprocess' and their respective batch
+            processing times in milliseconds.
         save_dir (Path): Directory to save results.
         plots (dict): Dictionary to store plots for visualization.
         callbacks (dict): Dictionary to store various callback functions.
@@ -93,11 +92,10 @@ class BaseValidator:
     """
 
     def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None):
-        """
-        Initialize a BaseValidator instance.
+        """Initialize a BaseValidator instance.
 
         Args:
-            dataloader (torch.utils.data.DataLoader, optional): Dataloader to be used for validation.
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to be used for validation.
             save_dir (Path, optional): Directory to save results.
             args (SimpleNamespace, optional): Configuration for the validator.
             _callbacks (dict, optional): Dictionary to store various callback functions.
@@ -116,6 +114,15 @@ class BaseValidator:
         self.stats = None
         self.confusion_matrix = None
         self.nc = None
+        self.use_scores = getattr(self.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
+        # TODO (CP/IRIT): Adding no detection metrics
+        self.no_detection = None
         self.iouv = None
         self.jdict = None
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
@@ -131,8 +138,7 @@ class BaseValidator:
 
     @smart_inference_mode()
     def __call__(self, trainer=None, model=None):
-        """
-        Execute validation process, running inference on dataloader and computing performance metrics.
+        """Execute validation process, running inference on dataloader and computing performance metrics.
 
         Args:
             trainer (object, optional): Trainer object that contains the model to validate.
@@ -159,6 +165,11 @@ class BaseValidator:
             if str(self.args.model).endswith(".yaml") and model is None:
                 LOGGER.warning("validating an untrained model YAML will result in 0 mAP.")
             callbacks.add_integration_callbacks(self)
+            if hasattr(model, "end2end"):
+                if self.args.end2end is not None:
+                    model.end2end = self.args.end2end
+                if model.end2end:
+                    model.set_head_attr(max_det=self.args.max_det, agnostic_nms=self.args.agnostic_nms)
             model = AutoBackend(
                 model=model or self.args.model,
                 device=select_device(self.args.device) if RANK == -1 else torch.device("cuda", RANK),
@@ -266,11 +277,11 @@ class BaseValidator:
                 LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}")
             return stats
 
+    # TODO (CP/IRIT): Adapt to use knowledge model.
     def match_predictions(
         self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False
     ) -> torch.Tensor:
-        """
-        Match predictions to ground truth objects using IoU.
+        """Match predictions to ground truth objects using IoU.
 
         Args:
             pred_classes (torch.Tensor): Predicted class indices of shape (N,).
@@ -287,22 +298,30 @@ class BaseValidator:
         # LxD matrix where L - labels (rows), D - detections (columns)
         # TODO (CP/IRIT): Replace with multiclass comparaison using bce between true scores and predicted scores.
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
+        # Has the ground truth class been correctly predicted ?
         correct_class = true_classes[:, None] == pred_classes
+        sz_correct_class = torch.numel(correct_class)
+        nz_correct_class = torch.count_nonzero(correct_class)
+        # Only keeps the IoU of correct classes (set the incorrect ones to 0)
         iou = iou * correct_class  # zero out the wrong classes
         iou = iou.cpu().numpy()
+        # Iterates over IoU thresholds
         for i, threshold in enumerate(self.iouv.cpu().tolist()):
+            iou_over_threshold = (iou >= threshold)
+            sz_iou_over_threshold = iou_over_threshold.size
+            nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
             if use_scipy:
                 # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
                 import scipy  # scope import to avoid importing for all commands
 
-                cost_matrix = iou * (iou >= threshold)
+                cost_matrix = iou * iou_over_threshold
                 if cost_matrix.any():
                     labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
                         correct[detections_idx[valid], i] = True
             else:
-                matches = np.nonzero(iou >= threshold)  # IoU > threshold and classes match
+                matches = np.nonzero(iou_over_threshold)  # IoU > threshold and classes match
                 matches = np.array(matches).T
                 if matches.shape[0]:
                     if matches.shape[0] > 1:
@@ -321,7 +340,7 @@ class BaseValidator:
         for callback in self.callbacks.get(event, []):
             callback(self)
 
-    def get_dataloader(self, dataset_path, batch_size):
+    def get_dataloader(self, dataset_path, batch_size, model):
         """Get data loader from dataset path and batch size."""
         raise NotImplementedError("get_dataloader function not implemented for this validator")
 
@@ -371,7 +390,10 @@ class BaseValidator:
         return []
 
     def on_plot(self, name, data=None):
-        """Register plots for visualization."""
+        """Register plots for visualization, deduplicating by type."""
+        plot_type = data.get("type") if data else None
+        if plot_type and any((v.get("data") or {}).get("type") == plot_type for v in self.plots.values()):
+            return  # Skip duplicate plot types
         self.plots[Path(name)] = {"data": data, "timestamp": time.time()}
 
     def plot_val_samples(self, batch, ni):

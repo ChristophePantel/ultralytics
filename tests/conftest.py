@@ -10,8 +10,7 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
-    """
-    Modify the list of test items to exclude tests marked as slow if the --slow option is not specified.
+    """Modify the list of test items to exclude tests marked as slow if the --slow option is not specified.
 
     Args:
         config: The pytest configuration object that provides access to command-line options.
@@ -23,8 +22,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 def pytest_sessionstart(session):
-    """
-    Initialize session configurations for pytest.
+    """Initialize session configurations for pytest.
 
     This function is automatically called by pytest after the 'Session' object has been created but before performing
     test collection. It sets the initial seeds for the test session.
@@ -38,8 +36,7 @@ def pytest_sessionstart(session):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """
-    Cleanup operations after pytest session.
+    """Cleanup operations after pytest session.
 
     This function is automatically called by pytest at the end of the entire test session. It removes certain files and
     directories used during testing.
@@ -53,7 +50,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
     # Remove files
     models = [path for x in {"*.onnx", "*.torchscript"} for path in WEIGHTS_DIR.rglob(x)]
-    for file in ["decelera_portrait_min.mov", "bus.jpg", "yolo11n.onnx", "yolo11n.torchscript", *models]:
+    for file in ["decelera_portrait_min.mov", "bus.jpg", "yolo26n.onnx", "yolo26n.torchscript", *models]:
         Path(file).unlink(missing_ok=True)
 
     # Remove directories

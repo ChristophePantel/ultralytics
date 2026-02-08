@@ -44,7 +44,9 @@ TORCH_1_13 = check_version(TORCH_VERSION, "1.13.0")
 TORCH_2_0 = check_version(TORCH_VERSION, "2.0.0")
 TORCH_2_1 = check_version(TORCH_VERSION, "2.1.0")
 TORCH_2_4 = check_version(TORCH_VERSION, "2.4.0")
+TORCH_2_8 = check_version(TORCH_VERSION, "2.8.0")
 TORCH_2_9 = check_version(TORCH_VERSION, "2.9.0")
+TORCH_2_10 = check_version(TORCH_VERSION, "2.10.0")
 TORCHVISION_0_10 = check_version(TORCHVISION_VERSION, "0.10.0")
 TORCHVISION_0_11 = check_version(TORCHVISION_VERSION, "0.11.0")
 TORCHVISION_0_13 = check_version(TORCHVISION_VERSION, "0.13.0")
@@ -77,14 +79,13 @@ def smart_inference_mode():
         if TORCH_1_9 and torch.is_inference_mode_enabled():
             return fn  # already in inference_mode, act as a pass-through
         else:
-            return (torch.inference_mode if TORCH_1_9 else torch.no_grad)()(fn)
+            return (torch.inference_mode if TORCH_1_10 else torch.no_grad)()(fn)
 
     return decorate
 
 
 def autocast(enabled: bool, device: str = "cuda"):
-    """
-    Get the appropriate autocast context manager based on PyTorch version and AMP setting.
+    """Get the appropriate autocast context manager based on PyTorch version and AMP setting.
 
     This function returns a context manager for automatic mixed precision (AMP) training that is compatible with both
     older and newer versions of PyTorch. It handles the differences in the autocast API between PyTorch versions.
@@ -132,8 +133,7 @@ def get_gpu_info(index):
 
 
 def select_device(device="", newline=False, verbose=True):
-    """
-    Select the appropriate PyTorch device based on the provided arguments.
+    """Select the appropriate PyTorch device based on the provided arguments.
 
     The function takes a string specifying the device or a torch.device object and returns a torch.device object
     representing the selected device. The function also validates the number of available devices and raises an
@@ -158,7 +158,7 @@ def select_device(device="", newline=False, verbose=True):
     Notes:
         Sets the 'CUDA_VISIBLE_DEVICES' environment variable for specifying which GPUs to use.
     """
-    if isinstance(device, torch.device) or str(device).startswith(("tpu", "intel")):
+    if isinstance(device, torch.device) or str(device).startswith(("tpu", "intel", "vulkan")):
         return device
 
     s = f"Ultralytics {__version__} 🚀 Python-{PYTHON_VERSION} torch-{TORCH_VERSION} "
@@ -181,7 +181,7 @@ def select_device(device="", newline=False, verbose=True):
     cpu = device == "cpu"
     mps = device in {"mps", "mps:0"}  # Apple Metal Performance Shaders (MPS)
     if cpu or mps:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # force torch.cuda.is_available() = False
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""  # force torch.cuda.is_available() = False
     elif device:  # non-cpu device requested
         if device == "cuda":
             device = "0"
@@ -236,8 +236,7 @@ def time_sync():
 
 
 def fuse_conv_and_bn(conv, bn):
-    """
-    Fuse Conv2d and BatchNorm2d layers for inference optimization.
+    """Fuse Conv2d and BatchNorm2d layers for inference optimization.
 
     Args:
         conv (nn.Conv2d): Convolutional layer to fuse.
@@ -270,8 +269,7 @@ def fuse_conv_and_bn(conv, bn):
 
 
 def fuse_deconv_and_bn(deconv, bn):
-    """
-    Fuse ConvTranspose2d and BatchNorm2d layers for inference optimization.
+    """Fuse ConvTranspose2d and BatchNorm2d layers for inference optimization.
 
     Args:
         deconv (nn.ConvTranspose2d): Transposed convolutional layer to fuse.
@@ -304,8 +302,7 @@ def fuse_deconv_and_bn(deconv, bn):
 
 
 def model_info(model, detailed=False, verbose=True, imgsz=640):
-    """
-    Print and return detailed model information layer by layer.
+    """Print and return detailed model information layer by layer.
 
     Args:
         model (nn.Module): Model to analyze.
@@ -359,8 +356,7 @@ def get_num_gradients(model):
 
 
 def model_info_for_loggers(trainer):
-    """
-    Return model info dict with useful model information.
+    """Return model info dict with useful model information.
 
     Args:
         trainer (ultralytics.engine.trainer.BaseTrainer): The trainer object containing model and validation data.
@@ -393,8 +389,7 @@ def model_info_for_loggers(trainer):
 
 
 def get_flops(model, imgsz=640):
-    """
-    Calculate FLOPs (floating point operations) for a model in billions.
+    """Calculate FLOPs (floating point operations) for a model in billions.
 
     Attempts two calculation methods: first with a stride-based tensor for efficiency, then falls back to full image
     size if needed (e.g., for RTDETR models). Returns 0.0 if thop library is unavailable or calculation fails.
@@ -434,8 +429,7 @@ def get_flops(model, imgsz=640):
 
 
 def get_flops_with_torch_profiler(model, imgsz=640):
-    """
-    Compute model FLOPs using torch profiler (alternative to thop package, but 2-10x slower).
+    """Compute model FLOPs using torch profiler (alternative to thop package, but 2-10x slower).
 
     Args:
         model (nn.Module): The model to calculate FLOPs for.
@@ -481,8 +475,7 @@ def initialize_weights(model):
 
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):
-    """
-    Scale and pad an image tensor, optionally maintaining aspect ratio and padding to gs multiple.
+    """Scale and pad an image tensor, optionally maintaining aspect ratio and padding to gs multiple.
 
     Args:
         img (torch.Tensor): Input image tensor.
@@ -504,8 +497,7 @@ def scale_img(img, ratio=1.0, same_shape=False, gs=32):
 
 
 def copy_attr(a, b, include=(), exclude=()):
-    """
-    Copy attributes from object 'b' to object 'a', with options to include/exclude certain attributes.
+    """Copy attributes from object 'b' to object 'a', with options to include/exclude certain attributes.
 
     Args:
         a (Any): Destination object to copy attributes to.
@@ -521,8 +513,7 @@ def copy_attr(a, b, include=(), exclude=()):
 
 
 def intersect_dicts(da, db, exclude=()):
-    """
-    Return a dictionary of intersecting keys with matching shapes, excluding 'exclude' keys, using da values.
+    """Return a dictionary of intersecting keys with matching shapes, excluding 'exclude' keys, using da values.
 
     Args:
         da (dict): First dictionary.
@@ -536,8 +527,7 @@ def intersect_dicts(da, db, exclude=()):
 
 
 def is_parallel(model):
-    """
-    Return True if model is of type DP or DDP.
+    """Return True if model is of type DP or DDP.
 
     Args:
         model (nn.Module): Model to check.
@@ -549,8 +539,7 @@ def is_parallel(model):
 
 
 def unwrap_model(m: nn.Module) -> nn.Module:
-    """
-    Unwrap compiled and parallel models to get the base model.
+    """Unwrap compiled and parallel models to get the base model.
 
     Args:
         m (nn.Module): A model that may be wrapped by torch.compile (._orig_mod) or parallel wrappers such as
@@ -569,8 +558,7 @@ def unwrap_model(m: nn.Module) -> nn.Module:
 
 
 def one_cycle(y1=0.0, y2=1.0, steps=100):
-    """
-    Return a lambda function for sinusoidal ramp from y1 to y2 https://arxiv.org/pdf/1812.01187.pdf.
+    """Return a lambda function for sinusoidal ramp from y1 to y2 https://arxiv.org/pdf/1812.01187.pdf.
 
     Args:
         y1 (float, optional): Initial value.
@@ -584,8 +572,7 @@ def one_cycle(y1=0.0, y2=1.0, steps=100):
 
 
 def init_seeds(seed=0, deterministic=False):
-    """
-    Initialize random number generator (RNG) seeds https://pytorch.org/docs/stable/notes/randomness.html.
+    """Initialize random number generator (RNG) seeds https://pytorch.org/docs/stable/notes/randomness.html.
 
     Args:
         seed (int, optional): Random seed.
@@ -618,8 +605,7 @@ def unset_deterministic():
 
 
 class ModelEMA:
-    """
-    Updated Exponential Moving Average (EMA) implementation.
+    """Updated Exponential Moving Average (EMA) implementation.
 
     Keeps a moving average of everything in the model state_dict (parameters and buffers). For EMA details see
     References.
@@ -638,8 +624,7 @@ class ModelEMA:
     """
 
     def __init__(self, model, decay=0.9999, tau=2000, updates=0):
-        """
-        Initialize EMA for 'model' with given arguments.
+        """Initialize EMA for 'model' with given arguments.
 
         Args:
             model (nn.Module): Model to create EMA for.
@@ -655,8 +640,7 @@ class ModelEMA:
         self.enabled = True
 
     def update(self, model):
-        """
-        Update EMA parameters.
+        """Update EMA parameters.
 
         Args:
             model (nn.Module): Model to update EMA from.
@@ -673,8 +657,7 @@ class ModelEMA:
                     # assert v.dtype == msd[k].dtype == torch.float32, f'{k}: EMA {v.dtype},  model {msd[k].dtype}'
 
     def update_attr(self, model, include=(), exclude=("process_group", "reducer")):
-        """
-        Update attributes and save stripped model with optimizer removed.
+        """Update attributes and save stripped model with optimizer removed.
 
         Args:
             model (nn.Module): Model to update attributes from.
@@ -686,8 +669,7 @@ class ModelEMA:
 
 
 def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, Any] | None = None) -> dict[str, Any]:
-    """
-    Strip optimizer from 'f' to finalize training, optionally save as 's'.
+    """Strip optimizer from 'f' to finalize training, optionally save as 's'.
 
     Args:
         f (str | Path): File path to model to strip the optimizer from.
@@ -747,8 +729,7 @@ def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, A
 
 
 def convert_optimizer_state_dict_to_fp16(state_dict):
-    """
-    Convert the state_dict of a given optimizer to FP16, focusing on the 'state' key for tensor conversions.
+    """Convert the state_dict of a given optimizer to FP16, focusing on the 'state' key for tensor conversions.
 
     Args:
         state_dict (dict): Optimizer state dictionary.
@@ -766,8 +747,7 @@ def convert_optimizer_state_dict_to_fp16(state_dict):
 
 @contextmanager
 def cuda_memory_usage(device=None):
-    """
-    Monitor and manage CUDA memory usage.
+    """Monitor and manage CUDA memory usage.
 
     This function checks if CUDA is available and, if so, empties the CUDA cache to free up unused memory. It then
     yields a dictionary containing memory usage information, which can be updated by the caller. Finally, it updates the
@@ -791,8 +771,7 @@ def cuda_memory_usage(device=None):
 
 
 def profile_ops(input, ops, n=10, device=None, max_num_obj=0):
-    """
-    Ultralytics speed, memory and FLOPs profiler.
+    """Ultralytics speed, memory and FLOPs profiler.
 
     Args:
         input (torch.Tensor | list): Input tensor(s) to profile.
@@ -877,8 +856,7 @@ def profile_ops(input, ops, n=10, device=None, max_num_obj=0):
 
 
 class EarlyStopping:
-    """
-    Early stopping class that stops training when a specified number of epochs have passed without improvement.
+    """Early stopping class that stops training when a specified number of epochs have passed without improvement.
 
     Attributes:
         best_fitness (float): Best fitness value observed.
@@ -888,8 +866,7 @@ class EarlyStopping:
     """
 
     def __init__(self, patience=50):
-        """
-        Initialize early stopping object.
+        """Initialize early stopping object.
 
         Args:
             patience (int, optional): Number of epochs to wait after fitness stops improving before stopping.
@@ -900,8 +877,7 @@ class EarlyStopping:
         self.possible_stop = False  # possible stop may occur next epoch
 
     def __call__(self, epoch, fitness):
-        """
-        Check whether to stop training.
+        """Check whether to stop training.
 
         Args:
             epoch (int): Current epoch of training
@@ -938,8 +914,7 @@ def attempt_compile(
     warmup: bool = False,
     mode: bool | str = "default",
 ) -> torch.nn.Module:
-    """
-    Compile a model with torch.compile and optionally warm up the graph to reduce first-iteration latency.
+    """Compile a model with torch.compile and optionally warm up the graph to reduce first-iteration latency.
 
     This utility attempts to compile the provided model using the inductor backend with dynamic shapes enabled and an
     autotuning mode. If compilation is unavailable or fails, the original model is returned unchanged. An optional

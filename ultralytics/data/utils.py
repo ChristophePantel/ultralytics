@@ -37,8 +37,8 @@ from ultralytics.utils.downloads import download, safe_download, unzip_file
 from ultralytics.utils.ops import segments2boxes
 
 HELP_URL = "See https://docs.ultralytics.com/datasets for dataset formatting guidance."
-IMG_FORMATS = {"bmp", "dng", "jpeg", "jpg", "mpo", "png", "tif", "tiff", "webp", "pfm", "heic"}  # image suffixes
-VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm"}  # video suffixes
+IMG_FORMATS = {"avif", "bmp", "dng", "heic", "jp2", "jpeg", "jpeg2000", "jpg", "mpo", "png", "tif", "tiff", "webp"}
+VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm"}  # videos
 FORMATS_HELP_MSG = f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
 
 
@@ -51,8 +51,7 @@ def img2label_paths(img_paths: list[str]) -> list[str]:
 def check_file_speeds(
     files: list[str], threshold_ms: float = 10, threshold_mb: float = 50, max_files: int = 5, prefix: str = ""
 ):
-    """
-    Check dataset file access speed and provide performance feedback.
+    """Check dataset file access speed and provide performance feedback.
 
     This function tests the access speed of dataset files by measuring ping (stat call) time and read speed. It samples
     up to 5 files from the provided list and warns if access times exceed the threshold.
@@ -184,7 +183,7 @@ def verify_image(args: tuple) -> tuple:
 # File structure depends on the task (classification, detection, obb, segmentation, pose)
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
+    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, use_km_scores = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -270,8 +269,10 @@ def verify_image_label(args: tuple) -> list:
         for i in range(nl):
                 for cls in lb[i,0:-4]:
                     class_scores[i,int(cls)]=1.0
-                for cls in km_lb[i]:
-                    class_scores[i,int(cls)]=1.0
+        # TODO(CP/IRIT): ignore knowledge model, uncomment to use knowledge model
+                if use_km_scores:
+                    for cls in km_lb[i]:
+                        class_scores[i,int(cls)]=1.0
         # TODO (CP/IRIT): Add Knowledge Model classes
         core_class = lb[:,0:-4]
         bboxes = lb[:,-4:]
@@ -286,8 +287,7 @@ def verify_image_label(args: tuple) -> list:
 
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[int, str]):
-    """
-    Visualize YOLO annotations (bounding boxes and class labels) on an image.
+    """Visualize YOLO annotations (bounding boxes and class labels) on an image.
 
     This function reads an image and its corresponding annotation file in YOLO format, then draws bounding boxes around
     detected objects and labels them with their respective class names. The bounding box colors are assigned based on
@@ -295,12 +295,12 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
     luminance.
 
     Args:
-        image_path (str): The path to the image file to annotate, and it can be in formats supported by PIL.
-        txt_path (str): The path to the annotation file in YOLO format, that should contain one line per object.
+        image_path (str): Path to the image file to annotate. The file must be readable by PIL.
+        txt_path (str): Path to the annotation file in YOLO format, which should contain one line per object.
         label_map (dict[int, str]): A dictionary that maps class IDs (integers) to class labels (strings).
 
     Examples:
-        >>> label_map = {0: "cat", 1: "dog", 2: "bird"}  # It should include all annotated classes details
+        >>> label_map = {0: "cat", 1: "dog", 2: "bird"}  # Should include all annotated classes
         >>> visualize_image_annotations("path/to/image.jpg", "path/to/annotations.txt", label_map)
     """
     import matplotlib.pyplot as plt
@@ -320,7 +320,7 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
             annotations.append((x, y, w, h, int(class_id)))
     _, ax = plt.subplots(1)  # Plot the image and annotations
     for x, y, w, h, label in annotations:
-        color = tuple(c / 255 for c in colors(label, True))  # Get and normalize the RGB color
+        color = tuple(c / 255 for c in colors(label, False))  # Get and normalize an RGB color for Matplotlib
         rect = plt.Rectangle((x, y), w, h, linewidth=2, edgecolor=color, facecolor="none")  # Create a rectangle
         ax.add_patch(rect)
         luminance = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]  # Formula for luminance
@@ -332,13 +332,12 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
 def polygon2mask(
     imgsz: tuple[int, int], polygons: list[np.ndarray], color: int = 1, downsample_ratio: int = 1
 ) -> np.ndarray:
-    """
-    Convert a list of polygons to a binary mask of the specified image size.
+    """Convert a list of polygons to a binary mask of the specified image size.
 
     Args:
         imgsz (tuple[int, int]): The size of the image as (height, width).
-        polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where
-            N is the number of polygons, and M is the number of points such that M % 2 = 0.
+        polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where N is the
+            number of polygons, and M is the number of points such that M % 2 = 0.
         color (int, optional): The color value to fill in the polygons on the mask.
         downsample_ratio (int, optional): Factor by which to downsample the mask.
 
@@ -357,13 +356,12 @@ def polygon2mask(
 def polygons2masks(
     imgsz: tuple[int, int], polygons: list[np.ndarray], color: int, downsample_ratio: int = 1
 ) -> np.ndarray:
-    """
-    Convert a list of polygons to a set of binary masks of the specified image size.
+    """Convert a list of polygons to a set of binary masks of the specified image size.
 
     Args:
         imgsz (tuple[int, int]): The size of the image as (height, width).
-        polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where
-            N is the number of polygons, and M is the number of points such that M % 2 = 0.
+        polygons (list[np.ndarray]): A list of polygons. Each polygon is an array with shape (N, M), where N is the
+            number of polygons, and M is the number of points such that M % 2 = 0.
         color (int): The color value to fill in the polygons on the masks.
         downsample_ratio (int, optional): Factor by which to downsample each mask.
 
@@ -403,8 +401,7 @@ def polygons2masks_overlap(
 
 
 def find_dataset_yaml(path: Path) -> Path:
-    """
-    Find and return the YAML file associated with a Detect, Segment or Pose dataset.
+    """Find and return the YAML file associated with a Detect, Segment or Pose dataset.
 
     This function searches for a YAML file at the root level of the provided directory first, and if not found, it
     performs a recursive search. It prefers YAML files that have the same stem as the provided path.
@@ -424,8 +421,7 @@ def find_dataset_yaml(path: Path) -> Path:
 
 
 def check_det_dataset(dataset: str, autodownload: bool = True) -> dict[str, Any]:
-    """
-    Download, verify, and/or unzip a dataset if not found locally.
+    """Download, verify, and/or unzip a dataset if not found locally.
 
     This function checks the availability of a specified dataset, and if not found, it has the option to download and
     unzip the dataset. It then reads and parses the accompanying YAML data, ensuring key requirements are met and also
@@ -519,8 +515,7 @@ def check_det_dataset(dataset: str, autodownload: bool = True) -> dict[str, Any]
 
 
 def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
-    """
-    Check a classification dataset such as Imagenet.
+    """Check a classification dataset such as Imagenet.
 
     This function accepts a `dataset` name and attempts to retrieve the corresponding dataset information. If the
     dataset is not found locally, it attempts to download the dataset from the internet and save it locally.
@@ -616,8 +611,7 @@ def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
 
 
 class HUBDatasetStats:
-    """
-    A class for generating HUB dataset JSON and `-hub` dataset directory.
+    """A class for generating HUB dataset JSON and `-hub` dataset directory.
 
     Args:
         path (str): Path to data.yaml or data.zip (with data.yaml inside data.zip).
@@ -785,10 +779,9 @@ class HUBDatasetStats:
 
 
 def compress_one_image(f: str, f_new: str | None = None, max_dim: int = 1920, quality: int = 50):
-    """
-    Compress a single image file to reduced size while preserving its aspect ratio and quality using either the Python
-    Imaging Library (PIL) or OpenCV library. If the input image is smaller than the maximum dimension, it will not be
-    resized.
+    """Compress a single image file to reduced size while preserving its aspect ratio and quality using either the
+    Python Imaging Library (PIL) or OpenCV library. If the input image is smaller than the maximum dimension, it
+    will not be resized.
 
     Args:
         f (str): The path to the input image file.

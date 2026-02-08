@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ultralytics.utils.metrics import OKS_SIGMA
+from ultralytics.utils.metrics import OKS_SIGMA, RLE_WEIGHT
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
 
-from .metrics import bbox_iou, probiou
-from .tal import bbox2dist
+from ultralytics.utils import km
 
+from .metrics import bbox_iou, probiou
+from .tal import bbox2dist, rbox2dist
+
+import math
 
 class VarifocalLoss(nn.Module):
-    """
-    Varifocal loss by Zhang et al.
+    """Varifocal loss by Zhang et al.
 
     Implements the Varifocal Loss function for addressing class imbalance in object detection by focusing on
     hard-to-classify examples and balancing positive/negative samples.
@@ -51,8 +54,7 @@ class VarifocalLoss(nn.Module):
 
 
 class FocalLoss(nn.Module):
-    """
-    Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5).
+    """Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5).
 
     Implements the Focal Loss function for addressing class imbalance by down-weighting easy examples and focusing on
     hard negatives during training.
@@ -124,6 +126,8 @@ class BboxLoss(nn.Module):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
+        imgsz: torch.Tensor,
+        stride: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
@@ -136,9 +140,74 @@ class BboxLoss(nn.Module):
             loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            target_ltrb = bbox2dist(anchor_points, target_bboxes)
+            # normalize ltrb by image size
+            target_ltrb = target_ltrb * stride
+            target_ltrb[..., 0::2] /= imgsz[1]
+            target_ltrb[..., 1::2] /= imgsz[0]
+            pred_dist = pred_dist * stride
+            pred_dist[..., 0::2] /= imgsz[1]
+            pred_dist[..., 1::2] /= imgsz[0]
+            loss_dfl = (
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none").mean(-1, keepdim=True) * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
+
+
+class RLELoss(nn.Module):
+    """Residual Log-Likelihood Estimation Loss.
+
+    Args:
+        use_target_weight (bool): Option to use weighted loss.
+        size_average (bool): Option to average the loss by the batch_size.
+        residual (bool): Option to add L1 loss and let the flow learn the residual error distribution.
+
+    References:
+        https://arxiv.org/abs/2107.11291
+        https://github.com/open-mmlab/mmpose/blob/main/mmpose/models/losses/regression_loss.py
+    """
+
+    def __init__(self, use_target_weight: bool = True, size_average: bool = True, residual: bool = True):
+        """Initialize RLELoss with target weight and residual options.
+
+        Args:
+            use_target_weight (bool): Whether to use target weights for loss calculation.
+            size_average (bool): Whether to average the loss over elements.
+            residual (bool): Whether to include residual log-likelihood term.
+        """
+        super().__init__()
+        self.size_average = size_average
+        self.use_target_weight = use_target_weight
+        self.residual = residual
+
+    def forward(
+        self, sigma: torch.Tensor, log_phi: torch.Tensor, error: torch.Tensor, target_weight: torch.Tensor = None
+    ) -> torch.Tensor:
+        """
+        Args:
+            sigma (torch.Tensor): Output sigma, shape (N, D).
+            log_phi (torch.Tensor): Output log_phi, shape (N).
+            error (torch.Tensor): Error, shape (N, D).
+            target_weight (torch.Tensor): Weights across different joint types, shape (N).
+        """
+        log_sigma = torch.log(sigma)
+        loss = log_sigma - log_phi.unsqueeze(1)
+
+        if self.residual:
+            loss += torch.log(sigma * 2) + torch.abs(error)
+
+        if self.use_target_weight:
+            assert target_weight is not None, "'target_weight' should not be None when 'use_target_weight' is True."
+            if target_weight.dim() == 1:
+                target_weight = target_weight.unsqueeze(1)
+            loss *= target_weight
+
+        if self.size_average:
+            loss /= len(loss)
+
+        return loss.sum()
 
 
 class RotatedBboxLoss(BboxLoss):
@@ -157,6 +226,8 @@ class RotatedBboxLoss(BboxLoss):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
+        imgsz: torch.Tensor,
+        stride: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for rotated bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
@@ -165,13 +236,82 @@ class RotatedBboxLoss(BboxLoss):
 
         # DFL loss
         if self.dfl_loss:
-            target_ltrb = bbox2dist(anchor_points, xywh2xyxy(target_bboxes[..., :4]), self.dfl_loss.reg_max - 1)
+            target_ltrb = rbox2dist(
+                target_bboxes[..., :4], anchor_points, target_bboxes[..., 4:5], reg_max=self.dfl_loss.reg_max - 1
+            )
             loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            target_ltrb = rbox2dist(target_bboxes[..., :4], anchor_points, target_bboxes[..., 4:5])
+            target_ltrb = target_ltrb * stride
+            target_ltrb[..., 0::2] /= imgsz[1]
+            target_ltrb[..., 1::2] /= imgsz[0]
+            pred_dist = pred_dist * stride
+            pred_dist[..., 0::2] /= imgsz[1]
+            pred_dist[..., 1::2] /= imgsz[0]
+            loss_dfl = (
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none").mean(-1, keepdim=True) * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
+
+
+class MultiChannelDiceLoss(nn.Module):
+    """Criterion class for computing multi-channel Dice losses."""
+
+    def __init__(self, smooth: float = 1e-6, reduction: str = "mean"):
+        """Initialize MultiChannelDiceLoss with smoothing and reduction options.
+
+        Args:
+            smooth (float): Smoothing factor to avoid division by zero.
+            reduction (str): Reduction method ('mean', 'sum', or 'none').
+        """
+        super().__init__()
+        self.smooth = smooth
+        self.reduction = reduction
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate multi-channel Dice loss between predictions and targets."""
+        assert pred.size() == target.size(), "the size of predict and target must be equal."
+
+        pred = pred.sigmoid()
+        intersection = (pred * target).sum(dim=(2, 3))
+        union = pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3))
+        dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
+        dice_loss = 1.0 - dice
+        dice_loss = dice_loss.mean(dim=1)
+
+        if self.reduction == "mean":
+            return dice_loss.mean()
+        elif self.reduction == "sum":
+            return dice_loss.sum()
+        else:
+            return dice_loss
+
+
+class BCEDiceLoss(nn.Module):
+    """Criterion class for computing combined BCE and Dice losses."""
+
+    def __init__(self, weight_bce: float = 0.5, weight_dice: float = 0.5):
+        """Initialize BCEDiceLoss with BCE and Dice weight factors.
+
+        Args:
+            weight_bce (float): Weight factor for BCE loss component.
+            weight_dice (float): Weight factor for Dice loss component.
+        """
+        super().__init__()
+        self.weight_bce = weight_bce
+        self.weight_dice = weight_dice
+        self.bce = nn.BCEWithLogitsLoss()
+        self.dice = MultiChannelDiceLoss(smooth=1)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate combined BCE and Dice loss between predictions and targets."""
+        _, _, mask_h, mask_w = pred.shape
+        if tuple(target.shape[-2:]) != (mask_h, mask_w):  # downsample to the same size as pred
+            target = F.interpolate(target, (mask_h, mask_w), mode="nearest")
+        return self.weight_bce * self.bce(pred, target) + self.weight_dice * self.dice(pred, target)
 
 
 class KeypointLoss(nn.Module):
@@ -193,356 +333,182 @@ class KeypointLoss(nn.Module):
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
 # TODO (CP/IRIT): LogicSeg derived loss to enforce consistency between the knowledge model and the prediction.
-# Code extracted from LogicSeg pascal_part module:
 
-    # Prépare les matrices utilisées pour exploiter la relation de composition dans les fonctions de loss
-    # targets : tenseur qui associe à chaque point (h,w) d'une image b un numéro de classe
-    # targets_high : tenseur de même taille que targets qui associe à chaque point (h,w) d'une image 
-    # def prepare_targets(targets):
-    #     # b : batch / sample number
-    #     # h : height of the pixel in the sample
-    #     # w : width of the pixel in the sample
-    #     b, h, w = targets.shape
-    #     # initialisation à 0 du tenseur targets_high de même taille que le tenseur targets
-    #     targets_high = torch.zeros((b, h, w), dtype=targets.dtype, device=targets.device)
-    #     # séquence des numéros des classes composites
-    #     indices_high = []
-    #     # parcours la liste des classes composites
-    #     # index sera le numéro de la classe de 0 à nombre de classes composites - 1
-    #     # high sera le nom de la classe composite
-    #     for index, high in enumerate(hiera["hiera_high"].keys()):
-    #         # intervalles des numéros des classes composantes qui composent la classe composite de numéro index et de nom high
-    #         indices = hiera["hiera_high"][high]
-    #         # pour chaque numéro de classe composante qui composent la classe composition
-    #         for ii in range(indices[0], indices[1]):
-    #             # les éléments de targets_high pour lesquels targets à la valeur ii prennent la valeur index
-    #             # targets_high contient donc le numéro de la classe composite alors que targets contient le numéro du composant
-    #             targets_high[targets==ii] = index
-    #         # ajout de l'intervalle de numéro de classes composantes à l'indice de la classe composite
-    #         indices_high.append(indices)
-    #
-    #     return targets, targets_high, indices_high
-
-
-    # # Fonction de perte de type Binary Cross Entropy
-    # # predictions : données prédites
-    # # targets : données terrain
-    # def loss_bce(predictions, targets):
-    #     bce = F.binary_cross_entropy_with_logits(predictions, targets.float())
-    #     loss = bce*10
-    #
-    #     return loss
-    #
-    # # Fonction de perte de type Binary Cross Entropy Focalisée
-    # # predictions : données prédites
-    # # targets : données terrain
-    # def losses_bce_focal(predictions, targets, valid_indices, eps=1e-8, alpha=0.5, gamma=2):
-    #     predictions = torch.sigmoid(predictions.float())
-    #     loss = ((-alpha*targets*torch.pow((1.0-predictions),gamma)*torch.log(predictions+eps)
-    #              -(1-alpha)*(1.0-targets)*torch.pow(predictions, gamma)*torch.log(1.0-predictions+eps))
-    #              *valid_indices).sum()/valid_indices.sum()
-    #
-    #     return loss
-
-    # # predictions : tenseur des données prédites pour chaque point de l'image
-    # # num_classes : 
-    # def loss_e(predictions, num_classes, p=3.0):
-    #     # Dimensions : b(atch) / sample number x channel x h(eight) x w(idth)
-    #     b, _, h, w = predictions.shape
-    #     # Application d'une sigmoide pour lisser entre -1 et 1
-    #     predictions = torch.sigmoid(predictions.float())
-    #
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #     # extraction de la partie correspondant aux numéros des 21 premières classes supérieures (les composites)
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     # applatissement pour faciliter la vectorisation
-    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
-    #
-    #     # extraction de la partie correspondant aux numéros des dernières classes (après 21) (les composantes)
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-    #
-    #     # filter high confidence pixels
-    #    # Compte le nombre de classes avec une forte prédiction pour chaque pixel de chaque image
-    #     easy_A_pos = (MCMA>0.7).sum(-1)
-    #    # Compte le nombre de classes avec une faible prédiction pour chaque pixel de chaque image
-    #     easy_A_neg = (MCMA<0.3).sum(-1)
-    #    # détermine les pixels difficiles (plusieurs classes forte prédiction ou intermédiaire
-    #     hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_classes-1).float()
-    #     new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
-    #
-    #     easy_B_pos = (MCMB>0.7).sum(-1)
-    #     easy_B_neg = (MCMB<0.3).sum(-1)
-    #     hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
-    #     new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
-    #
-    #     mask_A = (1 - torch.eye(num_classes))[None, :, :].cuda()
-    #     mask_B = (1 - torch.eye(21))[None, :, :].cuda()
-    #     # predicates: not (x and y)
-    #     predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
-    #     predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
-    #
-    #     # 1. for all pixels: use pmeanError to aggregate
-    #     all_A = torch.pow(torch.pow(predicate_A, p).mean(), 1.0/p)
-    #     all_B = torch.pow(torch.pow(predicate_B, p).mean(), 1.0/p)
-    #     # 2. average the clauses
-    #     factor_A = num_classes*num_classes/(num_classes*num_classes + 21*21)
-    #     factor_B = 21*21/(num_classes*num_classes + 21*21)
-    #     loss_ex = all_A*factor_A + all_B*factor_B
-    #
-    #     return loss_ex
-
-
-    # def loss_c(predictions, num_classes, indices_high, eps=1e-8, p=5):
-    #    batch size * class num * height * width
-    #     b, _, h, w = predictions.shape
-    #     predictions = torch.sigmoid(predictions.float())
-    #
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #
-    #     # v : classe composante, sous classe
-    #     # extraction de la partie correspondant aux numéros des composantes, sous-classes (avant 21 dernières)
-    #     # par bloc de composantes d'une même composite
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     # applatissement pour faciliter la vectorisation
-    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
-    #
-    #     # p_v : parent of v, i.e. classe composite, super classe
-    #     # extraction de la partie correspondant aux numéros des composites, super classes (21 dernières)
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-    #
-    #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
-    #     predicate = MCMA.clone()
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #     # Pour chaque numéro de classe composite
-    #     for ii in range(21):
-    #         # Intervalle des numéros des classes composantes
-    #         indices = indices_high[ii]
-    #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
-    #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
-    #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
-    #         # par tranche de composantes indices[0]:indices[1] de la composite ii
-    #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
-    #
-    #     # for all clause: use pmeanError to aggregate
-    # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
-    #     loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
-    #
-    #     return loss_c
-
-    # # predictions : tenseur qui associe à chaque point de chaque image la probabilité pour chaque classe
-    # # num_classes : inutilisé
-    # # indices_high :
-    # # eps :
-    # # p :
-    # def loss_d(predictions, num_classes, indices_high, eps=1e-8, p=5):
-    #     b, _, h, w = predictions.shape
-    #     predictions = torch.sigmoid(predictions.float())
-    #
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #
-    #     # c_n^v : n-ème sous-classes de v ou classes composantes ?
-    #     # extraction de la partie correspondant aux numéros des ???
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     # applatissement pour faciliter la vectorisation
-    #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
-    #
-    #     # v : classe composites
-    #     # extraction de la partie correspondant aux numéros des ???
-    #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-    #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-    #
-    #     # predicate:  1-p+p*q, with aggregater, simplified to p-p*q
-    #     predicate = MCMB.clone()
-    #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-    #     # Pour chaque numéro de classe composite
-    #     for ii in range(21):
-    #         # Intervalle des numéros des classes composantes
-    #         indices = indices_high[ii]
-    #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
-    #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
-    #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
-    #         predicate[:,ii:ii+1] = MCMB[:,ii:ii+1] - MCMB[:,ii:ii+1] * MCMA[:,indices[0]:indices[1]].max(dim=1, keepdim=True)[0]
-    #
-    #      # for all clause: use pmeanError to aggregate
-    # #     loss_d = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/21
-    #     loss_d = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
-    #
-    #     return loss_d
-
-    # class HieraLossPascalPart(nn.Module):
-    #
-    #     def __init__(self,
-    #                  num_classes,
-    #                  use_sigmoid=False,
-    #                  loss_weight=1.0,
-    #                  loss_name='hieralosspascalpart'):
-    #         super(HieraLossPascalPart, self).__init__()
-    #         self.num_classes = num_classes
-    #         self.loss_weight = loss_weight
-    #         self._loss_name = loss_name
-    #
-    #     # label : tenseur qui associe à chaque point de l'image sa classe
-    #     # cls_score : tenseur qui associe à chaque point de l'image un vecteur classe/probabilité
-    #     # cls_score_ori : tenseur qui associe à chaque point de l'image un vecteur classe/probabilité
-    #     def forward(self,
-    #                 cls_score,
-    #                 label,
-    #                 cls_score_ori,
-    #                 step,
-    #                 weight=None,
-    #                 **kwargs):
-    #         """Forward function."""
-    #
-    #         targets, targets_top, indices_top = prepare_targets(label)
-    #
-    #         # build hierarchy GT
-    #         void_indices = (targets==255)
-    #         targets[void_indices]=0
-    #         targets = F.one_hot(targets, self.num_classes).permute(0,3,1,2)
-    #         targets_top = F.one_hot(targets_top, 21).permute(0,3,1,2)
-    #         targets = torch.cat([targets, targets_top], dim=1)
-    #         valid_indices = (~void_indices).unsqueeze(1)
-    #
-    #         hiera_loss = losses_bce_focal(cls_score, targets, valid_indices)
-    #         e_rule = loss_e(cls_score_ori, self.num_classes)
-    #         c_rule = loss_c(cls_score_ori, self.num_classes, indices_top)
-    #         d_rule = loss_d(cls_score_ori, self.num_classes, indices_top)
-    #
-    #         # n'accorde de l'importance aux pertes liées au modèle de données qu'à partir d'un certain nombre d'étapes
-    #         if step<20000:
-    #             factor=0
-    #         elif step<50000:
-    #             factor = float(step-20000)/30000.0
-    #         else:
-    #             factor = 1.0
-    #
-    #         return 0.5*hiera_loss + 0.3*factor*(c_rule+d_rule+e_rule*2/3)
-    
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
     
     # TODO (CP/IRIT): The model should carry all required data (inheritance and composition relations).
-    def __init__(self, model, c_weight, d_weight, e_weight):
+    def __init__(self, model, power = 3.0, 
+                 decomposition_weight = 1.0, decomposition_exclusion_weight = 1.0, 
+                 composition_weight = 1.0, composition_exclusion_weight = 1.0,
+                 generalization_weight = 1.0, 
+                 specialization_weight = 1.0, specialization_exclusion_weight = 1.0,
+            ):
         """Initialize the KnowledgeModelLoss class."""
         super().__init__()
         self.model = model
-        self.c_weight = c_weight
-        self.d_weight = d_weight
-        self.e_weight = e_weight
-        
-    def loss_c(self, pred_scores, num_composites_classes, power=3.0):
+        self.power = power
+        self.use_scores = getattr( model.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
+        self.decomposition_weight = decomposition_weight
+        self.decomposition_exclusion_weight = decomposition_exclusion_weight
+        self.composition_weight = composition_weight
+        self.composition_exclusion_weight = composition_exclusion_weight
+        self.generalization_weight = generalization_weight
+        self.specialization_weight = specialization_weight
+        self.specialization_exclusion_weight = specialization_exclusion_weight
+        self.refinement = model.refinement
+        self.composition = model.composition
+        self.variants = model.variants
+        self.variant_to_class = model.variant_to_class
+        self.class_variants = km.encode_variants(model.nc, self.variants)
+        self.classes = set(range(model.nc))
+        self.refinement_forward = self.refinement # TODO (CP/IRIT)
+        self.refinement_backward = km.invert_relation( self.refinement ) # TODO (CP/IRIT)
+        self.composition_forward = self.composition # TODO (CP/IRIT)
+        self.composition_backward = km.invert_relation( self.composition) # TODO (CP/IRIT)
+    
+    # One of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> \/_{t in T(s)} p_t(o)
+    # origin_indexes : class indexes for the domain
+    # targets_from_source : class indexes for the co-domain
+    def disjunction_loss(self, pred_scores, targets_from_source, power=3.0):
         batch_size, anchor_point_size, class_number = pred_scores.shape
-        #     predictions = torch.sigmoid(predictions.float()) # already done
-        #
-        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-        #
-        #     # v : classe composante, sous classe
-        #     # extraction de la partie correspondant aux numéros ???
-        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-        #     # applatissement pour faciliter la vectorisation
-        #     MCMA = predictions[:,:-21,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, num_class
-        
-        MCMA = pred_scores.index_select( 3, model.component_indexes)
-        
-        #
-        #     # p_v : parent of v, i.e. classe composite, super classe
-        #     # extraction de la partie correspondant aux numéros ???
-        #     # réorganisation pour obtenir un tenseur qui associe à chaque point de chaque image et à chaque classe sa probabilité
-        #     MCMB = predictions[:,-21:,:,:].permute(0,2,3,1).flatten(0,2) # B*H*W, 21
-        MCMB = pred_scores.index_select( 3, model.component_indexes)
-        #
-        #     # predicate: 1-p+p*q, with aggregater, simplified to p-p*q
-        predicate = MCMA.clone()
-        #     # TODO : ne pas coder en dur le 21 (nombre de classes composites)
-        #     # Pour chaque numéro de classe composite
-        #     for ii in range(21):
-        #         # Intervalle des numéros des classes composantes
-        #         indices = indices_high[ii]
-        #         # Pour tous les points de toutes les images (B * H * W) en vectorisé suite applatissement
-        #         # ii:ii+1 permet de garder les dimensions au lieu d'extraire la ii valeur
-        #         # détermine la probabilité maximale pour les composantes de la classe composite de numéro ii
-        #         predicate[:,indices[0]:indices[1]] = MCMA[:,indices[0]:indices[1]] - MCMA[:,indices[0]:indices[1]]*MCMB[:,ii:ii+1]
-        #
-        #     # for all clause: use pmeanError to aggregate
-        # #     loss_c = torch.pow(torch.pow(predicate, p).mean(dim=0), 1.0/p).sum()/num_classes
-        loss_c = torch.pow(torch.pow(predicate, p).mean(), 1.0/p)
-        #
-        return loss_c
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            targets_from_s = list(targets_from_source[s])
+            # p_c(o)
+            source_scores = pred_scores[:, :, s:s+1]
+            # p_d(o)
+            indexes = torch.tensor(targets_from_s,device=pred_scores.device)
+            target_scores = pred_scores.index_select( 2, indexes)
+            # max(p_d(o))
+            target_scores_max = target_scores.max()
+            # p_s(o) - p_s(o) * max(p_t(o))
+            predicate_s_o = source_scores - source_scores * target_scores_max
+            # p-mean on O
+            predicate_s[idx_s] = torch.pow(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
+        # mean for s in sources
+        return torch.mean(predicate_s)
     
-    def loss_d(self):
-        pass
+    # All of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
+    # sources : indexes for the sources
+    # targets_from_source : list of targets for a given source
+    def conjunction_loss(self, pred_scores, targets_from_source, power=3.0):
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            # p_s(o)
+            source_scores = pred_scores[:,:,s:s+1]
+            targets_from_s = list(targets_from_source[s])
+            indexes = torch.tensor(targets_from_s,device=pred_scores.device)
+            s_targets_number = len(targets_from_s)
+            # p_t(o)
+            target_scores_t = pred_scores.index_select( 2, indexes)
+            # p_s(o) - p_s(o) * p_t(o)
+            predicate_s_t_o = source_scores - source_scores * target_scores_t
+            # moyenne sur O
+            predicate_s_t = torch.pow(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
+            # moyenne sur A
+            predicate_s[idx_s] = torch.mean(predicate_s_t)
+        # moyenne sur C \ R
+        return torch.mean(predicate_s)    
     
-    # TODO (CP/IRIT): Adapt the encoding from LogicSeg to KM-YOLO.
-    def loss_e(self, pred_scores, num_composites_classes, power=3.0):
-        # Dimensions : b(atch) / anchor point / classe
-        batch_size, anchor_point_size, class_size = pred_scores.shape
-
-        # Application of a sigmoid to smooth between -1 and 1
-        # TODO (CP/IRIT): Check that it has already been done.
-        preds = torch.sigmoid(preds.float())
-
-        # Extraction of the part corresponding to the numbers of the first 21 upper classes (the composites)
-        index_composites = ...
-        preds_composites = predictions.index_select( 3, index_composites)
-        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
-        preds_composites_permutate = preds_composites.permute(0,2,3,1)
-        # Flattening to facilitate the vectorization 
-        MCMA = preds_composites_permutate.flatten(0,2)
-
-        # extraction of the part corresponding to the numbers of the last classes (after 21) (the components)
-        index_components = ...
-        preds_components = predictions.index_select( 3, index_components)
-        # Reorganization to obtain a tensor that associates each point of each image and each class with its probability
-        preds_components_permutate = preds_components.permute(0,2,3,1)
-        # Flattening to facilitate the vectorization 
-        # TODO (CP/IRIT): Where is MCMB ?
-        MCMA = preds_components_permutate.flatten(0,2)      
-
-        # TODO : On ne travaille pas sur les pixels mais uniquement sur 
-        # filter high confidence pixels
-        # Count the number of classes with a strong prediction for each pixel of each image
-        easy_A_pos = (MCMA>0.7).sum(-1)
-        # Count the number of classes with low prediction for each pixel of each image
-        easy_A_neg = (MCMA<0.3).sum(-1)
-        # determines the difficult pixels (several strong prediction or intermediate classes)
-        hard_A = 1 - torch.logical_and(easy_A_pos==1, easy_A_neg==num_composites_classes-1).float()
-        new_MCMA = MCMA[hard_A>0].unsqueeze(-1) # num_hard, num_class, 1
-
-        easy_B_pos = (MCMB>0.7).sum(-1)
-        easy_B_neg = (MCMB<0.3).sum(-1)
-        hard_B = 1 - torch.logical_and(easy_B_pos==1, easy_B_neg==20).float()
-        new_MCMB = MCMB[hard_B>0].unsqueeze(-1) # num_hard, 21, 1
-
-        mask_A = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
-        mask_B = (1 - torch.eye(num_composites_classes))[None, :, :].cuda()
-        # predicates: not (x and y)
-        predicate_A = (new_MCMA@(new_MCMA.transpose(1,2)))*mask_A # num_hard, num_class, num_class
-        predicate_B = (new_MCMB@(new_MCMB.transpose(1,2)))*mask_B # num_hard, 21, 21
-
-        # 1. for all pixels: use pmeanError to aggregate
-        all_A = torch.pow(torch.pow(predicate_A, power).mean(), 1.0/power)
-        all_B = torch.pow(torch.pow(predicate_B, power).mean(), 1.0/power)
-        # 2. average the clauses
-        factor_A = num_classes*num_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
-        factor_B = num_composites_classes*num_composites_classes/(num_classes*num_classes + num_composites_classes*num_composites_classes)
-        loss_ex = all_A*factor_A + all_B*factor_B
-
-        return loss_ex
+    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # sources : class indexes for the domain
+    # targets_from_source : class indexes for the co-domain
+    def exclusion_loss(self, pred_scores, targets_from_source, power=3.0):
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        predicate_s = torch.zeros(source_number)
+        for idx_s, s in enumerate(sources):
+            # p_s(o)
+            source_scores = pred_scores[:,:,s:s+1]
+            targets_from_s = list(targets_from_source[s])
+            s_targets_number = len(targets_from_s)
+            predicate_s_t = torch.zeros(s_targets_number)
+            if s_targets_number > 1:
+                for idx_t, t in enumerate(targets_from_s):
+                    targets_except_t = targets_from_s.copy()
+                    targets_except_t.remove(t)
+                    # p_t(o)
+                    target_scores_t = pred_scores[:,:, t:t+1]
+                    # p_e(o)
+                    indexes = torch.tensor(targets_except_t,device=pred_scores.device)
+                    target_scores_e = pred_scores.index_select( 2, indexes)
+                    # p_t(o) * p_e(o)
+                    predicate_s_t_e_o = target_scores_t * target_scores_e
+                    # moyenne sur O
+                    predicate_s_t_e = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
+                    # moyenne sur e in T(s) \ { t }
+                    predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
+            # moyenne sur t in T(s)
+            predicate_s[idx_s] = torch.mean(predicate_s_t)
+        # moyenne sur s in S
+        return torch.mean(predicate_s)
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
-        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
-        kpt_loss_factor = kpt_mask.shape[1] / (torch.sum(kpt_mask != 0, dim=1) + 1e-9)
-        # e = d / (2 * (area * self.sigmas) ** 2 + 1e-9)  # from formula
-        e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
-        return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
+
+        if self.use_refinement:
+            if len(self.refinement_forward) == 0:
+                S_loss = 0.0
+                SE_loss = 0.0
+            else:
+                # Call disjunction_loss for refinement and composition
+                S_loss = self.disjunction_loss(pred_scores, self.refinement_forward)
+                # Call exclusion_loss for refinement and composition
+                SE_loss = self.exclusion_loss(pred_scores, self.refinement_forward)
+            if len(self.refinement_backward) == 0:
+                 G_loss = 0.0
+            else:
+                # Call conjunction_loss for refinement
+                G_loss = self.conjunction_loss(pred_scores, self.refinement_backward)
+        else:
+            S_loss = 0.0
+            SE_loss = 0.0
+            G_loss = 0.0
+        if self.use_composition:
+            if len(self.composition_forward) == 0:
+                C_loss = 0.0
+                CE_loss = 0.0
+            else:
+                # Call disjunction_loss for refinement and composition
+                C_loss = self.disjunction_loss(pred_scores, self.composition_forward)
+                # Call exclusion_loss for refinement and composition
+                CE_loss = self.exclusion_loss(pred_scores, self.composition_forward)
+            if len(self.composition_backward) == 0:
+                D_loss = 0.0
+                DE_loss = 0.0
+            else:
+                # Call conjunction_loss for refinement
+                D_loss = self.disjunction_loss(pred_scores, self.composition_backward)
+                DE_loss = self.exclusion_loss(pred_scores, self.composition_backward)
+        else:
+            C_loss = 0.0
+            CE_loss = 0.0
+            D_loss = 0.0
+            DE_loss = 0.0
+        return (self.specialization_weight * S_loss
+            + self.composition_weight * C_loss 
+            + self.specialization_exclusion_weight * SE_loss 
+            + self.composition_exclusion_weight * CE_loss 
+            + self.generalization_weight * G_loss 
+            + self.decomposition_weight * D_loss)
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
 
-    def __init__(self, model, tal_topk: int = 10):  # model must be de-paralleled
+    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
         """Initialize v8DetectionLoss with model parameters and task-aligned assignment settings."""
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
@@ -558,8 +524,31 @@ class v8DetectionLoss:
 
         self.use_dfl = m.reg_max > 1
 
-        self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
+        self.use_scores = getattr( model.args, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
+        if self.use_km_losses:
+            self.km_loss = KnowledgeBasedLoss(model)
+        else:
+            km_loss = None
+
+        self.assigner = TaskAlignedAssigner(
+            topk=tal_topk,
+            num_classes=self.nc,
+            alpha=0.5,
+            beta=6.0,
+            stride=self.stride.tolist(),
+            topk2=tal_topk2,
+            use_scores = self.use_scores,
+            use_km_scores = self.use_km_scores, 
+            use_variant_selection = self.use_variant_selection,
+            )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        # TODO(CP/IRIT): Add knowledge model control
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -576,6 +565,7 @@ class v8DetectionLoss:
                 matches = i == j
                 if n := matches.sum():
                     out[j, :n] = targets[matches, 1:]
+            # DONE (CP/IRIT): Bounding boxes are at the end of the out tensor.
             out[..., -4:] = xywh2xyxy(out[..., -4:].mul_(scale_tensor))
         return out
 
@@ -600,8 +590,9 @@ class v8DetectionLoss:
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
-    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size.
+    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size and return foreground mask and
+        target indices.
         TODO (CP/IRIT): Should all tensors be on the same device there ?
         Args:
             preds (Union[ Tuple( Tensor, ...), Tensor]) : prediction computed by the trainee network to compute the loss with respect to the ground truth
@@ -611,25 +602,38 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
-        loss = torch.zeros(3, device=self.device)  # 3 loss items: box, cls, dfl
-        # TODO (CP/IRIT): Why use preds[1] instead of preds[0] ?
-        feats = preds[1] if isinstance(preds, tuple) else preds
-        # merge all the prediction levels along dimension 2
-        pred_merged = torch.cat( [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
-        # split between bounding box and class score features
-        pred_for_bboxes, pred_scores = pred_merged.split((self.reg_max * 4, self.nc), 1)
+        if self.use_km_scores:
+            score_index = 2
+            if self.use_km_losses:
+                loss_number = 5
+                km_index = 3
+            else:
+                loss_number =4
+        else:
+            loss_number = 3
+        box_index = 0
+        cls_index = 1
+        dfl_index = loss_number - 1
+        
+        # TODO (CP/IRIT): Adding knowledge model loss
+        loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
 
         # reorganize dimensions for future operations
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        # rename pred_distri to pred_for_bboxes
+        pred_for_bboxes, pred_scores, pred_km_scores = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+            preds["km_scores"].permute(0, 2, 1).contiguous(),
+        )
+        # anchor points from the first stride, then the second, etc
+        anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
+
         # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
-        pred_for_bboxes = pred_for_bboxes.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
-
-        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        # anchor points from the first stride, then the second, etc
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        # image size (h,w)
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
 
         # Targets
         
@@ -642,6 +646,7 @@ class v8DetectionLoss:
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT) : are the ground truth labels used ?
         gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
+
         # Identify future positive anchor points
         # Sum the components of each bounding boxes
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
@@ -651,18 +656,17 @@ class v8DetectionLoss:
 
         # Bounding boxes
         # Compute predicted bounding boxes according to anchor points
+        # rename pred_distri to pred_for_bboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
-        # dfl_conf = pred_for_bboxes.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
-        # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
-
+        
         smoothed_pred_scores = pred_scores.detach().sigmoid()
+        
         # Scale predicted bounding boxes along the pyramid (stride values)
         scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
         scaled_anchor_points = anchor_points * stride_tensor
 
         # Computer the ground truth for the bounding boxes and class scores
-        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
-            # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
+        _, target_bboxes, target_scores, target_km_scores, fg_mask, target_gt_idx = self.assigner(
             smoothed_pred_scores,
             scaled_pred_boxes,
             scaled_anchor_points,
@@ -675,128 +679,161 @@ class v8DetectionLoss:
         target_scores_sum = max(target_scores.sum(), 1)
 
         # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
-        loss[1] = bce_values.sum() / target_scores_sum  # BCE
+        loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
+        
+        if self.use_km_scores:
+            target_km_scores_sum = max(target_km_scores.sum(), 1)
+            km_bce_values = self.bce(pred_km_scores, target_scores.to(dtype))
+            loss[score_index] = km_bce_values.sum() / target_km_scores_sum  # BCE
+        
+        # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
+        if self.use_km_losses:
+            # KM loss takes as inputs probability that an object is an instance of a class to enforce the consistency w.r.t. the knowledge model.
+            # Should be 0 when there is no object and 1 when there is an object of a given class.
+            # But scores express confidence that there is an object (a bounding box) of a given class. 
+            # If an object is expected to be present, its main class score should be scaled to 1 and the other scores should be consistent.
+            # If no object are expected, no constraints should be enforced
+            norm_pred_km_scores = pred_km_scores.sigmoid()
+            km_loss = self.km_loss(norm_pred_km_scores, target_km_scores)
+            # print('Knowledge Model Loss = ',km_loss)
+            loss[km_index] = km_loss
 
         # Bbox loss
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
         if fg_mask.sum():
-            loss[0], loss[2] = self.bbox_loss(
-                pred_distri,
+            loss[box_index], loss[dfl_index] = self.bbox_loss(
+                pred_for_bboxes, # rename pred_distri to pred_for_bboxes
                 pred_bboxes,
                 anchor_points,
                 target_bboxes / stride_tensor,
                 target_scores,
                 target_scores_sum,
                 fg_mask,
+                imgsz,
+                stride_tensor,
             )
 
-        loss[0] *= self.hyp.box  # box gain
-        loss[1] *= self.hyp.cls  # cls gain
-        loss[2] *= self.hyp.dfl  # dfl gain
+        loss[box_index] *= self.hyp.box  # box gain
+        loss[cls_index] *= self.hyp.cls  # cls gain
+        if self.use_km_scores:
+            loss[score_index] *= self.hyp.cls 
+        if self.use_km_losses:
+            loss[km_index] *= self.hyp.km  # km gain
+        loss[dfl_index] *= self.hyp.dfl  # dfl gain
+        
+        has_nan = math.isnan(loss[box_index]) or math.isnan(loss[cls_index]) or math.isnan(loss[dfl_index])
+        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km_losses else has_nan
+        
+        if has_nan:
+            print("NaN occured in loss computation.")
 
-        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
+        return (
+            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+            loss,
+            loss.detach(),
+        )  # loss(box, cls, dfl)
+
+    def parse_output(
+        self, preds: dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]]
+    ) -> torch.Tensor:
+        """Parse model predictions to extract features."""
+        return preds[1] if isinstance(preds, tuple) else preds
+
+    def __call__(
+        self,
+        preds: dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]],
+        batch: dict[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        # DONE (CP/IRIT): Test the loss functions using variant data. Results should be 0.
+        # if (self.km_loss.class_variants != None):
+        #     test_data = self.km_loss.class_variants.unsqueeze(0)
+        #     test = self.km_loss( test_data, test_data)
+        return self.loss(self.parse_output(preds), batch)
+
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """A wrapper for get_assigned_targets_and_loss and parse_output."""
+        batch_size = preds["boxes"].shape[0]
+        loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+        return loss * batch_size, loss_detach
 
 
 class v8SegmentationLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 segmentation."""
 
-    def __init__(self, model):  # model must be de-paralleled
+    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
         """Initialize the v8SegmentationLoss class with model parameters and mask overlap setting."""
-        super().__init__(model)
+        super().__init__(model, tal_topk, tal_topk2)
         self.overlap = model.args.overlap_mask
+        self.bcedice_loss = BCEDiceLoss(weight_bce=0.5, weight_dice=0.5)
 
-    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the combined loss for detection and segmentation."""
-        loss = torch.zeros(4, device=self.device)  # box, seg, cls, dfl
-        feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
+        pred_masks, proto = preds["mask_coefficient"].permute(0, 2, 1).contiguous(), preds["proto"]
+        loss = torch.zeros(5, device=self.device)  # box, seg, cls, dfl
+        if isinstance(proto, tuple) and len(proto) == 2:
+            proto, pred_semseg = proto
+        else:
+            pred_semseg = None
+        # TODO (CP/IRIT): should "scores" be managed in the same way ?
+        (fg_mask, target_gt_idx, target_bboxes, _, _), det_loss, _ = self.get_assigned_targets_and_loss(preds, batch)
+        # NOTE: re-assign index for consistency for now. Need to be removed in the future.
+        loss[0], loss[2], loss[3] = det_loss[0], det_loss[1], det_loss[2]
+
         batch_size, _, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
-        )
-
-        # B, grids, ..
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
-        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
-        pred_masks = pred_masks.permute(0, 2, 1).contiguous()
-
-        dtype = pred_scores.dtype
-        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
-
-        # Targets
-        try:
-            batch_idx = batch["batch_idx"].view(-1, 1)
-            # TODO (CP/IRIT): should "scores" be managed in the same way ?
-            targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
-            targets = self.preprocess(targets, batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
-            gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
-            mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
-        except RuntimeError as e:
-            raise TypeError(
-                "ERROR ❌ segment dataset incorrectly formatted or not a segment dataset.\n"
-                "This error can occur when incorrectly training a 'segment' model on a 'detect' dataset, "
-                "i.e. 'yolo train model=yolo11n-seg.pt data=coco8.yaml'.\nVerify your dataset is a "
-                "correctly formatted 'segment' dataset using 'data=coco8-seg.yaml' "
-                "as an example.\nSee https://docs.ultralytics.com/datasets/segment/ for help."
-            ) from e
-
-        # Pboxes
-        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
-
-        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
-            pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-            anchor_points * stride_tensor,
-            gt_labels,
-            gt_bboxes,
-            mask_gt,
-        )
-
-        target_scores_sum = max(target_scores.sum(), 1)
-
-        # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[2] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
-
         if fg_mask.sum():
-            # Bbox loss
-            loss[0], loss[3] = self.bbox_loss(
-                pred_distri,
-                pred_bboxes,
-                anchor_points,
-                target_bboxes / stride_tensor,
-                target_scores,
-                target_scores_sum,
-                fg_mask,
-            )
             # Masks loss
             masks = batch["masks"].to(self.device).float()
             if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
-                masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
+                # masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
+                proto = F.interpolate(proto, masks.shape[-2:], mode="bilinear", align_corners=False)
 
-            loss[1] = self.calculate_segmentation_loss(
-                fg_mask, masks, target_gt_idx, target_bboxes, batch_idx, proto, pred_masks, imgsz, self.overlap
+            imgsz = (
+                torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=pred_masks.dtype) * self.stride[0]
             )
+            loss[1] = self.calculate_segmentation_loss(
+                fg_mask,
+                masks,
+                target_gt_idx,
+                target_bboxes,
+                batch["batch_idx"].view(-1, 1),
+                proto,
+                pred_masks,
+                imgsz,
+            )
+            if pred_semseg is not None:
+                sem_masks = batch["sem_masks"].to(self.device)  # NxHxW
+                sem_masks = F.one_hot(sem_masks.long(), num_classes=self.nc).permute(0, 3, 1, 2).float()  # NxCxHxW
+
+                if self.overlap:
+                    mask_zero = masks == 0  # NxHxW
+                    sem_masks[mask_zero.unsqueeze(1).expand_as(sem_masks)] = 0
+                else:
+                    batch_idx = batch["batch_idx"].view(-1)  # [total_instances]
+                    for i in range(batch_size):
+                        instance_mask_i = masks[batch_idx == i]  # [num_instances_i, H, W]
+                        if len(instance_mask_i) == 0:
+                            continue
+                        sem_masks[i, :, instance_mask_i.sum(dim=0) == 0] = 0
+
+                loss[4] = self.bcedice_loss(pred_semseg, sem_masks)
+                loss[4] *= self.hyp.box  # seg gain
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
+            if pred_semseg is not None:
+                loss[4] += (pred_semseg * 0).sum()
 
-        loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.box  # seg gain
-        loss[2] *= self.hyp.cls  # cls gain
-        loss[3] *= self.hyp.dfl  # dfl gain
-
-        return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl)
+        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
 
     @staticmethod
     def single_mask_loss(
         gt_mask: torch.Tensor, pred: torch.Tensor, proto: torch.Tensor, xyxy: torch.Tensor, area: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Compute the instance segmentation loss for a single image.
+        """Compute the instance segmentation loss for a single image.
 
         Args:
             gt_mask (torch.Tensor): Ground truth mask of shape (N, H, W), where N is the number of objects.
@@ -826,10 +863,8 @@ class v8SegmentationLoss(v8DetectionLoss):
         proto: torch.Tensor,
         pred_masks: torch.Tensor,
         imgsz: torch.Tensor,
-        overlap: bool,
     ) -> torch.Tensor:
-        """
-        Calculate the loss for instance segmentation.
+        """Calculate the loss for instance segmentation.
 
         Args:
             fg_mask (torch.Tensor): A binary tensor of shape (BS, N_anchors) indicating which anchors are positive.
@@ -840,7 +875,6 @@ class v8SegmentationLoss(v8DetectionLoss):
             proto (torch.Tensor): Prototype masks of shape (BS, 32, H, W).
             pred_masks (torch.Tensor): Predicted masks for each anchor of shape (BS, N_anchors, 32).
             imgsz (torch.Tensor): Size of the input image as a tensor of shape (2), i.e., (H, W).
-            overlap (bool): Whether the masks in `masks` tensor overlap.
 
         Returns:
             (torch.Tensor): The calculated loss for instance segmentation.
@@ -866,7 +900,7 @@ class v8SegmentationLoss(v8DetectionLoss):
             fg_mask_i, target_gt_idx_i, pred_masks_i, proto_i, mxyxy_i, marea_i, masks_i = single_i
             if fg_mask_i.any():
                 mask_idx = target_gt_idx_i[fg_mask_i]
-                if overlap:
+                if self.overlap:
                     gt_mask = masks_i == (mask_idx + 1).view(-1, 1, 1)
                     gt_mask = gt_mask.float()
                 else:
@@ -886,9 +920,9 @@ class v8SegmentationLoss(v8DetectionLoss):
 class v8PoseLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 pose estimation."""
 
-    def __init__(self, model):  # model must be de-paralleled
+    def __init__(self, model, tal_topk: int = 10, tal_topk2: int = 10):  # model must be de-paralleled
         """Initialize v8PoseLoss with model parameters and keypoint-specific loss functions."""
-        super().__init__(model)
+        super().__init__(model, tal_topk, tal_topk2)
         self.kpt_shape = model.model[-1].kpt_shape
         self.bce_pose = nn.BCEWithLogitsLoss()
         is_pose = self.kpt_shape == [17, 3]
@@ -896,72 +930,43 @@ class v8PoseLoss(v8DetectionLoss):
         sigmas = torch.from_numpy(OKS_SIGMA).to(self.device) if is_pose else torch.ones(nkpt, device=self.device) / nkpt
         self.keypoint_loss = KeypointLoss(sigmas=sigmas)
 
-    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the total loss and detach it for pose estimation."""
+        pred_kpts = preds["kpts"].permute(0, 2, 1).contiguous()
         loss = torch.zeros(5, device=self.device)  # box, cls, dfl, kpt_location, kpt_visibility
-        feats, pred_kpts = preds if isinstance(preds[0], list) else preds[1]
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
+        (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor), det_loss, _ = (
+            self.get_assigned_targets_and_loss(preds, batch)
         )
+        # NOTE: re-assign index for consistency for now. Need to be removed in the future.
+        loss[0], loss[3], loss[4] = det_loss[0], det_loss[1], det_loss[2]
 
-        # B, grids, ..
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
-        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
-        pred_kpts = pred_kpts.permute(0, 2, 1).contiguous()
-
-        dtype = pred_scores.dtype
-        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
-
-        # Targets
-        batch_size = pred_scores.shape[0]
-        batch_idx = batch["batch_idx"].view(-1, 1)
+        batch_size = pred_kpts.shape[0]
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
-        targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
-        targets = self.preprocess(targets, batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
-        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
-        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=pred_kpts.dtype) * self.stride[0]
 
         # Pboxes
-        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
         pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, 17, 3)
-
-        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
-            pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-            anchor_points * stride_tensor,
-            gt_labels,
-            gt_bboxes,
-            mask_gt,
-        )
-
-        target_scores_sum = max(target_scores.sum(), 1)
-
-        # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[3] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():
-            target_bboxes /= stride_tensor
-            loss[0], loss[4] = self.bbox_loss(
-                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
-            )
             keypoints = batch["keypoints"].to(self.device).float().clone()
             keypoints[..., 0] *= imgsz[1]
             keypoints[..., 1] *= imgsz[0]
 
             loss[1], loss[2] = self.calculate_keypoints_loss(
-                fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
+                fg_mask,
+                target_gt_idx,
+                keypoints,
+                batch["batch_idx"].view(-1, 1),
+                stride_tensor,
+                target_bboxes,
+                pred_kpts,
             )
 
-        loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.pose  # pose gain
         loss[2] *= self.hyp.kobj  # kobj gain
-        loss[3] *= self.hyp.cls  # cls gain
-        loss[4] *= self.hyp.dfl  # dfl gain
 
-        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
+        return loss * batch_size, loss.detach()  # loss(box, pose, kobj, cls, dfl)
 
     @staticmethod
     def kpts_decode(anchor_points: torch.Tensor, pred_kpts: torch.Tensor) -> torch.Tensor:
@@ -972,35 +977,23 @@ class v8PoseLoss(v8DetectionLoss):
         y[..., 1] += anchor_points[:, [1]] - 0.5
         return y
 
-    def calculate_keypoints_loss(
+    def _select_target_keypoints(
         self,
-        masks: torch.Tensor,
-        target_gt_idx: torch.Tensor,
         keypoints: torch.Tensor,
         batch_idx: torch.Tensor,
-        stride_tensor: torch.Tensor,
-        target_bboxes: torch.Tensor,
-        pred_kpts: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Calculate the keypoints loss for the model.
-
-        This function calculates the keypoints loss and keypoints object loss for a given batch. The keypoints loss is
-        based on the difference between the predicted keypoints and ground truth keypoints. The keypoints object loss is
-        a binary classification loss that classifies whether a keypoint is present or not.
+        target_gt_idx: torch.Tensor,
+        masks: torch.Tensor,
+    ) -> torch.Tensor:
+        """Select target keypoints for each anchor based on batch index and target ground truth index.
 
         Args:
-            masks (torch.Tensor): Binary mask tensor indicating object presence, shape (BS, N_anchors).
-            target_gt_idx (torch.Tensor): Index tensor mapping anchors to ground truth objects, shape (BS, N_anchors).
             keypoints (torch.Tensor): Ground truth keypoints, shape (N_kpts_in_batch, N_kpts_per_object, kpts_dim).
             batch_idx (torch.Tensor): Batch index tensor for keypoints, shape (N_kpts_in_batch, 1).
-            stride_tensor (torch.Tensor): Stride tensor for anchors, shape (N_anchors, 1).
-            target_bboxes (torch.Tensor): Ground truth boxes in (x1, y1, x2, y2) format, shape (BS, N_anchors, 4).
-            pred_kpts (torch.Tensor): Predicted keypoints, shape (BS, N_anchors, N_kpts_per_object, kpts_dim).
+            target_gt_idx (torch.Tensor): Index tensor mapping anchors to ground truth objects, shape (BS, N_anchors).
+            masks (torch.Tensor): Binary mask tensor indicating object presence, shape (BS, N_anchors).
 
         Returns:
-            kpts_loss (torch.Tensor): The keypoints loss.
-            kpts_obj_loss (torch.Tensor): The keypoints object loss.
+            (torch.Tensor): Selected keypoints tensor, shape (BS, N_anchors, N_kpts_per_object, kpts_dim).
         """
         batch_idx = batch_idx.flatten()
         batch_size = len(masks)
@@ -1027,6 +1020,40 @@ class v8PoseLoss(v8DetectionLoss):
             1, target_gt_idx_expanded.expand(-1, -1, keypoints.shape[1], keypoints.shape[2])
         )
 
+        return selected_keypoints
+
+    def calculate_keypoints_loss(
+        self,
+        masks: torch.Tensor,
+        target_gt_idx: torch.Tensor,
+        keypoints: torch.Tensor,
+        batch_idx: torch.Tensor,
+        stride_tensor: torch.Tensor,
+        target_bboxes: torch.Tensor,
+        pred_kpts: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the keypoints loss for the model.
+
+        This function calculates the keypoints loss and keypoints object loss for a given batch. The keypoints loss is
+        based on the difference between the predicted keypoints and ground truth keypoints. The keypoints object loss is
+        a binary classification loss that classifies whether a keypoint is present or not.
+
+        Args:
+            masks (torch.Tensor): Binary mask tensor indicating object presence, shape (BS, N_anchors).
+            target_gt_idx (torch.Tensor): Index tensor mapping anchors to ground truth objects, shape (BS, N_anchors).
+            keypoints (torch.Tensor): Ground truth keypoints, shape (N_kpts_in_batch, N_kpts_per_object, kpts_dim).
+            batch_idx (torch.Tensor): Batch index tensor for keypoints, shape (N_kpts_in_batch, 1).
+            stride_tensor (torch.Tensor): Stride tensor for anchors, shape (N_anchors, 1).
+            target_bboxes (torch.Tensor): Ground truth boxes in (x1, y1, x2, y2) format, shape (BS, N_anchors, 4).
+            pred_kpts (torch.Tensor): Predicted keypoints, shape (BS, N_anchors, N_kpts_per_object, kpts_dim).
+
+        Returns:
+            kpts_loss (torch.Tensor): The keypoints loss.
+            kpts_obj_loss (torch.Tensor): The keypoints object loss.
+        """
+        # Select target keypoints using helper method
+        selected_keypoints = self._select_target_keypoints(keypoints, batch_idx, target_gt_idx, masks)
+
         # Divide coordinates by stride
         selected_keypoints[..., :2] /= stride_tensor.view(1, -1, 1, 1)
 
@@ -1034,6 +1061,7 @@ class v8PoseLoss(v8DetectionLoss):
         kpts_obj_loss = 0
 
         if masks.any():
+            target_bboxes /= stride_tensor
             gt_kpt = selected_keypoints[masks]
             area = xyxy2xywh(target_bboxes[masks])[:, 2:].prod(1, keepdim=True)
             pred_kpt = pred_kpts[masks]
@@ -1044,6 +1072,172 @@ class v8PoseLoss(v8DetectionLoss):
                 kpts_obj_loss = self.bce_pose(pred_kpt[..., 2], kpt_mask.float())  # keypoint obj loss
 
         return kpts_loss, kpts_obj_loss
+
+
+class PoseLoss26(v8PoseLoss):
+    """Criterion class for computing training losses for YOLOv8 pose estimation with RLE loss support."""
+
+    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
+        """Initialize PoseLoss26 with model parameters and keypoint-specific loss functions including RLE loss."""
+        super().__init__(model, tal_topk, tal_topk2)
+        is_pose = self.kpt_shape == [17, 3]
+        nkpt = self.kpt_shape[0]  # number of keypoints
+        self.rle_loss = None
+        self.flow_model = model.model[-1].flow_model if hasattr(model.model[-1], "flow_model") else None
+        if self.flow_model is not None:
+            self.rle_loss = RLELoss(use_target_weight=True).to(self.device)
+            self.target_weights = (
+                torch.from_numpy(RLE_WEIGHT).to(self.device) if is_pose else torch.ones(nkpt, device=self.device)
+            )
+
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the total loss and detach it for pose estimation."""
+        pred_kpts = preds["kpts"].permute(0, 2, 1).contiguous()
+        loss = torch.zeros(6 if self.rle_loss else 5, device=self.device)  # box, cls, dfl, kpt_location, kpt_visibility
+        (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor), det_loss, _ = (
+            self.get_assigned_targets_and_loss(preds, batch)
+        )
+        # NOTE: re-assign index for consistency for now. Need to be removed in the future.
+        loss[0], loss[3], loss[4] = det_loss[0], det_loss[1], det_loss[2]
+
+        batch_size = pred_kpts.shape[0]
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=pred_kpts.dtype) * self.stride[0]
+
+        pred_kpts = pred_kpts.view(batch_size, -1, *self.kpt_shape)  # (b, h*w, 17, 3)
+
+        if self.rle_loss and preds.get("kpts_sigma", None) is not None:
+            pred_sigma = preds["kpts_sigma"].permute(0, 2, 1).contiguous()
+            pred_sigma = pred_sigma.view(batch_size, -1, self.kpt_shape[0], 2)  # (b, h*w, 17, 2)
+            pred_kpts = torch.cat([pred_kpts, pred_sigma], dim=-1)  # (b, h*w, 17, 5)
+
+        pred_kpts = self.kpts_decode(anchor_points, pred_kpts)
+
+        # Bbox loss
+        if fg_mask.sum():
+            keypoints = batch["keypoints"].to(self.device).float().clone()
+            keypoints[..., 0] *= imgsz[1]
+            keypoints[..., 1] *= imgsz[0]
+
+            keypoints_loss = self.calculate_keypoints_loss(
+                fg_mask,
+                target_gt_idx,
+                keypoints,
+                batch["batch_idx"].view(-1, 1),
+                stride_tensor,
+                target_bboxes,
+                pred_kpts,
+            )
+            loss[1] = keypoints_loss[0]
+            loss[2] = keypoints_loss[1]
+            if self.rle_loss is not None:
+                loss[5] = keypoints_loss[2]
+
+        loss[1] *= self.hyp.pose  # pose gain
+        loss[2] *= self.hyp.kobj  # kobj gain
+        if self.rle_loss is not None:
+            loss[5] *= self.hyp.rle  # rle gain
+
+        return loss * batch_size, loss.detach()  # loss(box, cls, dfl, kpt_location, kpt_visibility)
+
+    @staticmethod
+    def kpts_decode(anchor_points: torch.Tensor, pred_kpts: torch.Tensor) -> torch.Tensor:
+        """Decode predicted keypoints to image coordinates."""
+        y = pred_kpts.clone()
+        y[..., 0] += anchor_points[:, [0]]
+        y[..., 1] += anchor_points[:, [1]]
+        return y
+
+    def calculate_rle_loss(self, pred_kpt: torch.Tensor, gt_kpt: torch.Tensor, kpt_mask: torch.Tensor) -> torch.Tensor:
+        """Calculate the RLE (Residual Log-likelihood Estimation) loss for keypoints.
+
+        Args:
+            pred_kpt (torch.Tensor): Predicted keypoints with sigma, shape (N, kpts_dim) where kpts_dim >= 4.
+            gt_kpt (torch.Tensor): Ground truth keypoints, shape (N, kpts_dim).
+            kpt_mask (torch.Tensor): Mask for valid keypoints, shape (N, num_keypoints).
+
+        Returns:
+            (torch.Tensor): The RLE loss.
+        """
+        pred_kpt_visible = pred_kpt[kpt_mask]
+        gt_kpt_visible = gt_kpt[kpt_mask]
+        pred_coords = pred_kpt_visible[:, 0:2]
+        pred_sigma = pred_kpt_visible[:, -2:]
+        gt_coords = gt_kpt_visible[:, 0:2]
+
+        target_weights = self.target_weights.unsqueeze(0).repeat(kpt_mask.shape[0], 1)
+        target_weights = target_weights[kpt_mask]
+
+        pred_sigma = pred_sigma.sigmoid()
+        error = (pred_coords - gt_coords) / (pred_sigma + 1e-9)
+
+        # Filter out NaN and Inf values to prevent MultivariateNormal validation errors
+        valid_mask = ~(torch.isnan(error) | torch.isinf(error)).any(dim=-1)
+        if not valid_mask.any():
+            return torch.tensor(0.0, device=pred_kpt.device)
+
+        error = error[valid_mask]
+        error = error.clamp(-100, 100)  # Prevent numerical instability
+        pred_sigma = pred_sigma[valid_mask]
+        target_weights = target_weights[valid_mask]
+
+        log_phi = self.flow_model.log_prob(error)
+
+        return self.rle_loss(pred_sigma, log_phi, error, target_weights)
+
+    def calculate_keypoints_loss(
+        self,
+        masks: torch.Tensor,
+        target_gt_idx: torch.Tensor,
+        keypoints: torch.Tensor,
+        batch_idx: torch.Tensor,
+        stride_tensor: torch.Tensor,
+        target_bboxes: torch.Tensor,
+        pred_kpts: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Calculate the keypoints loss for the model.
+
+        This function calculates the keypoints loss and keypoints object loss for a given batch. The keypoints loss is
+        based on the difference between the predicted keypoints and ground truth keypoints. The keypoints object loss is
+        a binary classification loss that classifies whether a keypoint is present or not.
+
+        Args:
+            masks (torch.Tensor): Binary mask tensor indicating object presence, shape (BS, N_anchors).
+            target_gt_idx (torch.Tensor): Index tensor mapping anchors to ground truth objects, shape (BS, N_anchors).
+            keypoints (torch.Tensor): Ground truth keypoints, shape (N_kpts_in_batch, N_kpts_per_object, kpts_dim).
+            batch_idx (torch.Tensor): Batch index tensor for keypoints, shape (N_kpts_in_batch, 1).
+            stride_tensor (torch.Tensor): Stride tensor for anchors, shape (N_anchors, 1).
+            target_bboxes (torch.Tensor): Ground truth boxes in (x1, y1, x2, y2) format, shape (BS, N_anchors, 4).
+            pred_kpts (torch.Tensor): Predicted keypoints, shape (BS, N_anchors, N_kpts_per_object, kpts_dim).
+
+        Returns:
+            kpts_loss (torch.Tensor): The keypoints loss.
+            kpts_obj_loss (torch.Tensor): The keypoints object loss.
+            rle_loss (torch.Tensor): The RLE loss.
+        """
+        # Select target keypoints using inherited helper method
+        selected_keypoints = self._select_target_keypoints(keypoints, batch_idx, target_gt_idx, masks)
+
+        # Divide coordinates by stride
+        selected_keypoints[..., :2] /= stride_tensor.view(1, -1, 1, 1)
+
+        kpts_loss = 0
+        kpts_obj_loss = 0
+        rle_loss = 0
+
+        if masks.any():
+            target_bboxes /= stride_tensor
+            gt_kpt = selected_keypoints[masks]
+            area = xyxy2xywh(target_bboxes[masks])[:, 2:].prod(1, keepdim=True)
+            pred_kpt = pred_kpts[masks]
+            kpt_mask = gt_kpt[..., 2] != 0 if gt_kpt.shape[-1] == 3 else torch.full_like(gt_kpt[..., 0], True)
+            kpts_loss = self.keypoint_loss(pred_kpt, gt_kpt, kpt_mask, area)  # pose loss
+
+            if self.rle_loss is not None and (pred_kpt.shape[-1] == 4 or pred_kpt.shape[-1] == 5):
+                rle_loss = self.calculate_rle_loss(pred_kpt, gt_kpt, kpt_mask)
+            if pred_kpt.shape[-1] == 3 or pred_kpt.shape[-1] == 5:
+                kpts_obj_loss = self.bce_pose(pred_kpt[..., 2], kpt_mask.float())  # keypoint obj loss
+
+        return kpts_loss, kpts_obj_loss, rle_loss
 
 
 class v8ClassificationLoss:
@@ -1060,10 +1254,17 @@ class v8ClassificationLoss:
 class v8OBBLoss(v8DetectionLoss):
     """Calculates losses for object detection, classification, and box distribution in rotated YOLO models."""
 
-    def __init__(self, model):
+    def __init__(self, model, tal_topk=10, tal_topk2: int | None = None):
         """Initialize v8OBBLoss with model, assigner, and rotated bbox loss; model must be de-paralleled."""
-        super().__init__(model)
-        self.assigner = RotatedTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
+        super().__init__(model, tal_topk=tal_topk)
+        self.assigner = RotatedTaskAlignedAssigner(
+            topk=tal_topk,
+            num_classes=self.nc,
+            alpha=0.5,
+            beta=6.0,
+            stride=self.stride.tolist(),
+            topk2=tal_topk2,
+        )
         self.bbox_loss = RotatedBboxLoss(self.reg_max).to(self.device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -1083,39 +1284,35 @@ class v8OBBLoss(v8DetectionLoss):
                     out[j, :n] = torch.cat([targets[matches, 1:2], bboxes], dim=-1)
         return out
 
-    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the loss for oriented bounding box detection."""
-        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
-        feats, pred_angle = preds if isinstance(preds[0], list) else preds[1]
-        batch_size = pred_angle.shape[0]  # batch size, number of masks, mask height, mask width
-        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.reg_max * 4, self.nc), 1
+        loss = torch.zeros(4, device=self.device)  # box, cls, dfl, angle
+        pred_distri, pred_scores, pred_angle = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+            preds["angle"].permute(0, 2, 1).contiguous(),
         )
-
-        # b, grids, ..
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
-        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
-        pred_angle = pred_angle.permute(0, 2, 1).contiguous()
+        anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
+        batch_size = pred_angle.shape[0]  # batch size, number of masks, mask height, mask width
 
         dtype = pred_scores.dtype
-        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
-        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
 
         # targets
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
             # TODO (CP/IRIT): should "scores" be managed in the same way ?
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"].view(-1, 5)), 1)
-            rw, rh = targets[:, 4] * imgsz[0].item(), targets[:, 5] * imgsz[1].item()
+            rw, rh = targets[:, 4] * float(imgsz[1]), targets[:, 5] * float(imgsz[0])
             targets = targets[(rw >= 2) & (rh >= 2)]  # filter rboxes of tiny size to stabilize training
-            targets = self.preprocess(targets, batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+            targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
             gt_labels, gt_bboxes = targets.split((1, 5), 2)  # cls, xywhr
             mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
         except RuntimeError as e:
             raise TypeError(
                 "ERROR ❌ OBB dataset incorrectly formatted or not a OBB dataset.\n"
                 "This error can occur when incorrectly training a 'OBB' model on a 'detect' dataset, "
-                "i.e. 'yolo train model=yolo11n-obb.pt data=coco8.yaml'.\nVerify your dataset is a "
+                "i.e. 'yolo train model=yolo26n-obb.pt data=dota8.yaml'.\nVerify your dataset is a "
                 "correctly formatted 'OBB' dataset using 'data=dota8.yaml' "
                 "as an example.\nSee https://docs.ultralytics.com/datasets/obb/ for help."
             ) from e
@@ -1145,22 +1342,34 @@ class v8OBBLoss(v8DetectionLoss):
         if fg_mask.sum():
             target_bboxes[..., :4] /= stride_tensor
             loss[0], loss[2] = self.bbox_loss(
-                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+                pred_distri,
+                pred_bboxes,
+                anchor_points,
+                target_bboxes,
+                target_scores,
+                target_scores_sum,
+                fg_mask,
+                imgsz,
+                stride_tensor,
             )
+            weight = target_scores.sum(-1)[fg_mask]
+            loss[3] = self.calculate_angle_loss(
+                pred_bboxes, target_bboxes, fg_mask, weight, target_scores_sum
+            )  # angle loss
         else:
             loss[0] += (pred_angle * 0).sum()
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
+        loss[3] *= self.hyp.angle  # angle gain
 
-        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
+        return loss * batch_size, loss.detach()  # loss(box, cls, dfl, angle)
 
     def bbox_decode(
         self, anchor_points: torch.Tensor, pred_dist: torch.Tensor, pred_angle: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Decode predicted object bounding box coordinates from anchor points and distribution.
+        """Decode predicted object bounding box coordinates from anchor points and distribution.
 
         Args:
             anchor_points (torch.Tensor): Anchor points, (h*w, 2).
@@ -1174,6 +1383,34 @@ class v8OBBLoss(v8DetectionLoss):
             b, a, c = pred_dist.shape  # batch, anchors, channels
             pred_dist = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.type(pred_dist.dtype))
         return torch.cat((dist2rbox(pred_dist, pred_angle, anchor_points), pred_angle), dim=-1)
+
+    def calculate_angle_loss(self, pred_bboxes, target_bboxes, fg_mask, weight, target_scores_sum, lambda_val=3):
+        """Calculate oriented angle loss.
+
+        Args:
+            pred_bboxes: [N, 5] (x, y, w, h, theta).
+            target_bboxes: [N, 5] (x, y, w, h, theta).
+            fg_mask: Foreground mask indicating valid predictions.
+            weight: Loss weights for each prediction.
+            target_scores_sum: Sum of target scores for normalization.
+            lambda_val: control the sensitivity to aspect ratio.
+        """
+        w_gt = target_bboxes[..., 2]
+        h_gt = target_bboxes[..., 3]
+        pred_theta = pred_bboxes[..., 4]
+        target_theta = target_bboxes[..., 4]
+
+        log_ar = torch.log((w_gt + 1e-9) / (h_gt + 1e-9))
+        scale_weight = torch.exp(-(log_ar**2) / (lambda_val**2))
+
+        delta_theta = pred_theta - target_theta
+        delta_theta_wrapped = delta_theta - torch.round(delta_theta / math.pi) * math.pi
+        ang_loss = torch.sin(2 * delta_theta_wrapped[fg_mask]) ** 2
+
+        ang_loss = scale_weight[fg_mask] * ang_loss
+        ang_loss = ang_loss * weight
+
+        return ang_loss.sum() / target_scores_sum
 
 
 class E2EDetectLoss:
@@ -1194,63 +1431,103 @@ class E2EDetectLoss:
         return loss_one2many[0] + loss_one2one[0], loss_one2many[1] + loss_one2one[1]
 
 
+class E2ELoss:
+    """Criterion class for computing training losses for end-to-end detection."""
+
+    def __init__(self, model, loss_fn=v8DetectionLoss):
+        """Initialize E2ELoss with one-to-many and one-to-one detection losses using the provided model."""
+        self.one2many = loss_fn(model, tal_topk=10)
+        self.one2one = loss_fn(model, tal_topk=7, tal_topk2=1)
+        self.updates = 0
+        self.total = 1.0
+        # init gain
+        self.o2m = 0.8
+        self.o2o = self.total - self.o2m
+        self.o2m_copy = self.o2m
+        # final gain
+        self.final_o2m = 0.1
+
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        preds = self.one2many.parse_output(preds)
+        one2many, one2one = preds["one2many"], preds["one2one"]
+        loss_one2many = self.one2many.loss(one2many, batch)
+        loss_one2one = self.one2one.loss(one2one, batch)
+        return loss_one2many[0] * self.o2m + loss_one2one[0] * self.o2o, loss_one2one[1]
+
+    def update(self) -> None:
+        """Update the weights for one-to-many and one-to-one losses based on the decay schedule."""
+        self.updates += 1
+        self.o2m = self.decay(self.updates)
+        self.o2o = max(self.total - self.o2m, 0)
+
+    def decay(self, x) -> float:
+        """Calculate the decayed weight for one-to-many loss based on the current update step."""
+        return max(1 - x / max(self.one2one.hyp.epochs - 1, 1), 0) * (self.o2m_copy - self.final_o2m) + self.final_o2m
+
+
 class TVPDetectLoss:
     """Criterion class for computing training losses for text-visual prompt detection."""
 
-    def __init__(self, model):
+    def __init__(self, model, tal_topk=10, tal_topk2: int | None = None):
         """Initialize TVPDetectLoss with task-prompt and visual-prompt criteria using the provided model."""
-        self.vp_criterion = v8DetectionLoss(model)
+        self.vp_criterion = v8DetectionLoss(model, tal_topk, tal_topk2)
         # NOTE: store following info as it's changeable in __call__
+        self.hyp = self.vp_criterion.hyp
         self.ori_nc = self.vp_criterion.nc
         self.ori_no = self.vp_criterion.no
         self.ori_reg_max = self.vp_criterion.reg_max
 
+    def parse_output(self, preds) -> dict[str, torch.Tensor]:
+        """Parse model predictions to extract features."""
+        return self.vp_criterion.parse_output(preds)
+
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for text-visual prompt detection."""
-        feats = preds[1] if isinstance(preds, tuple) else preds
-        assert self.ori_reg_max == self.vp_criterion.reg_max  # TODO: remove it
+        return self.loss(self.parse_output(preds), batch)
 
-        if self.ori_reg_max * 4 + self.ori_nc == feats[0].shape[1]:
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the loss for text-visual prompt detection."""
+        if self.ori_nc == preds["scores"].shape[1]:
             loss = torch.zeros(3, device=self.vp_criterion.device, requires_grad=True)
             return loss, loss.detach()
 
-        vp_feats = self._get_vp_features(feats)
-        vp_loss = self.vp_criterion(vp_feats, batch)
+        preds["scores"] = self._get_vp_features(preds)
+        vp_loss = self.vp_criterion(preds, batch)
         box_loss = vp_loss[0][1]
         return box_loss, vp_loss[1]
 
-    def _get_vp_features(self, feats: list[torch.Tensor]) -> list[torch.Tensor]:
+    def _get_vp_features(self, preds: dict[str, torch.Tensor]) -> list[torch.Tensor]:
         """Extract visual-prompt features from the model output."""
-        vnc = feats[0].shape[1] - self.ori_reg_max * 4 - self.ori_nc
+        scores = preds["scores"]
+        vnc = scores.shape[1]
 
         self.vp_criterion.nc = vnc
         self.vp_criterion.no = vnc + self.vp_criterion.reg_max * 4
         self.vp_criterion.assigner.num_classes = vnc
-
-        return [
-            torch.cat((box, cls_vp), dim=1)
-            for box, _, cls_vp in [xi.split((self.ori_reg_max * 4, self.ori_nc, vnc), dim=1) for xi in feats]
-        ]
+        return scores
 
 
 class TVPSegmentLoss(TVPDetectLoss):
     """Criterion class for computing training losses for text-visual prompt segmentation."""
 
-    def __init__(self, model):
+    def __init__(self, model, tal_topk=10):
         """Initialize TVPSegmentLoss with task-prompt and visual-prompt criteria using the provided model."""
         super().__init__(model)
-        self.vp_criterion = v8SegmentationLoss(model)
+        self.vp_criterion = v8SegmentationLoss(model, tal_topk)
+        self.hyp = self.vp_criterion.hyp
 
     def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for text-visual prompt segmentation."""
-        feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
-        assert self.ori_reg_max == self.vp_criterion.reg_max  # TODO: remove it
+        return self.loss(self.parse_output(preds), batch)
 
-        if self.ori_reg_max * 4 + self.ori_nc == feats[0].shape[1]:
+    def loss(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the loss for text-visual prompt detection."""
+        if self.ori_nc == preds["scores"].shape[1]:
             loss = torch.zeros(4, device=self.vp_criterion.device, requires_grad=True)
             return loss, loss.detach()
 
-        vp_feats = self._get_vp_features(feats)
-        vp_loss = self.vp_criterion((vp_feats, pred_masks, proto), batch)
+        preds["scores"] = self._get_vp_features(preds)
+        vp_loss = self.vp_criterion(preds, batch)
         cls_loss = vp_loss[0][2]
         return cls_loss, vp_loss[1]

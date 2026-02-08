@@ -8,7 +8,7 @@ from PIL import Image
 
 from tests import CUDA_DEVICE_COUNT, CUDA_IS_AVAILABLE, MODELS, TASK_MODEL_DATA
 from ultralytics.utils import ARM64, ASSETS, LINUX, WEIGHTS_DIR, checks
-from ultralytics.utils.torch_utils import TORCH_1_11, TORCH_2_9, WINDOWS
+from ultralytics.utils.torch_utils import TORCH_1_11
 
 
 def run(cmd: str) -> None:
@@ -34,19 +34,26 @@ def test_train(task: str, model: str, data: str) -> None:
 @pytest.mark.parametrize("task,model,data", TASK_MODEL_DATA)
 def test_val(task: str, model: str, data: str) -> None:
     """Test YOLO validation process for specified task, model, and data using a shell command."""
-    run(f"yolo val {task} model={model} data={data} imgsz=32 save_txt save_json visualize")
+    for end2end in {False, True}:
+        run(
+            f"yolo val {task} model={model} data={data} imgsz=32 save_txt save_json visualize end2end={end2end} max_det=100 agnostic_nms"
+        )
 
 
 @pytest.mark.parametrize("task,model,data", TASK_MODEL_DATA)
 def test_predict(task: str, model: str, data: str) -> None:
     """Test YOLO prediction on provided sample assets for specified task and model."""
-    run(f"yolo {task} predict model={model} source={ASSETS} imgsz=32 save save_crop save_txt visualize")
+    for end2end in {False, True}:
+        run(
+            f"yolo {task} predict model={model} source={ASSETS} imgsz=32 save save_crop save_txt visualize end2end={end2end} max_det=100"
+        )
 
 
 @pytest.mark.parametrize("model", MODELS)
 def test_export(model: str) -> None:
     """Test exporting a YOLO model to TorchScript format."""
-    run(f"yolo export model={model} format=torchscript imgsz=32")
+    for end2end in {False, True}:
+        run(f"yolo export model={model} format=torchscript imgsz=32 end2end={end2end} max_det=100")
 
 
 @pytest.mark.skipif(not TORCH_1_11, reason="RTDETR requires torch>=1.11")
@@ -129,10 +136,3 @@ def test_train_gpu(task: str, model: str, data: str) -> None:
 def test_solutions(solution: str) -> None:
     """Test yolo solutions command-line modes."""
     run(f"yolo solutions {solution} verbose=False")
-
-
-@pytest.mark.skipif(not checks.IS_PYTHON_MINIMUM_3_10 or not TORCH_2_9, reason="Requires Python>=3.10 and Torch>=2.9.0")
-@pytest.mark.skipif(WINDOWS, reason="Skipping test on Windows")
-def test_export_executorch() -> None:
-    """Test exporting a YOLO model to ExecuTorch format via CLI."""
-    run("yolo export model=yolo11n.pt format=executorch imgsz=32")
