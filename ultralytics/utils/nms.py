@@ -254,6 +254,7 @@ def non_max_suppression(
             if return_idxs:
                 selected_xk = selected_xk[image_anchor_point_candidates]
 
+        # TODO (CP/IRIT): duplicate bounding box for each class from the selected variant
         widened_class_indexes = selected_image_prediction[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
         selected_image_scores = selected_image_prediction[:, 4]  # scores de confiance pour chaque point
         if rotated:
