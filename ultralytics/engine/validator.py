@@ -59,7 +59,7 @@ class BaseValidator:
         stats (dict): Statistics collected during validation.
         confusion_matrix: Confusion matrix for classification evaluation.
         nc (int): Number of classes.
-        iouv (torch.Tensor): IoU thresholds from 0.50 to 0.95 in spaces of 0.05.
+        iouv (torch.Tensor): IoU thresholds from 0.50 to 0.95 in steps of 0.05.
         jdict (list): List to store JSON validation results.
         speed (dict): Dictionary with keys 'preprocess', 'inference', 'loss', 'postprocess' and their respective batch
             processing times in milliseconds.
@@ -311,12 +311,11 @@ class BaseValidator:
             sz_iou_over_threshold = iou_over_threshold.size
             nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
             if use_scipy:
-                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
                 import scipy  # scope import to avoid importing for all commands
 
                 cost_matrix = iou * iou_over_threshold
                 if cost_matrix.any():
-                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix)
+                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
                         correct[detections_idx[valid], i] = True

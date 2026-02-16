@@ -102,6 +102,7 @@ from ultralytics.utils import (
     callbacks,
     colorstr,
     get_default_args,
+    is_dgx,
     is_jetson,
 )
 from ultralytics.utils.checks import (
@@ -213,7 +214,7 @@ def validate_args(format, passed_args, valid_args):
 
     Args:
         format (str): The export format.
-        passed_args (Namespace): The arguments used during export.
+        passed_args (SimpleNamespace): The arguments used during export.
         valid_args (list): List of valid arguments for the format.
 
     Raises:
@@ -270,7 +271,7 @@ class Exporter:
         pretty_name (str): Formatted model name for display purposes.
         metadata (dict): Model metadata including description, author, version, etc.
         device (torch.device): Device on which the model is loaded.
-        imgsz (tuple): Input image size for the model.
+        imgsz (list): Input image size for the model.
 
     Methods:
         __call__: Main export method that handles the export process.
@@ -290,24 +291,26 @@ class Exporter:
         export_tfjs: Export model to TensorFlow.js format.
         export_rknn: Export model to RKNN format.
         export_imx: Export model to IMX format.
+        export_executorch: Export model to ExecuTorch format.
+        export_axelera: Export model to Axelera format.
 
     Examples:
-        Export a YOLOv8 model to ONNX format
+        Export a YOLO26 model to ONNX format
         >>> from ultralytics.engine.exporter import Exporter
         >>> exporter = Exporter()
-        >>> exporter(model="yolov8n.pt")  # exports to yolov8n.onnx
+        >>> exporter(model="yolo26n.pt")  # exports to yolo26n.onnx
 
         Export with specific arguments
         >>> args = {"format": "onnx", "dynamic": True, "half": True}
         >>> exporter = Exporter(overrides=args)
-        >>> exporter(model="yolov8n.pt")
+        >>> exporter(model="yolo26n.pt")
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
         """Initialize the Exporter class.
 
         Args:
-            cfg (str, optional): Path to a configuration file.
+            cfg (str | Path | dict | SimpleNamespace, optional): Configuration file path or configuration object.
             overrides (dict, optional): Configuration overrides.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
@@ -702,6 +705,7 @@ class Exporter:
                 dynamic["output0"].pop(2)
         if self.args.nms and self.model.task == "obb":
             self.args.opset = opset  # for NMSModel
+            self.args.simplify = True  # fix OBB runtime error related to topk
 
         with arange_patch(self.args):
             torch2onnx(
@@ -1006,7 +1010,7 @@ class Exporter:
 
         # Force re-install TensorRT on CUDA 13 ARM devices to 10.15.x versions for RT-DETR exports
         # https://github.com/ultralytics/ultralytics/issues/22873
-        if is_jetson(jetpack=7):
+        if is_jetson(jetpack=7) or is_dgx():
             check_tensorrt("10.15")
 
         try:
@@ -1131,7 +1135,7 @@ class Exporter:
 
     @try_export
     def export_axelera(self, prefix=colorstr("Axelera:")):
-        """YOLO Axelera export."""
+        """Export YOLO model to Axelera format."""
         os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
         try:
             from axelera import compiler
@@ -1198,16 +1202,16 @@ class Exporter:
 
     @try_export
     def export_executorch(self, prefix=colorstr("ExecuTorch:")):
-        """Exports a model to ExecuTorch (.pte) format into a dedicated directory and saves the required metadata,
-        following Ultralytics conventions.
-        """
-        LOGGER.info(f"\n{prefix} starting export with ExecuTorch...")
+        """Export YOLO model to ExecuTorch *.pte format."""
         assert TORCH_2_9, f"ExecuTorch requires torch>=2.9.0 but torch=={TORCH_VERSION} is installed"
 
         check_executorch_requirements()
 
+        from executorch import version as executorch_version
         from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
         from executorch.exir import to_edge_transform_and_lower
+
+        LOGGER.info(f"\n{prefix} starting export with ExecuTorch {executorch_version.__version__}...")
 
         file_directory = Path(str(self.file).replace(self.file.suffix, "_executorch_model"))
         file_directory.mkdir(parents=True, exist_ok=True)
@@ -1296,7 +1300,6 @@ class Exporter:
             "Export only supported on Linux."
             "See https://developer.aitrios.sony-semicon.com/en/docs/raspberry-pi-ai-camera/imx500-converter?version=3.17.3&progLang="
         )
-        assert not ARM64, "IMX export is not supported on ARM64 architectures."
         assert IS_PYTHON_MINIMUM_3_9, "IMX export is only supported on Python 3.9 or above."
 
         if getattr(self.model, "end2end", False):
@@ -1466,7 +1469,7 @@ class IOSDetectModel(torch.nn.Module):
         Args:
             model (torch.nn.Module): The YOLO model to wrap.
             im (torch.Tensor): Example input tensor with shape (B, C, H, W).
-            mlprogram (bool): Whether exporting to MLProgram format to fix NMS bug.
+            mlprogram (bool): Whether exporting to MLProgram format.
         """
         super().__init__()
         _, _, h, w = im.shape  # batch, channel, height, width
@@ -1499,7 +1502,7 @@ class NMSModel(torch.nn.Module):
 
         Args:
             model (torch.nn.Module): The model to wrap with NMS postprocessing.
-            args (Namespace): The export arguments.
+            args (SimpleNamespace): The export arguments.
         """
         super().__init__()
         self.model = model
@@ -1511,11 +1514,11 @@ class NMSModel(torch.nn.Module):
         """Perform inference with NMS post-processing. Supports Detect, Segment, OBB and Pose.
 
         Args:
-            x (torch.Tensor): The preprocessed tensor with shape (N, 3, H, W).
+            x (torch.Tensor): The preprocessed tensor with shape (B, C, H, W).
 
         Returns:
-            (torch.Tensor): List of detections, each an (N, max_det, 4 + 2 + extra_shape) Tensor where N is the number
-                of detections after NMS.
+            (torch.Tensor | tuple): Tensor of shape (B, max_det, 4 + 2 + extra_shape) where B is the batch size, or a
+                tuple of (detections, proto) for segmentation models.
         """
         from functools import partial
 
