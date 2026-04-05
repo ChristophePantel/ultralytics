@@ -106,7 +106,7 @@ class BaseValidator:
         """
         import torchvision  # noqa (import here so torchvision import time not recorded in postprocess time)
 
-        self.args = get_cfg(overrides=args)
+        self.args = get_cfg(overrides=args) # TODO (CP/IRIT): Should inherit the args from the model being validated.
         self.dataloader = dataloader
         self.stride = None
         self.data = None

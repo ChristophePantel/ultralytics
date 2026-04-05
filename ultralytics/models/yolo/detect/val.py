@@ -160,7 +160,7 @@ class DetectionValidator(BaseValidator):
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
-            use_km_scores = getattr(self, 'use_km_scores', None),
+            use_km_scores = getattr(self, 'use_km_scores', False),
             use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): transmit the class variants from the model
             class_variants=getattr(self, 'class_variants',None),

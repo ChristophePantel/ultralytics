@@ -153,7 +153,8 @@ class TaskAlignedAssigner(nn.Module):
         Returns:
             target_labels (torch.Tensor): Target labels with shape (bs, num_total_anchors).
             target_bboxes (torch.Tensor): Target bounding boxes with shape (bs, num_total_anchors, 4).
-            target_scores (torch.Tensor): Target scores with shape (bs, num_total_anchors, num_classes).
+            target_scores (torch.Tensor): Target scores with shape (bs, num_total_anchors, num_classes). # DONE (IRIT/CP): combined bounding box and class scores.
+            target_km_scores (torch.Tensor): Target knowledge model scores with shape (bs, num_total_anchors, num_classes). # DONE (IRIT/CP): class only scores.
             fg_mask (torch.Tensor): Foreground mask with shape (bs, num_total_anchors).
             target_gt_idx (torch.Tensor): Target ground truth indices with shape (bs, num_total_anchors).
         """
@@ -199,6 +200,7 @@ class TaskAlignedAssigner(nn.Module):
         # Keep the expected scores for variants between 0 and 1
         target_km_scores = target_scores
         # Combine the class score with the align metrics
+        # DONE (CP/IRIT): score combines class score and bounding box score.
         target_scores = target_scores * norm_align_metric
 
         # DONE (CP/IRIT): Returns the variant related km scores (between 0 and 1)

@@ -151,7 +151,7 @@ class Detect(nn.Module):
         bs = x[0].shape[0]  # batch size
         boxes = torch.cat([box_head[i](x[i]).view(bs, 4 * self.reg_max, -1) for i in range(self.nl)], dim=-1)
         scores = torch.cat([cls_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1)
-        km_scores = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1)
+        km_scores = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
         return dict(boxes=boxes, scores=scores, km_scores=km_scores, feats=x)
 
     def forward(
@@ -233,10 +233,10 @@ class Detect(nn.Module):
             (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6) and last
                 dimension format [x1, y1, x2, y2, max_class_prob, class_index].
         """
-        boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1)
+        boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
         scores, conf, idx = self.get_topk_index(scores, self.max_det)
         boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
-        km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc))
+        km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # DONE (CP/IRIT): Add predicted knowledge model scores
         return torch.cat([boxes, scores, conf, km_scores], dim=-1)
 
     def get_topk_index(self, scores: torch.Tensor, max_det: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

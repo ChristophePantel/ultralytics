@@ -603,13 +603,13 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
-        if self.use_km_scores:
+        if self.use_km_scores: # DONE (CP/IRIT): Add knowledge model class scores
             score_index = 2
-            if self.use_km_losses:
+            if self.use_km_losses: # DONE (CP/IRIT): Add knowledge model losses on class scores
                 loss_number = 5
                 km_index = 3
             else:
-                loss_number =4
+                loss_number = 4
         else:
             loss_number = 3
         box_index = 0
@@ -624,7 +624,7 @@ class v8DetectionLoss:
         pred_for_bboxes, pred_scores, pred_km_scores = (
             preds["boxes"].permute(0, 2, 1).contiguous(),
             preds["scores"].permute(0, 2, 1).contiguous(),
-            preds["km_scores"].permute(0, 2, 1).contiguous(),
+            preds["km_scores"].permute(0, 2, 1).contiguous(), # DONE (CP/IRIT): Add knowledge model class scores
         )
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
@@ -652,7 +652,7 @@ class v8DetectionLoss:
         # Sum the components of each bounding boxes
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
         # Indicates which image in a batch contains bounding boxes
-        # TODO: make it boolean
+        # TODO (CP/IRIT): make it boolean
         mask_gt = gt_bboxes_sum.gt_(0.0)
 
         # Bounding boxes
@@ -683,12 +683,13 @@ class v8DetectionLoss:
         bce_values = self.bce(pred_scores, target_scores.to(dtype))
         loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
         
+        # DONE (CP/IRIT): Train to predict class score only (without bounding box score).
         if self.use_km_scores:
             target_km_scores_sum = max(target_km_scores.sum(), 1)
-            km_bce_values = self.bce(pred_km_scores, target_scores.to(dtype))
+            km_bce_values = self.bce(pred_km_scores, target_km_scores.to(dtype))
             loss[score_index] = km_bce_values.sum() / target_km_scores_sum  # BCE
         
-        # TODO (CP/IRIT): Adding knowledge model loss to the usual class loss
+        # DONE (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
             # KM loss takes as inputs probability that an object is an instance of a class to enforce the consistency w.r.t. the knowledge model.
             # Should be 0 when there is no object and 1 when there is an object of a given class.
