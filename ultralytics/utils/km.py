@@ -2,6 +2,9 @@
 
 import torch
 
+class VariantNotFound(Exception):
+    print('Variant does not exist.')
+
 def get_class_names():
     class_names = frozenset({
         'Aeroplane', #00
@@ -297,3 +300,27 @@ def encode_variants(class_number, class_variants):
         for class_index in class_variants[variant_index]:
             result[variant_index,class_index] = 1.0
     return result
+
+def get_variant_code(variant_classes, variants):
+    # variant_classes : set of classes in the variant
+    # variants : dict which associate to a variant number, the set of classes
+    # Return : number of the variant
+    variant_number = 0
+    for key, value in variants.items():
+        if value == variant_classes:
+            variant_number = key
+        else: 
+            raise VariantNotFound
+    return variant_number
+    
+def get_candidate_variants(variant_classes, variant_to_classes):
+    variant_set = frozenset()
+    class_to_variants = invert_relation(variant_to_classes)
+    for key, value in class_to_variants.items():
+        if value==variant_classes:
+            variant_set.intersection(key)
+    return variant_set
+    
+
+    
+    

@@ -609,7 +609,7 @@ class v8DetectionLoss:
                 loss_number = 5
                 km_index = 3
             else:
-                loss_number =4
+                loss_number = 4
         else:
             loss_number = 3
         box_index = 0

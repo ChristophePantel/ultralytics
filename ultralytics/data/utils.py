@@ -236,7 +236,10 @@ def verify_image_label(args: tuple) -> list:
                 with open(km_file, encoding="utf-8") as km_f:
                 # Extract the various data items from each line
                     km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
+                    variant = km_lb[:,1]
+                    km_lb = km_lb[:,1:]
             else:
+                variant = -1
                 km_lb = np.zeros((len(lb),0))
             if nl := len(lb):
                 if keypoint:
@@ -293,12 +296,12 @@ def verify_image_label(args: tuple) -> list:
         bboxes = lb[:,-4:]
         # returns a Tuple
         # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
-        return im_file, core_class, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
+        return im_file, core_class, variant, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
         # returns a List 
-        return [None, None, None, None, None, None, None, nm, nf, ne, nc, msg]
+        return [None, None, None, None, None, None, None, None, nm, nf, ne, nc, msg]
 
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[int, str]):

@@ -132,7 +132,7 @@ class YOLODataset(BaseDataset):
             )
             pbar = TQDM(results, desc=desc, total=total)
             # for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
-            for im_file, core_class, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+            for im_file, core_class, variant, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                 nm += nm_f
                 nf += nf_f
                 ne += ne_f
@@ -147,6 +147,7 @@ class YOLODataset(BaseDataset):
                             # Classes are the first values before the bounding boxes
                             # "cls": lb[:, 0:-4],  # n, 1
                             "cls": core_class,
+                            "variant": variant,
                             "scores" : class_scores,
                             # Bounding boxes are the last four values
                             # "bboxes": lb[:, -4:],  # n, 4
