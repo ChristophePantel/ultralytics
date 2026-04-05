@@ -195,12 +195,14 @@ class BaseDataset(Dataset):
             if include_class is not None:
                 # TODO (CP/IRIT): should "scores" be managed in the same way ?
                 cls = self.labels[i]["cls"]
+                variant = self.labels[i]["variant"]
                 scores = self.labels[i]["scores"]
                 bboxes = self.labels[i]["bboxes"]
                 segments = self.labels[i]["segments"]
                 keypoints = self.labels[i]["keypoints"]
                 j = (cls == include_class_array).any(1)
                 self.labels[i]["cls"] = cls[j]
+                self.labels[i]["variant"] = variant[j]
                 # TODO (CP/IRIT): Must remove the positive from the scores for the other classes
                 self.labels[i]["scores"] = scores[j]
                 self.labels[i]["bboxes"] = bboxes[j]
