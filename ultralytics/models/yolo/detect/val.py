@@ -132,6 +132,9 @@ class DetectionValidator(BaseValidator):
         self.jdict = []
         self.metrics.names = model.names
         self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
+        # TODO (CP/IRIT): Add a confusion matrix for variants.
+        # TODO (CP/IRIT): Add variant_names in model
+        # self.variant_confusion_matrix = ConfusionMatrix(names=model.variant_names, save_matches=self.args.plots and self.args.visualize)
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
@@ -179,10 +182,12 @@ class DetectionValidator(BaseValidator):
         Returns:
             (dict[str, Any]): Prepared batch with processed annotations.
         """
+        # TODO (CPIRIT): Add variant management.
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
         scores = batch["scores"][idx]
+        # variant = batch["variant"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
@@ -192,6 +197,7 @@ class DetectionValidator(BaseValidator):
             "cls": cls,
             "bboxes": bbox,
             "scores": scores,
+            # "variant":variant,
             "ori_shape": ori_shape,
             "imgsz": imgsz,
             "ratio_pad": ratio_pad,
@@ -228,6 +234,7 @@ class DetectionValidator(BaseValidator):
 
             cls = pbatch["cls"].cpu().numpy()
             scores = pbatch["scores"].cpu().numpy()
+            # variant = pbatch["variant"].cpu().numpy()
             class_number = scores.shape[1]
             no_pred = predn["cls"].shape[0] == 0
             # if no_pred:
@@ -237,8 +244,10 @@ class DetectionValidator(BaseValidator):
             self.metrics.update_stats(
                 {
                     **self._process_batch(predn, pbatch),
+                    # TODO (CP/IRIT): Add the target variant.
                     "target_cls": cls,
                     "target_scores": scores,
+                    # "target_variant":variant,
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
