@@ -322,7 +322,7 @@ def get_candidate_variants(variant_classes, variant_to_classes):
             variant_set.intersection(key)
     return variant_set
     
-# TODO : test A <-> B = A -> B /\ B -> A
+# TODO : test A <-> B = A /\ B \/ ~ A /\ ~ B
 def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
     """Compute fuzzy equivalence between expected scores and predicted scores.
     
