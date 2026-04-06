@@ -236,8 +236,8 @@ def verify_image_label(args: tuple) -> list:
                 with open(km_file, encoding="utf-8") as km_f:
                 # Extract the various data items from each line
                     km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
-                    variant = km_lb[:,1]
-                    km_lb = km_lb[:,1:]
+                    variant = np.array([x[0:1] for x in km_lb], dtype=np.float32)
+                    km_lb = [x[1:] for x in km_lb]
             else:
                 variant = -1
                 km_lb = np.zeros((len(lb),0))
