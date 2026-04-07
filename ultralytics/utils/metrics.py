@@ -580,7 +580,7 @@ class ConfusionMatrix(DataExportMixin):
             fp (np.ndarray): False positives.
         """
         tp = self.matrix.diagonal()  # true positives
-        fp = self.matrix.sum(1) - tp  # false positives
+        fp = self.matrix.sum(1) - tp  # false positives 
         # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
         return (tp, fp) if self.task == "classify" else (tp[:-1], fp[:-1])  # remove background class if task=detect
 
