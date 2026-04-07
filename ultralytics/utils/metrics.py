@@ -432,20 +432,23 @@ class ConfusionMatrix(DataExportMixin):
                 self._append_matches("GT", batch, i)  # store GT
 
         is_obb = gt_bboxes.shape[1] == 5  # check if boxes contains angle for OBB
-
+        
+        # conf is the level of confidence in a detection (confidence threshold)
         conf = 0.25 if conf in {None, 0.01 if is_obb else 0.001} else conf  # apply 0.25 if default val conf is passed
 
         # Check if there are no predictions
         no_pred = detections["cls"].shape[0] == 0
 
         # -----------------------------
-        # CASE 1: No ground truth (Image contains no objects, but model predicted nothing)
+        # CASE 1: No ground truth (Image contains no objects, but model predicted something)
         # -----------------------------
 
         if gt_cls.shape[0] == 0:  # Check if labels is empty
             
             # if there are predictions but no ground truth
             if not no_pred:
+                
+                # Get all detections that are over the confidence threshold
                 detections = {k: detections[k][detections["conf"] > conf] for k in detections}
 
                  # detection_classes is the list of predicted classes converted from from float to int then tensor to list 
@@ -495,16 +498,25 @@ class ConfusionMatrix(DataExportMixin):
         iou = batch_probiou(gt_bboxes, bboxes) if is_obb else box_iou(gt_bboxes, bboxes)
 
         # Find all (gt, pred) pairs with IoU above threshold
-        # x[0] are gt indices x[1] are pred indices
+        # x[0] are lines and x[1] are columns indices
         x = torch.where(iou > iou_thres)
 
         # if x[0] is not empty that means there is at least one GT / prediction pair with IoU above threshold
         if x[0].shape[0]:
+            # stack rebuild the pair line/column
+            # line is the gt_bboxes index
+            # column is the bboxes index
+            # iou[x[0], x[1]][:, None] gets the associated iou values
+            # cat builds triple with line, column, iou value
             matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
             if x[0].shape[0] > 1:
+                # sort according to iou value in reverse order ? meaning of [::-1]
                 matches = matches[matches[:, 2].argsort()[::-1]]
+                # remove bboxes that occurs several time keeping the highest iou
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                # sort according to iou value in reverse order ? meaning of [::-1]
                 matches = matches[matches[:, 2].argsort()[::-1]]
+                # remove gt_bboxes that occurs several time keeping the highest iou
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
         
         # there are no GT / prediction pair with IoU above threshold
@@ -512,6 +524,9 @@ class ConfusionMatrix(DataExportMixin):
             matches = np.zeros((0, 3))
 
         n = matches.shape[0] > 0
+        # m0: line indexes, i.e. gt_bboxes indexes
+        # m1: column indexes, i.e. bboxes indexes
+        # _:do not use iou
         m0, m1, _ = matches.transpose().astype(int)
 
         # -----------------------------
@@ -519,14 +534,22 @@ class ConfusionMatrix(DataExportMixin):
         # -----------------------------
 
         # (i is the index and gc is the GT class number)
+        # gc: ground truth class
         for i, gc in enumerate(gt_classes):
+            # indices for the matched gt_bboxes
             j = m0 == i
+            # existing matches and one for i
             if n and sum(j) == 1:
+                # dc: detected class
                 dc = detection_classes[m1[j].item()]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
+                # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
                 if dc == gc:
+                    # When ground truth and predicted are identical, add to the true positive
                     self._append_matches("TP", detections, m1[j].item())
                 else:
+                    # else add to the false positive for the predicted and false negative for the ground truth
+                    # .tem() extract the value from the tensor
                     self._append_matches("FP", detections, m1[j].item())
                     self._append_matches("FN", batch, i)
             else:
