@@ -364,14 +364,19 @@ class ConfusionMatrix(DataExportMixin):
             return
         
         # Loop through the batch items (such as bounding boxes, class labels, etc).
+        # batch can either be GT or detections 
         # batch is a dictionnary with k being the key and either 'bboxes", "cls", "conf", keypoints' or 'masks'
         # v is the values of each
         for k, v in batch.items():
+
             # TODO (CP/IRIT): should "scores" be managed in the same way ?
             # Exemple : self.matches[TP]["bboxes"] means the True Positives for the bounding boxes 
             if k in {"bboxes", "cls", "conf", "keypoints"}:
-                # TODO (CP/IRIT) : why v[[idx]] ?
+        
+                # (CP/IRIT) : why v[[idx]] ? => in order to keeps batch dimension, not only bounding box dimnesions 
+                # (batch, size) and not (size, )
                 self.matches[mtype][k] += v[[idx]]
+            
             elif k == "masks":
                 # NOTE: masks.max() > 1.0 means overlap_mask=True with (1, H, W) shape
                 self.matches[mtype][k] += [v[0] == idx + 1] if v.max() > 1.0 else [v[idx]]
@@ -391,7 +396,9 @@ class ConfusionMatrix(DataExportMixin):
 
     def process_batch(
         self,
+        # format of detections {"bboxes": Tensor[N, 4] or Tensor[N, 5],"cls":    Tensor[N],"conf":   Tensor[N],"keypoints": Tensor[N, ...],"masks": Tensor[N, H, W] or similar}
         detections: dict[str, torch.Tensor],
+        # format of batches {"bboxes": Tensor[M, 4] or Tensor[N, 5],"cls":    Tensor[M]}
         batch: dict[str, Any],
         conf: float = 0.25,
         iou_thres: float = 0.45,
@@ -408,36 +415,90 @@ class ConfusionMatrix(DataExportMixin):
             iou_thres (float, optional): IoU threshold for matching detections to ground truth.
         """
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
+        # Extract ground-truth classes and bounding boxes
+        # batchs corresponds to GT
         gt_cls, gt_bboxes = batch["cls"], batch["bboxes"]
+
+        # If match visualization is enabled, reset match storage
         if self.matches is not None:  # only if visualization is enabled
+            
+            # Initialize storage for True Positives, False Positives, False Negatives, and Ground Truth
+            # self.matches is a dict with {"TP": defaultdict(list),"FP": defaultdict(list),"FN": defaultdict(list),"GT": defaultdict(list)}
+            # and self.matches["TP"] = {"bboxes": [...], "cls": [...],"conf": [...],"masks": [...]}
             self.matches = {k: defaultdict(list) for k in {"TP", "FP", "FN", "GT"}}
+
+            # store all ground-truth objects
             for i in range(gt_cls.shape[0]):
                 self._append_matches("GT", batch, i)  # store GT
+
         is_obb = gt_bboxes.shape[1] == 5  # check if boxes contains angle for OBB
+
         conf = 0.25 if conf in {None, 0.01 if is_obb else 0.001} else conf  # apply 0.25 if default val conf is passed
+
+        # Check if there are no predictions
         no_pred = detections["cls"].shape[0] == 0
+
+        # -----------------------------
+        # CASE 1: No ground truth (Image contains no objects, but model predicted nothing)
+        # -----------------------------
+
         if gt_cls.shape[0] == 0:  # Check if labels is empty
+            
+            # if there are predictions but no ground truth
             if not no_pred:
                 detections = {k: detections[k][detections["conf"] > conf] for k in detections}
+
+                 # detection_classes is the list of predicted classes converted from from float to int then tensor to list 
                 detection_classes = detections["cls"].int().tolist()
+
+                # (i is the index and gc is the predicted class number)
                 for i, dc in enumerate(detection_classes):
+                    # self.nc represents no ground turth match (on the extra column)
                     self.matrix[dc, self.nc] += 1  # FP
                     self._append_matches("FP", detections, i)
             return
+        
+        # -----------------------------
+        # CASE 2: No predictions (Image contains objects, but model predicted nothing)
+        # -----------------------------        
+        
         if no_pred:
+            # first convert gt_cls from float to int then tensor to list 
+            # gt_classes is the list of ground truth classes 
             gt_classes = gt_cls.int().tolist()
+            # (i is the index and gc is the GT class number)
             for i, gc in enumerate(gt_classes):
+                # self.nc represents no prediction match (on the extra row)
                 self.matrix[self.nc, gc] += 1  # FN
                 self._append_matches("FN", batch, i)
             return
 
+        # -----------------------------
+        # CASE 3: Normal case (GT + predictions exist)
+        # -----------------------------
+
+        # Filter detections by confidence threshold
         detections = {k: detections[k][detections["conf"] > conf] for k in detections}
+
+        # first convert gt_cls from float to int then tensor to list 
+        # gt_classes is the list of ground ttruth classes 
         gt_classes = gt_cls.int().tolist()
+
+        # first convert the detected classes from float to int then tensor to list 
+        # detections["cls"] is the list of detected classes         
         detection_classes = detections["cls"].int().tolist()
         bboxes = detections["bboxes"]
+
+        # Compute IoU matrix between GT boxes and predicted boxes
+        # bboxes being the predicted boxes
+        # iou is a tensor of shape (N, M) representing obb similarities with N being the number of GT and M being the number of predicted
         iou = batch_probiou(gt_bboxes, bboxes) if is_obb else box_iou(gt_bboxes, bboxes)
 
+        # Find all (gt, pred) pairs with IoU above threshold
+        # x[0] are gt indices x[1] are pred indices
         x = torch.where(iou > iou_thres)
+
+        # if x[0] is not empty that means there is at least one GT / prediction pair with IoU above threshold
         if x[0].shape[0]:
             matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
             if x[0].shape[0] > 1:
@@ -445,11 +506,19 @@ class ConfusionMatrix(DataExportMixin):
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                 matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+        
+        # there are no GT / prediction pair with IoU above threshold
         else:
             matches = np.zeros((0, 3))
 
         n = matches.shape[0] > 0
         m0, m1, _ = matches.transpose().astype(int)
+
+        # -----------------------------
+        # Process each ground-truth object
+        # -----------------------------
+
+        # (i is the index and gc is the GT class number)
         for i, gc in enumerate(gt_classes):
             j = m0 == i
             if n and sum(j) == 1:
@@ -461,11 +530,18 @@ class ConfusionMatrix(DataExportMixin):
                     self._append_matches("FP", detections, m1[j].item())
                     self._append_matches("FN", batch, i)
             else:
+                # self.nc represents no prediction match (on the extra row)
                 self.matrix[self.nc, gc] += 1  # FN
                 self._append_matches("FN", batch, i)
 
+        # -----------------------------
+        # Process unmatched detections
+        # -----------------------------
+
+        # (i is the index and dc is the detected class number)
         for i, dc in enumerate(detection_classes):
             if not any(m1 == i):
+                # self.nc represents no ground turth match (on the extra column)
                 self.matrix[dc, self.nc] += 1  # FP
                 self._append_matches("FP", detections, i)
 
