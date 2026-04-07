@@ -75,7 +75,7 @@ class Detect(nn.Module):
     legacy = False  # backward compatibility for v3/v5/v8/v9 models
     xyxy = False  # xyxy or xywh output
 
-    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, reg_max=16, end2end=False, use_km_scores=False, ch: tuple = ()):
         """Initialize the YOLO detection layer with specified number of classes and channels.
 
         Args:
@@ -90,6 +90,7 @@ class Detect(nn.Module):
         self.reg_max = reg_max  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
+        self.use_km_scores = use_km_scores
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
         # cv2 predicts the bounding boxes coordinates
         self.cv2 = nn.ModuleList(
@@ -111,7 +112,8 @@ class Detect(nn.Module):
         )
         # DONE (CP/IRIT): Add the variant score prediction in Head
         # this confidence excludes bounding boxes confidences
-        self.cv3_km = copy.deepcopy(self.cv3)
+        if self.use_km_scores:
+            self.cv3_km = copy.deepcopy(self.cv3)
         
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
@@ -120,17 +122,24 @@ class Detect(nn.Module):
             self.one2one_cv3 = copy.deepcopy(self.cv3)
             
             # DONE (CP/IRIT): Add the variant score prediction in Head 
-            self.one2one_cv3_km = copy.deepcopy(self.cv3_km)
+            if self.use_km_scores:
+                self.one2one_cv3_km = copy.deepcopy(self.cv3_km)
 
     @property
     def one2many(self):
         """Returns the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
-        return dict(box_head=self.cv2, cls_head=self.cv3, km_head=self.cv3_km)
+        if self.use_km_scores:
+            return dict(box_head=self.cv2, cls_head=self.cv3, km_head=self.cv3_km)
+        else:
+            return dict(box_head=self.cv2, cls_head=self.cv3)
 
     @property
     def one2one(self):
         """Returns the one-to-one head components."""
-        return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3, km_head=self.one2one_cv3_km)
+        if self.use_km_scores:
+            return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3, km_head=self.one2one_cv3_km)
+        else:
+            return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3)
 
     @property
     def end2end(self):
@@ -151,8 +160,11 @@ class Detect(nn.Module):
         bs = x[0].shape[0]  # batch size
         boxes = torch.cat([box_head[i](x[i]).view(bs, 4 * self.reg_max, -1) for i in range(self.nl)], dim=-1)
         scores = torch.cat([cls_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1)
-        km_scores = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
-        return dict(boxes=boxes, scores=scores, km_scores=km_scores, feats=x)
+        if self.use_km_scores:
+            km_scores = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
+            return dict(boxes=boxes, scores=scores, km_scores=km_scores, feats=x)
+        else:
+            return dict(boxes=boxes, scores=scores, feats=x)
 
     def forward(
         self, x: list[torch.Tensor]
@@ -181,7 +193,10 @@ class Detect(nn.Module):
         """
         # Inference path
         dbox = self._get_decode_boxes(x)
-        return torch.cat((dbox, x["scores"].sigmoid(), x["km_scores"].sigmoid()), 1)
+        if self.use_km_scores:
+            return torch.cat((dbox, x["scores"].sigmoid(), x["km_scores"].sigmoid()), 1)
+        else:
+            return torch.cat((dbox, x["scores"].sigmoid()), 1)
 
     def _get_decode_boxes(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         """Get decoded boxes based on anchors and strides."""
@@ -233,11 +248,17 @@ class Detect(nn.Module):
             (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6) and last
                 dimension format [x1, y1, x2, y2, max_class_prob, class_index].
         """
-        boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
+        if self.use_km_scores:
+            boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
+        else:
+            boxes, scores = preds.split([4, self.nc], dim=-1)
         scores, conf, idx = self.get_topk_index(scores, self.max_det)
         boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
-        km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # DONE (CP/IRIT): Add predicted knowledge model scores
-        return torch.cat([boxes, scores, conf, km_scores], dim=-1)
+        if self.use_km_scores:
+            km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # DONE (CP/IRIT): Add predicted knowledge model scores
+            return torch.cat([boxes, scores, conf, km_scores], dim=-1)
+        else:
+            return torch.cat([boxes, scores, conf], dim=-1)
 
     def get_topk_index(self, scores: torch.Tensor, max_det: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Get top-k indices from scores.

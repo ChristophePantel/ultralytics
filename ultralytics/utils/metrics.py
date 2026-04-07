@@ -327,10 +327,20 @@ class ConfusionMatrix(DataExportMixin):
             task (str, optional): Type of task, either 'detect' or 'classify'.
             save_matches (bool, optional): Save the indices of GTs, TPs, FPs, FNs for visualization.
         """
+        # set task type (detection of classificaiton)
         self.task = task
+        
+        # set the number of classes, being len(names) names being the list of classes
         self.nc = len(names)  # number of classes
+        
+        # Initialise the confusion matrix
+        # For classification, it's a square matrix of size (number_classes * number_classes)
+        # For detection 's an (nc + 1) x (nc + 1) matrix to accommodate background class
         self.matrix = np.zeros((self.nc, self.nc)) if self.task == "classify" else np.zeros((self.nc + 1, self.nc + 1))
+        
         self.names = names  # name of classes
+        
+        # Initialize 'matches' to None or a dictionary depending on whether we want to save matches (GT, TP, FP, FN)
         self.matches = {} if save_matches else None
 
     def _append_matches(self, mtype: str, batch: dict[str, Any], idx: int) -> None:
@@ -349,16 +359,24 @@ class ConfusionMatrix(DataExportMixin):
             For masks, handles both overlap and non-overlap cases. When masks.max() > 1.0, it indicates
             overlap_mask=True with shape (1, H, W), otherwise uses direct indexing.
         """
+        # If no matches are being saved, exit early
         if self.matches is None:
             return
+        
+        # Loop through the batch items (such as bounding boxes, class labels, etc).
+        # batch is a dictionnary with k being the key and either 'bboxes", "cls", "conf", keypoints' or 'masks'
+        # v is the values of each
         for k, v in batch.items():
             # TODO (CP/IRIT): should "scores" be managed in the same way ?
+            # Exemple : self.matches[TP]["bboxes"] means the True Positives for the bounding boxes 
             if k in {"bboxes", "cls", "conf", "keypoints"}:
+                # TODO (CP/IRIT) : why v[[idx]] ?
                 self.matches[mtype][k] += v[[idx]]
             elif k == "masks":
                 # NOTE: masks.max() > 1.0 means overlap_mask=True with (1, H, W) shape
                 self.matches[mtype][k] += [v[0] == idx + 1] if v.max() > 1.0 else [v[idx]]
 
+    # (CP/IRIT) : This procedure does not interest us for oru task 
     def process_cls_preds(self, preds: list[torch.Tensor], targets: list[torch.Tensor]) -> None:
         """Update confusion matrix for classification task.
 
@@ -366,6 +384,7 @@ class ConfusionMatrix(DataExportMixin):
             preds (list[torch.Tensor]): Predicted class labels.
             targets (list[torch.Tensor]): Ground truth class labels.
         """
+        
         preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
         for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy()):
             self.matrix[p][t] += 1
