@@ -912,11 +912,19 @@ def ap_per_class(
         prec_values (np.ndarray): Precision values at mAP@0.5 for each class.
     """
     # Sort by objectness
+    # we want the confidence by descending order (highest confidence first: it's why it's negative)
+    # i is the indices of the confidence scores by descending order 
     i = np.argsort(-conf)
+
+    # re-order all the arrays (i is a list of indexes)
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
     # Find unique classes
+    # from target_cls, if a class appears several times, unique_classes only returns all classes onces
+    # since return_counts is set to True, nt returns the number of times a class appears
     unique_classes, nt = np.unique(target_cls, return_counts=True)
+
+    # get the number of classes that are detected
     nc = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
@@ -924,18 +932,38 @@ def ap_per_class(
 
     # Average precision, precision and recall curves
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+
+    # ci is the index of the class, c is the class
+    # isolate one class at a time
     for ci, c in enumerate(unique_classes):
+        
+        # pred_cls is a list of predicted classes
+        # i returns a list of boolean that says which in the list of predicted_class which ones has been predicted as c
+        # if pred_cls = [1 2 1 3] and c = 1 then i = [True False True False]
         i = pred_cls == c
-        n_l = nt[ci]  # number of labels
+
+        # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
+        n_l = nt[ci]  # number of labels in GT
+
+        # n_p returns the number of times the class c has been predicted 
         n_p = i.sum()  # number of predictions
+
+        # n_p == 0 the model has made no predictions for class c ; n_l no ground_truth for objects of this class 
         if n_p == 0 or n_l == 0:
             continue
 
         # Accumulate FPs and TPs
+        # tp is a Binary array indicating whether the detection is correct (True) or not (False).
+        # if i = [True False True False] and tp = [0 1 0 1]
+        # tp[i] returns [0 0]
+
+        # FPC is the cumulative number of incorrect detections
         fpc = (1 - tp[i]).cumsum(0)
+
+        # TPC is the cumulative number of correct detections
         tpc = tp[i].cumsum(0)
 
-        # Recall
+        # Recall with n_l being the number of GT labels
         recall = tpc / (n_l + eps)  # recall curve
         r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
 
@@ -1067,11 +1095,13 @@ class Metric(SimpleClass):
         """
         return self.all_ap.mean() if len(self.all_ap) else 0.0
 
+    # TODO (CP/IRIT) : the final versions ? 
     def mean_results(self) -> list[float]:
         """Return mean of results, mp, mr, map50, map."""
         return [self.mp, self.mr, self.map50, self.map]
 
     def class_result(self, i: int) -> tuple[float, float, float, float]:
+        # TODO (CP/IRIT) is i a specific number of class ?
         """Return class-aware result, p[i], r[i], ap50[i], ap[i]."""
         return self.p[i], self.r[i], self.ap50[i], self.ap[i]
 
@@ -1170,13 +1200,26 @@ class DetMetrics(SimpleClass, DataExportMixin):
         Args:
             names (dict[int, str], optional): Dictionary of class names.
         """
+        # Dictionary that maps class_id -> class_name
         self.names = names
+
+        # Metric aggregatpr (handles AP, Precision, Recall)
         self.box = Metric()
+
+        # Timing breakdown at different pipeline
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+
+        # Task type, here detect
         self.task = "detect"
+
         # DONE (CP/IRIT): Adding scores, both predicted and target
+        # tp => true positives, conf => confidences, pred_cls => predicted classes, pred_scores => predicted_scores, target_cls => Ground Truth class, target_scorse => GT scores, target_image
         self.stats = dict(tp=[], conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
+
+        # Number of targets per class (computed later)
         self.nt_per_class = None
+
+        # Number of targets per image (computed later)
         self.nt_per_image = None
 
     def update_stats(self, stat: dict[str, Any]) -> None:
@@ -1186,7 +1229,10 @@ class DetMetrics(SimpleClass, DataExportMixin):
             stat (dict[str, Any]): Dictionary containing new statistical values to append. Keys should match existing
                 keys in self.stats.
         """
+        # for key in the self.stats that is the dict containing (tp=[], conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
+        # go through each eat
         for k in self.stats.keys():
+            # accumulate batch-wise results stat[k] being a new stastical value to add at a specific key
             self.stats[k].append(stat[k])
 
     def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
@@ -1200,20 +1246,31 @@ class DetMetrics(SimpleClass, DataExportMixin):
         Returns:
             (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
         """
+        # initialise stats for new statistical values 
         stats = {}
+        # get key and values in original defined stats
         for k, v in self.stats.items():
+
             expected = v[0].shape
+
+            # Debug check: ensure consistent shapes across batches
             for i, e in enumerate(v):
                 if len(e.shape) != len(expected):
                     print( 'ko ', k, ' ', i, ' ', len(expected), ' ', expected,  ' ', len(e.shape), ' ', e.shape, ' ', e)
             stats[k] = np.concatenate(v, 0)
+
         # stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
+        # If no stats collected, return empty
         if not stats:
             return stats
+        
         # TODO (CP/IRIT): Add scores management
         # Should classes be derived from scores instead of main class ?
         # Should predicted scores be set to 0 / 1 instead of a value between 0 and 1 ?
         # Should TP/TN/FP/FN be computed from scores ? (How is it done for boxes ?)
+
+        # Compute per-class AP, precision, recall, etc.
+        # from stats["tp"] it will be able to compute the TP, FP, FN
         results = ap_per_class(
             stats["tp"],
             stats["conf"],
@@ -1225,9 +1282,15 @@ class DetMetrics(SimpleClass, DataExportMixin):
             on_plot=on_plot,
             prefix="Box",
         )[2:]
+
+        # Update internal metric object
         self.box.nc = len(self.names)
         self.box.update(results)
+
+        # Count number of targets per class
         self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=len(self.names))
+
+         # Count number of targets per image
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=len(self.names))
         return stats
 
