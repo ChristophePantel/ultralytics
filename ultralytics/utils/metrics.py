@@ -544,6 +544,7 @@ class ConfusionMatrix(DataExportMixin):
                 dc = detection_classes[m1[j].item()]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
                 # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
+                # if distance[ dc, gc] <= threshold:
                 if dc == gc:
                     # When ground truth and predicted are identical, add to the true positive
                     self._append_matches("TP", detections, m1[j].item())
