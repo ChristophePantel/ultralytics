@@ -949,7 +949,7 @@ def ap_per_class(
     eps: float = 1e-16,
     prefix: str = "",
     use_km_metrics : bool = False,
-    distance = lambda a,b: (a == b)
+    class_compatibility_test = lambda a,b: (a == b)
 ) -> tuple:
     """Compute the average precision per class for object detection evaluation.
 
@@ -1003,7 +1003,7 @@ def ap_per_class(
 
     # ci is the index of the class, c is the class
     # isolate one class at a time
-    for ci, c in enumerate(unique_classes):
+    for ci, c in enumerate(unique_classes.astype(int)):
         
         # pred_cls is a list of predicted classes
         # i returns a list of boolean that says which in the list of predicted_class which ones has been predicted as c
@@ -1011,7 +1011,7 @@ def ap_per_class(
         # TODO (IRIT/CP): Compare classes according to knowledge model distance.
         # i = (distance[ pred_cls, c] <= threshold):
         if (use_km_metrics):
-            i = distance( pred_cls, c)
+            i = class_compatibility_test( pred_cls.astype(int), c)
         else:
             i = pred_cls == c
 
@@ -1357,6 +1357,8 @@ class DetMetrics(SimpleClass, DataExportMixin):
             names=self.names,
             on_plot=on_plot,
             prefix="Box",
+            use_km_metrics=True,
+            class_compatibility_test= lambda a, b:self.is_compatible(a, b)
         )[2:]
 
         # Update internal metric object
@@ -1369,6 +1371,9 @@ class DetMetrics(SimpleClass, DataExportMixin):
          # Count number of targets per image
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=len(self.names))
         return stats
+    
+    def is_compatible(self, a, b):
+        return (a == b)   
 
     def clear_stats(self) -> None:
         """Clear the stored statistics."""

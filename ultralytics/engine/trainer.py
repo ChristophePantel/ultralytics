@@ -361,6 +361,8 @@ class BaseTrainer:
         self.ema = ModelEMA(self.model)
         if RANK in {-1, 0}:
             metric_keys = self.validator.metrics.keys + self.label_loss_items(prefix="val")
+            # TODO (CP/IRIT): a first definition of self.metrics as keys/values as the validation cannot be executed now...
+            # It does not seem to be updated later.
             self.metrics = dict(zip(metric_keys, [0] * len(metric_keys)))
             if self.args.plots:
                 self.plot_training_labels()
@@ -763,6 +765,7 @@ class BaseTrainer:
             # Sync EMA buffers from rank 0 to all ranks
             for buffer in self.ema.ema.buffers():
                 dist.broadcast(buffer, src=0)
+        # TODO (CP/IRIT): a local definition of metrics as the result of the validation procedure.
         metrics = self.validator(self)
         if metrics is None:
             return None, None
@@ -848,6 +851,7 @@ class BaseTrainer:
             LOGGER.info(f"\nValidating {model}...")
             self.validator.args.plots = self.args.plots
             self.validator.args.compile = False  # disable final val compile as too slow
+            # TODO (CP/IRIT): another definition for metrics as the results of the validation
             self.metrics = self.validator(model=model)
             self.metrics.pop("fitness", None)
             self.run_callbacks("on_fit_epoch_end")
