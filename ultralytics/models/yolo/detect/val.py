@@ -61,7 +61,10 @@ class DetectionValidator(BaseValidator):
         self.args.task = "detect"
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
-        self.metrics = DetMetrics()
+        if self.use_km_metrics:
+            self.metrics = KnowledgeModelDetMetrics()
+        else:
+            self.metrics = DetMetrics()
         self.bce_calculator = nn.BCELoss(reduction="none")
         self.count = 0
 
@@ -131,7 +134,10 @@ class DetectionValidator(BaseValidator):
         self.seen = 0
         self.jdict = []
         self.metrics.names = model.names
-        self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
+        if (self.use_km_metrics):
+            self.confusion_matrix = KnowledgeModelConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
+        else:
+            self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
         # TODO (CP/IRIT): Add a confusion matrix for variants.
         # TODO (CP/IRIT): Add variant_names in model
         # self.variant_confusion_matrix = ConfusionMatrix(names=model.variant_names, save_matches=self.args.plots and self.args.visualize)

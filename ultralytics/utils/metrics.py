@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
+from keras.src.metrics.metrics_utils import ConfusionMatrix
 
 OKS_SIGMA = (
     np.array(
@@ -343,6 +344,9 @@ class ConfusionMatrix(DataExportMixin):
         # Initialize 'matches' to None or a dictionary depending on whether we want to save matches (GT, TP, FP, FN)
         self.matches = {} if save_matches else None
 
+    def is_compatible( self, a : int, b : int) -> bool: 
+        return (a == b)
+
     def _append_matches(self, mtype: str, batch: dict[str, Any], idx: int) -> None:
         """Append the matches to TP, FP, FN or GT list for the last batch.
 
@@ -544,8 +548,8 @@ class ConfusionMatrix(DataExportMixin):
                 dc = detection_classes[m1[j].item()]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
                 # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
-                # if distance[ dc, gc] <= threshold:
-                if dc == gc:
+                if self.is_compatible( dc, gc):
+                # if dc == gc:
                     # When ground truth and predicted are identical, add to the true positive
                     self._append_matches("TP", detections, m1[j].item())
                 else:
@@ -569,10 +573,12 @@ class ConfusionMatrix(DataExportMixin):
                 self.matrix[dc, self.nc] += 1  # FP
                 self._append_matches("FP", detections, i)
 
+    # TODO (CP/IRIT) : is this function used ?
     def matrix(self):
         """Return the confusion matrix."""
         return self.matrix
 
+    # TODO (CP/IRIT) : is this function used ?
     def tp_fp(self) -> tuple[np.ndarray, np.ndarray]:
         """Return true positives and false positives.
 
@@ -585,6 +591,7 @@ class ConfusionMatrix(DataExportMixin):
         # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
         return (tp, fp) if self.task == "classify" else (tp[:-1], fp[:-1])  # remove background class if task=detect
 
+    
     def plot_matches(self, img: torch.Tensor, im_file: str, save_dir: Path) -> None:
         """Plot grid of GT, TP, FP, FN for each image.
 
@@ -702,6 +709,7 @@ class ConfusionMatrix(DataExportMixin):
         for i in range(self.matrix.shape[0]):
             LOGGER.info(" ".join(map(str, self.matrix[i])))
 
+    # TODO (CP/IRIT) : is this function used ?
     def summary(self, normalize: bool = False, decimals: int = 5) -> list[dict[str, float]]:
         """Generate a summarized representation of the confusion matrix as a list of dictionaries, with optional
         normalization. This is useful for exporting the matrix to various formats such as CSV, XML, HTML, JSON,
@@ -738,6 +746,51 @@ class ConfusionMatrix(DataExportMixin):
             dict({"Predicted": clean_names[i]}, **{clean_names[j]: array[i, j] for j in range(len(clean_names))})
             for i in range(len(clean_names))
         ]
+
+class KnowledgeModelConfusionMatrix(ConfusionMatrix):
+    
+    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, threshold: int = 0):
+        ConfusionMatrix.__init__(self, names, task, save_matches)
+        self.threshold = threshold
+        self.class_distance = km.generate_class_distance()
+    
+    def is_compatible(self, a, b):
+        return self.class_distance[a, b] <= self.threshold
+
+class MultipleConfusionMatrix(ConfusionMatrix):
+    
+    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, size_list):
+        self.confusion_matrix_list = []
+        for i in range(size_list):
+            confusion_matrix_item = KnowledgeModelConfusionMatrix(names, task, save_matches, i)
+            self.confusion_matrix_list.append(confusion_matrix_item)
+    
+    def _append_matches(self, mtype: str, batch: dict[str, Any], idx: int) -> None:
+        for item in self.confusion_matrix_list:
+            item._append_matches(mtype, batch, idx)
+    
+    def process_cls_preds(self, preds: list[torch.Tensor], targets: list[torch.Tensor]) -> None:
+        for item in self.confusion_matrix_list:
+            item.process_cls_preds(preds, targets)
+    
+    def process_batch(self,detections: dict[str, torch.Tensor], batch: dict[str, Any], conf: float = 0.25,iou_thres: float = 0.45,) -> None:
+        for item in self.confusion_matrix_list:
+            item.process_batch(detections, batch, conf, iou_thres)
+    
+    def plot_matches(self, img: torch.Tensor, im_file: str, save_dir: Path) -> None:
+        for item in self.confusion_matrix_list:
+            item.plot_matches(img, im_file, save_dir)
+        
+    @TryExcept(msg="ConfusionMatrix plot failure")
+    @plt_settings()
+    def plot(self, normalize: bool = True, save_dir: str = "", on_plot=None):  
+        for item in self.confusion_matrix_list:
+            item.plot(normalize, bool, save_dir, on_plot)
+    
+    def print(self):
+        """Print the confusion matrix to the console."""
+        for item in self.confusion_matrix_list:
+            item.print()
 
 
 def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
@@ -865,7 +918,7 @@ def compute_ap(recall: list[float], precision: list[float]) -> tuple[float, np.n
         func = np.trapezoid if checks.check_version(np.__version__, ">=2.0") else np.trapz  # np.trapz deprecated
         ap = func(np.interp(x, mrec, mpre), x)  # integrate
     else:  # 'continuous'
-        i = np.where(mrec[1:] != mrec[:-1])[0]  # points where x-axis (recall) changes
+        i = np.where(mrec[1:] != mrec[:-1])[0]  # points wh# if distance[ dc, gc] <= threshold:ere x-axis (recall) changes
         ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])  # area under curve
 
     return ap, mpre, mrec
@@ -883,6 +936,8 @@ def ap_per_class(
     names: dict[int, str] = {},
     eps: float = 1e-16,
     prefix: str = "",
+    use_km_metrics : bool = False,
+    distance = lambda a,b: (a == b)
 ) -> tuple:
     """Compute the average precision per class for object detection evaluation.
 
@@ -941,7 +996,12 @@ def ap_per_class(
         # pred_cls is a list of predicted classes
         # i returns a list of boolean that says which in the list of predicted_class which ones has been predicted as c
         # if pred_cls = [1 2 1 3] and c = 1 then i = [True False True False]
-        i = pred_cls == c
+        # TODO (IRIT/CP): Compare classes according to knowledge model distance.
+        # i = (distance[ pred_cls, c] <= threshold):
+        if (use_km_metrics):
+            i = distance( pred_cls, c)
+        else:
+            i = pred_cls == c
 
         # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
         n_l = nt[ci]  # number of labels in GT
@@ -1165,6 +1225,7 @@ class Metric(SimpleClass):
 
 
 # TODO (CP/IRIT): Switch to predicted score analysis instead basic class.
+# TODO (CP/IRIT): Why does not DetMetrics inherit from Metrics
 # Rely on the list of concrete class variants generated from the knowledge model.
 class DetMetrics(SimpleClass, DataExportMixin):
     """Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP).
@@ -1236,6 +1297,8 @@ class DetMetrics(SimpleClass, DataExportMixin):
             # accumulate batch-wise results stat[k] being a new stastical value to add at a specific key
             self.stats[k].append(stat[k])
 
+
+    # TODO (CP/IRIT) : how to add since they are all functions ?
     def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
         """Process predicted results for object detection and update metrics.
 
@@ -1295,7 +1358,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=len(self.names))
         return stats
 
-    def clear_stats(self):
+    def clear_stats(self) -> None:
         """Clear the stored statistics."""
         for v in self.stats.values():
             v.clear()
@@ -1379,6 +1442,29 @@ class DetMetrics(SimpleClass, DataExportMixin):
             for i in range(len(per_class["Box-P"]))
         ]
 
+class KnowledgeModelDetMetrics(DetMetrics):
+    
+    def __init__(self, names: dict[int, str] = {}, threshold: int = 0) -> None: 
+        DetMetrics.__init__(self, names, task, save_matches)
+        self.threshold = threshold
+        self.class_distance = km.generate_class_distance()
+        
+    def is_compatible(self, a, b):
+        return self.class_distance[a, b] <= self.threshold     
+
+class MultipleDetMetrics(DetMetrics):
+    
+    def __init__(self, names: dict[int, str] = {}, size_list) -> None:
+        self.confusion_matrix_list = []
+        for i in range(size_list):
+            confusion_matrix_item = KnowledgeModelDetMetrics(names, i)
+            self.confusion_matrix_list.append(confusion_matrix_item)
+            
+    def update_stats(self, stat: dict[str, Any]) -> None:
+        for item in self.confusion_matrix_list:
+            item.update_stats(stat)
+            
+    
 
 class SegmentMetrics(DetMetrics):
     """Calculate and aggregate detection and segmentation metrics over a given set of classes.
@@ -1687,6 +1773,8 @@ class ClassifyMetrics(SimpleClass, DataExportMixin):
             pred (torch.Tensor): Predicted classes.
         """
         pred, targets = torch.cat(pred), torch.cat(targets)
+        # TODO (CP/IRIT): Compare classes according to knowledge model
+        # correct( distance[ targets[ :, None], pred] <= threshold:
         correct = (targets[:, None] == pred).float()
         acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
         self.top1, self.top5 = acc.mean(0).tolist()
