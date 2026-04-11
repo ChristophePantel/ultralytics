@@ -359,6 +359,7 @@ class BaseTrainer:
         self._build_train_pipeline()
         self.validator = self.get_validator()
         self.ema = ModelEMA(self.model)
+        self.set_class_weights()  # compute class weights after dataloader is ready
         if RANK in {-1, 0}:
             metric_keys = self.validator.metrics.keys + self.label_loss_items(prefix="val")
             # TODO (CP/IRIT): a first definition of self.metrics as keys/values as the validation cannot be executed now...
@@ -802,6 +803,10 @@ class BaseTrainer:
         """Set or update model parameters before training."""
         self.model.names = self.data["names"]
 
+    def set_class_weights(self):
+        """Compute and set class weights for handling class imbalance. Override in subclasses."""
+        pass
+
     def build_targets(self, preds, targets):
         """Build target tensors for training YOLO model."""
         pass
@@ -966,7 +971,7 @@ class BaseTrainer:
             )
             self.epochs += ckpt["epoch"]  # finetune additional epochs
         self._load_checkpoint_state(ckpt)
-        if unwrap_model(self.model).end2end:
+        if getattr(unwrap_model(self.model), "end2end", False):
             # initialize loss and resume o2o and o2m args
             unwrap_model(self.model).criterion = unwrap_model(self.model).init_criterion()
             unwrap_model(self.model).criterion.updates = start_epoch - 1

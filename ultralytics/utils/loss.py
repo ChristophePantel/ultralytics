@@ -525,6 +525,11 @@ class v8DetectionLoss:
         self.device = device
 
         self.use_dfl = m.reg_max > 1
+        
+        # Class weights for handling imbalanced datasets
+        self.class_weights = getattr(model, "class_weights", None)
+        if self.class_weights is not None:
+            self.class_weights = self.class_weights.to(device).view(1, 1, -1)
 
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
@@ -683,10 +688,12 @@ class v8DetectionLoss:
         )
 
         target_scores_sum = max(target_scores.sum(), 1)
-
-        # Cls loss
-        bce_values = self.bce(pred_scores, target_scores.to(dtype))
-        loss[cls_index] = bce_values.sum() / target_scores_sum  # BCE
+        
+        # Cls loss with optional class weighting
+        bce_loss = self.bce(pred_scores, target_scores.to(dtype))  # (bs, num_anchors, nc)
+        if self.class_weights is not None:
+            bce_loss *= self.class_weights
+        loss[cls_index] = bce_loss.sum() / target_scores_sum  # BCE
         
         # DONE (CP/IRIT): Train to predict class score only (without bounding box score).
         if self.use_km_scores:
