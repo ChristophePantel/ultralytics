@@ -16,7 +16,7 @@ from ultralytics.data import build_dataloader, build_yolo_dataset, converter
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK, nms, ops
 from ultralytics.utils.checks import check_requirements
-from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
+from ultralytics.utils.metrics import ConfusionMatrix, MultipleConfusionMatrix, DetMetrics, KnowledgeModelDetMetrics, box_iou
 from ultralytics.utils.plotting import plot_images
 
 from ultralytics.utils import km
@@ -135,7 +135,9 @@ class DetectionValidator(BaseValidator):
         self.jdict = []
         self.metrics.names = model.names
         if (self.use_km_metrics):
-            self.confusion_matrix = KnowledgeModelConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
+            self.class_compatibility_matrix = km.get_class_compatibility_matrix( self.nc, self.refinement, self.composition)
+            self.metrics.set_class_compatibility_matrix(self.class_compatibility_matrix)
+            self.confusion_matrix = MultipleConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize, class_compatibility_matrix=self.class_compatibility_matrix, amount=self.km_metrics_amount)
         else:
             self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
         # TODO (CP/IRIT): Add a confusion matrix for variants.

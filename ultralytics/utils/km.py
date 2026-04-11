@@ -329,18 +329,65 @@ def get_candidate_variants(variant_classes, variant_to_classes):
             variant_set = variant_set.intersection(class_to_variants[other_class])
             #print(variant_set)
     return variant_set
+    
+# TODO : test A <-> B = A /\ B \/ ~ A /\ ~ B
+def scores_fuzzy_equiv(batch_scores, prediction_scores, alpha=0.9, power=3):
+    """Compute fuzzy equivalence between expected scores and predicted scores.
+    
+    Args:
+    
+    Returns:
+    """
+    batch_range = batch_scores.shape[0]
+    prediction_range = prediction_scores.shape[0]
+    aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
+    aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
+    negated_aligned_batch_scores = 1.0 - aligned_batch_scores
+    negated_aligned_prediction_scores = 1.0 - aligned_prediction_scores
+    positive_component = aligned_batch_scores * aligned_prediction_scores
+    negative_component = negated_aligned_batch_scores * negated_aligned_prediction_scores
+    # Version Mean of positive contribution (bad according to CP/IRIT)
+    # positive_component_sum = positive_component.sum(-1)
+    # aligned_batch_scores_sum = aligned_batch_scores.sum(-1)
+    # batch_prediction_equiv_mean = positive_component_sum  / aligned_batch_scores_sum 
+    # Version Balanced Mean of positive and negative contribution
+    batch_prediction_equiv = alpha *  positive_component + (1 - alpha) * negative_component
+    # Version enhanced power mean
+    # batch_prediction_equiv_mean = batch_prediction_equiv.pow(power).mean(-1).pow(1/power)
+    # Version linear mean
+    batch_prediction_equiv_mean = batch_prediction_equiv.mean(-1)
+    return batch_prediction_equiv_mean
+
+def scores_bce(batch_scores, prediction_scores):
+    """Compute binary cross entropy between expected scores and predicted scores.
+    
+    Args:
+    
+    Returns:
+    """
+    bce_calculator = nn.BCELoss(reduction="none")
+    batch_range = batch_scores.shape[0]
+    prediction_range = prediction_scores.shape[0]
+    batch_scores_sum = torch.sum(batch_scores,1)
+    aligned_batch_scores_sum = torch.unsqueeze(batch_scores_sum, 0).expand(prediction_range,-1)
+    aligned_batch_scores = torch.unsqueeze(batch_scores, 0).expand(prediction_range,-1,-1)
+    aligned_prediction_scores = torch.unsqueeze(prediction_scores, 1).expand(-1,batch_range,-1)
+    bce_per_class = bce_calculator(aligned_prediction_scores,aligned_batch_scores) 
+    bce = torch.sum(bce_per_class,2) / batch_scores_sum
+    # detected = torch.where(bce < 1)
+    return bce
 
 def get_class_compatibility_matrix(class_number, coded_class_hierarchy, coded_part_hierarchy):
-    g = sps.lil_array((class_number,class_number))
+    knowledge_graph = sps.lil_array((class_number,class_number))
 
     for origin in coded_class_hierarchy.keys():
         for destination in coded_class_hierarchy[origin]:
-            g[origin, destination] = 1 
-            g[destination, origin] = 1 
-    t = spsg.dijkstra(g)
+            knowledge_graph[origin, destination] = 1 
+            knowledge_graph[destination, origin] = 1 
     
     for origin in coded_part_hierarchy.keys():
         for destination in coded_part_hierarchy[origin]:
-            g[origin, destination] = 1
-            g[destination, origin] = 1 
-    t = spsg.dijkstra(g)
+            knowledge_graph[origin, destination] = 1
+            knowledge_graph[destination, origin] = 1 
+    class_compatibility_matrix = spsg.dijkstra(knowledge_graph)
+    return class_compatibility_matrix

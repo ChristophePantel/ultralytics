@@ -98,7 +98,7 @@ def bbox_iou(
         box1 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
         box2 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
         xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in (x1, y1,
-            x2, y2) format.
+            x2, y2) format.get_class_compatibility_matrix
         GIoU (bool, optional): If True, calculate Generalized IoU.
         DIoU (bool, optional): If True, calculate Distance IoU.
         CIoU (bool, optional): If True, calculate Complete IoU.
@@ -749,20 +749,22 @@ class ConfusionMatrix(DataExportMixin):
 
 class KnowledgeModelConfusionMatrix(ConfusionMatrix):
     
-    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, threshold: int = 0):
-        ConfusionMatrix.__init__(self, names, task, save_matches)
+    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, class_compatibility_matrix = None, threshold: int = 0):
+        super().__init__(names, task, save_matches)
         self.threshold = threshold
-        self.class_distance = km.generate_class_distance()
+        self.class_compatibility_matrix = class_compatibility_matrix
     
     def is_compatible(self, a, b):
-        return self.class_distance[a, b] <= self.threshold
+        return self.class_compatibility_matrix[a, b] <= self.threshold
 
 class MultipleConfusionMatrix(ConfusionMatrix):
     
-    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, size_list):
+    def __init__(self, names: dict[int, str] = {}, task: str = "detect", save_matches: bool = False, class_compatibility_matrix = None, amount: int = 0):
         self.confusion_matrix_list = []
-        for i in range(size_list):
-            confusion_matrix_item = KnowledgeModelConfusionMatrix(names, task, save_matches, i)
+        self.amount = amount
+        self.class_compatibility_matrix = class_compatibility_matrix
+        for i in range(self.amount):
+            confusion_matrix_item = KnowledgeModelConfusionMatrix(names, task, save_matches, class_compatibility_matrix, i)
             self.confusion_matrix_list.append(confusion_matrix_item)
     
     def _append_matches(self, mtype: str, batch: dict[str, Any], idx: int) -> None:
@@ -776,7 +778,15 @@ class MultipleConfusionMatrix(ConfusionMatrix):
     def process_batch(self,detections: dict[str, torch.Tensor], batch: dict[str, Any], conf: float = 0.25,iou_thres: float = 0.45,) -> None:
         for item in self.confusion_matrix_list:
             item.process_batch(detections, batch, conf, iou_thres)
+
+   # TODO (CP/IRIT) : is this function used ?
+    def matrix(self):
+        return matrix(self.confusion_matrix_list[0]) 
     
+    # TODO (CP/IRIT) : is this function used ?
+    def tp_fp(self) -> tuple[np.ndarray, np.ndarray]:
+        return tp_fp(self.confusion_matrix_list[0]) 
+
     def plot_matches(self, img: torch.Tensor, im_file: str, save_dir: Path) -> None:
         for item in self.confusion_matrix_list:
             item.plot_matches(img, im_file, save_dir)
@@ -785,13 +795,15 @@ class MultipleConfusionMatrix(ConfusionMatrix):
     @plt_settings()
     def plot(self, normalize: bool = True, save_dir: str = "", on_plot=None):  
         for item in self.confusion_matrix_list:
-            item.plot(normalize, bool, save_dir, on_plot)
+            item.plot(normalize, save_dir, on_plot)
     
     def print(self):
         """Print the confusion matrix to the console."""
         for item in self.confusion_matrix_list:
             item.print()
 
+    def summary(self, normalize: bool = False, decimals: int = 5) -> list[dict[str, float]]:
+        return summary(self.confusion_matrix_list[0], normalize, decimals) 
 
 def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
     """Box filter of fraction f."""
@@ -1444,19 +1456,24 @@ class DetMetrics(SimpleClass, DataExportMixin):
 
 class KnowledgeModelDetMetrics(DetMetrics):
     
-    def __init__(self, names: dict[int, str] = {}, threshold: int = 0) -> None: 
-        DetMetrics.__init__(self, names, task, save_matches)
+    def __init__(self, names: dict[int, str] = {}, class_compatibility_matrix = None, threshold: int = 0) -> None: 
+        super().__init__(names)
         self.threshold = threshold
-        self.class_distance = km.generate_class_distance()
+        self.class_compatibility_matrix = class_compatibility_matrix
         
     def is_compatible(self, a, b):
-        return self.class_distance[a, b] <= self.threshold     
+        return self.class_compatibility_matrix[a, b] <= self.threshold     
+    
+    def set_class_compatibility_matrix(self, class_compatibility_matrix):
+        self.class_compatibility_matrix = class_compatibility_matrix
 
 class MultipleDetMetrics(DetMetrics):
     
-    def __init__(self, names: dict[int, str] = {}, size_list) -> None:
+    def __init__(self, names: dict[int, str] = {}, amount : int = 1) -> None:
+        super().__init__(names)
         self.confusion_matrix_list = []
-        for i in range(size_list):
+        self.amount = amount
+        for i in range(self.amount):
             confusion_matrix_item = KnowledgeModelDetMetrics(names, i)
             self.confusion_matrix_list.append(confusion_matrix_item)
             
@@ -1464,7 +1481,52 @@ class MultipleDetMetrics(DetMetrics):
         for item in self.confusion_matrix_list:
             item.update_stats(stat)
             
+    def set_class_compatibility_matrix(self, class_compatibility_matrix):
+        for item in self.confusion_matrix_list:
+            item.set_class_compatibility_matrix( class_compatibility_matrix )
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+        return process(self.confusion_matrix_list[0], save_dir, plot, on_plot)
     
+    def clear_stats(self) -> None:
+        return clear_stats(self.confusion_matrix_list) 
+    
+    @property
+    def keys(self) -> list[str]:
+        return keys(self.confusion_matrix_list) 
+
+    def mean_results(self) -> list[float]:
+        return mean_results(self.confusion_matrix_list) 
+
+    def class_result(self, i: int) -> tuple[float, float, float, float]:
+        return class_result(self.confusion_matrix_list, i) 
+
+    @property
+    def maps(self) -> np.ndarray:
+        return maps(self.confusion_matrix_list) 
+
+    @property
+    def fitness(self) -> float:
+        return fitness(self.confusion_matrix_list) 
+    
+    @property
+    def ap_class_index(self) -> list:
+        return ap_class_index(self.confusion_matrix_list) 
+
+    @property
+    def results_dict(self) -> dict[str, float]:
+        return results_dict(self.confusion_matrix_list) 
+
+    @property
+    def curves(self) -> list[str]:
+        return curves(self.confusion_matrix_list) 
+
+    @property
+    def curves_results(self) -> list[list]:
+        return curves_results(self.confusion_matrix_list) 
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, Any]]:
+        return summary(self.confusion_matrix_list, normalize, decimals) 
 
 class SegmentMetrics(DetMetrics):
     """Calculate and aggregate detection and segmentation metrics over a given set of classes.
