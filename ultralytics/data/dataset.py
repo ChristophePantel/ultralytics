@@ -84,9 +84,11 @@ class YOLODataset(BaseDataset):
         """
         self.use_scores = kwargs["hyp"].get("use_scores",False)
         self.use_km = self.use_scores and kwargs["hyp"].get("use_km",False)
+        self.use_km_metrics = self.use_km and kwargs["hyp"].get("use_km_metrics",False)
+        self.km_metrics_amount = kwargs["hyp"].get('km_metrics_amount', 1)
         self.use_km_scores = self.use_km and kwargs["hyp"].get("use_km_scores",False)
         self.use_variant_selection = self.use_km_scores and kwargs["hyp"].get("use_variant_selection",False)
-        self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_scores",False)
+        self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_losses",False)
         self.use_refinement = self.use_km_losses and kwargs["hyp"].get("use_refinement",False)
         self.use_composition = self.use_km_losses and kwargs["hyp"].get("use_composition",False)
         self.use_segments = task == "segment"

@@ -350,6 +350,8 @@ class KnowledgeBasedLoss(nn.Module):
         self.power = power
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
+        self.km_metrics_amount = getattr(self.args, 'km_metrics_amount', 1)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
         self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
@@ -531,6 +533,8 @@ class v8DetectionLoss:
 
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
+        self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
+        self.km_metrics_amount = getattr(model.args, 'km_metrics_amount', 1)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
         self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
@@ -626,11 +630,12 @@ class v8DetectionLoss:
 
         # reorganize dimensions for future operations
         # rename pred_distri to pred_for_bboxes
-        pred_for_bboxes, pred_scores, pred_km_scores = (
+        pred_for_bboxes, pred_scores = (
             preds["boxes"].permute(0, 2, 1).contiguous(),
-            preds["scores"].permute(0, 2, 1).contiguous(),
-            preds["km_scores"].permute(0, 2, 1).contiguous(), # DONE (CP/IRIT): Add knowledge model class scores
+            preds["scores"].permute(0, 2, 1).contiguous()
         )
+        if self.use_km_scores:
+            pred_km_scores = preds["km_scores"].permute(0, 2, 1).contiguous() # DONE (CP/IRIT): Add knowledge model class scores
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
 
