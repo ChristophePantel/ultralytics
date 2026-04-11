@@ -393,6 +393,7 @@ def run_ray_tune(
         "box": tune.uniform(1.0, 20.0),  # box loss gain
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         "cls": tune.uniform(0.1, 4.0),  # cls loss gain (scale with pixels)
+        "cls_pw": tune.uniform(0.0, 1.0),  # cls power weight (scale with pixels)
         "dfl": tune.uniform(0.4, 12.0),  # dfl loss gain
         "hsv_h": tune.uniform(0.0, 0.1),  # image HSV-Hue augmentation (fraction)
         "hsv_s": tune.uniform(0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
