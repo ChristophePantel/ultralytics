@@ -127,7 +127,7 @@ class BaseTrainer:
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
-        self.km_metrics_amount = getattr(self.args, 'km_metrics_amount', 1)
+        self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
         self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
