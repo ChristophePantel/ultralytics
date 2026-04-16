@@ -408,6 +408,7 @@ class ConfusionMatrix(DataExportMixin):
         iou_thres: float = 0.45,
     ) -> None:
         """Update confusion matrix for object detection task.
+         # TODO (CP/IRIT): Check that all TP are indeed TP with respect to pred/gt association...
 
         Args:
             detections (dict[str, torch.Tensor]): Dictionary containing detected bounding boxes and their associated
@@ -871,7 +872,7 @@ def plot_mc_curve(
     """Plot metric-confidence curve.
 
     Args:
-        px (np.ndarray): X values for the metric-confidence curve.
+        px (np.ndarray): X values for the metric-conreturn fidence curve.
         py (np.ndarray): Y values for the metric-confidence curve.
         save_dir (Path, optional): Path to save the plot.
         names (dict[int, str], optional): Dictionary mapping class indices to class names.
@@ -948,16 +949,20 @@ def ap_per_class(
     names: dict[int, str] = {},
     eps: float = 1e-16,
     prefix: str = "",
+    # fn: np.ndarray = None,
     use_km_metrics : bool = False,
     class_compatibility_test = lambda a,b: (a == b)
 ) -> tuple:
     """Compute the average precision per class for object detection evaluation.
+    # TODO (CP/IRIT): Add a link between tp, pred_cls and target_cls (tp was computed previously based on pred_cls, target_cls, and iou between bounding boxes
+        Prediction and Ground Truth should be associated at that time.
 
     Args:
-        tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
-        conf (np.ndarray): Array of confidence scores of the detections.
-        pred_cls (np.ndarray): Array of predicted classes of the detections.
-        target_cls (np.ndarray): Array of true classes of the targets.
+        tp (np.ndarray): Binary array of shape (N,) indicating whether the detection is correct (True) or not (False) -- both the class and the bounding box.
+        # Array indicating the number of the ground truth data between 0 and M-1 associated to the positive detection or -1 if it is a false positive
+        conf (np.ndarray): Array of shape (N,1) of confidence scores of the detections.
+        pred_cls (np.ndarray): Array of shape (N,) of predicted classes of the detections.
+        target_cls (np.ndarray): Array of shape (M,) of true classes of the targets.
         plot (bool, optional): Whether to plot PR curves or not.
         on_plot (callable, optional): A callback to pass plots path and data when they are rendered.
         save_dir (Path, optional): Directory to save the PR curves.
@@ -988,8 +993,9 @@ def ap_per_class(
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
     # Find unique classes
-    # from target_cls, if a class appears several times, unique_classes only returns all classes onces
+    # from target_cls, if a class appears several times, unique_classes only returns all classes once
     # since return_counts is set to True, nt returns the number of times a class appears
+    # nt is the ground truth number of class instances for each expected class
     unique_classes, nt = np.unique(target_cls, return_counts=True)
 
     # get the number of classes that are detected
@@ -1002,23 +1008,34 @@ def ap_per_class(
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
 
     # ci is the index of the class, c is the class
-    # isolate one class at a time
+    # isolate one class at a time from the expected classes
     for ci, c in enumerate(unique_classes.astype(int)):
-        
         # pred_cls is a list of predicted classes
         # i returns a list of boolean that says which in the list of predicted_class which ones has been predicted as c
         # if pred_cls = [1 2 1 3] and c = 1 then i = [True False True False]
         # TODO (IRIT/CP): Compare classes according to knowledge model distance.
         # i = (distance[ pred_cls, c] <= threshold):
+        # tp_i: contains the line where the class was correctly predicted, each line indicates if the bounding box is correct or not for each IoU threshold
         if (use_km_metrics):
+            compatible_gt_classes = class_compatibility_test( target_cls.astype(int), c)
+            n_l = compatible_gt_classes.sum()
+            # Indexes of the predictions whose label is c and bounding box is correct
+            # i = (tp == c)
+            # TODO (CP/IRIT): Should we use the class compatibility relation to include the similar classes ?
             i = class_compatibility_test( pred_cls.astype(int), c)
+            
         else:
+            # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
+            n_l = nt[ci]  # number of labels in GT
+            # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
             i = pred_cls == c
+            
+        # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
+        tp_i = tp[i,:].astype(int)
+        # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
+        c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
 
-        # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
-        n_l = nt[ci]  # number of labels in GT
-
-        # n_p returns the number of times the class c has been predicted 
+        # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
         n_p = i.sum()  # number of predictions
 
         # n_p == 0 the model has made no predictions for class c ; n_l no ground_truth for objects of this class 
@@ -1031,18 +1048,25 @@ def ap_per_class(
         # tp[i] returns [0 0]
 
         # FPC is the cumulative number of incorrect detections
-        fpc = (1 - tp[i]).cumsum(0)
+        fpc = c_tp_i.cumsum(0) # accumulate the number of incorrect prediction (either the class or the bounding box, or both)
 
         # TPC is the cumulative number of correct detections
-        tpc = tp[i].cumsum(0)
+        tpc = tp_i.cumsum(0)  # accumulate the number of correct prediction (correct class and correct bounding box)
 
+        # Recall
         # Recall with n_l being the number of GT labels
+        # if use_km_metrics:
+        #     recall = tpc / (tpc + fnc)
+        #else:
+        # TODO (CP/IRIT): when using the compatibility matrix, tpc is usually higher than n_l, should we take all the compatible labels ?
         recall = tpc / (n_l + eps)  # recall curve
-        r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+        recall_0 = recall[:, 0] # extract fist IoU threshold
+        r_curve[ci] = np.interp(-x, -conf[i], recall_0, left=0)  # negative x, xp because xp decreases
 
         # Precision
         precision = tpc / (tpc + fpc)  # precision curve
-        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+        precision_0 = precision[:, 0] # extract fist IoU threshold
+        p_curve[ci] = np.interp(-x, -conf[i], precision_0, left=1)  # p at pr_score
 
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
@@ -1288,7 +1312,8 @@ class DetMetrics(SimpleClass, DataExportMixin):
 
         # DONE (CP/IRIT): Adding scores, both predicted and target
         # tp => true positives, conf => confidences, pred_cls => predicted classes, pred_scores => predicted_scores, target_cls => Ground Truth class, target_scorse => GT scores, target_image
-        self.stats = dict(tp=[], conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
+        self.stats = dict(tp=[], # fn=[], 
+                          conf=[], pred_cls=[], pred_scores=[], target_cls=[], target_scores=[], target_img=[])
 
         # Number of targets per class (computed later)
         self.nt_per_class = None
@@ -1311,7 +1336,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
 
 
     # TODO (CP/IRIT) : how to add since they are all functions ?
-    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None, use_km_metrics=False) -> dict[str, np.ndarray]:
         """Process predicted results for object detection and update metrics.
 
         Args:
@@ -1357,7 +1382,8 @@ class DetMetrics(SimpleClass, DataExportMixin):
             names=self.names,
             on_plot=on_plot,
             prefix="Box",
-            use_km_metrics=True,
+            # fn=stats["fn"], # TODO (CP/IRIT): Must compute false negative.
+            use_km_metrics=use_km_metrics,
             class_compatibility_test= lambda a, b:self.is_compatible(a, b)
         )[2:]
 

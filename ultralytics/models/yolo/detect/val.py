@@ -323,7 +323,7 @@ class DetectionValidator(BaseValidator):
         Returns:
             (dict[str, Any]): Dictionary containing metrics results.
         """
-        self.metrics.process(save_dir=self.save_dir, plot=self.args.plots, on_plot=self.on_plot)
+        self.metrics.process(save_dir=self.save_dir, plot=self.args.plots, on_plot=self.on_plot, use_km_metrics=self.use_km_metrics)
         self.metrics.clear_stats()
         return self.metrics.results_dict
 
@@ -367,7 +367,11 @@ class DetectionValidator(BaseValidator):
         pred_scores = preds["scores"]
         bce = self.scores_bce( batch_scores, pred_scores)
         # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
-        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
+        if self.use_km_metrics:
+            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
+        else:
+            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
+        return result
 
     def scores_bce(self, batch_scores, prediction_scores):
         """Compute binary cross entropy between expected scores and predicted scores.

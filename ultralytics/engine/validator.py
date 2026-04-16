@@ -286,7 +286,7 @@ class BaseValidator:
 
     # TODO (CP/IRIT): Adapt to use knowledge model.
     def match_predictions(
-        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False
+        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False, compatibility_threshold :int = 0, compatibility_matrix = None
     ) -> torch.Tensor:
         """Match predictions to ground truth objects using IoU.
 
@@ -299,14 +299,24 @@ class BaseValidator:
 
         Returns:
             (torch.Tensor): Correct tensor of shape (N, 10) for 10 IoU thresholds.
+            DONE (CP/IRIT): Indicates if the prediction is correct (both the class and the bounding box) for a given IoU thresholds
         """
         # Dx10 matrix, where D - detections, 10 - IoU thresholds
-        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        # TODO (CP/IRIT): use an integer instead of a boolean (ground truth number or -1 for background
+        if self.use_km_metrics:
+            correct = - np.ones((pred_classes.shape[0], self.iouv.shape[0])).astype(int)
+        else:
+            correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
         # LxD matrix where L - labels (rows), D - detections (columns)
         # TODO (CP/IRIT): Replace with multiclass comparaison using bce between true scores and predicted scores.
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
         # Has the ground truth class been correctly predicted ?
-        correct_class = true_classes[:, None] == pred_classes
+        # TODO (CP/IRIT): Must integrate the class compatibility threshold
+        if self.use_km_metrics:
+            compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
+            correct_class = compatibility_matrix_tensor[true_classes[:, None].int(),pred_classes.int()] <= compatibility_threshold
+        else:
+            correct_class = true_classes[:, None] == pred_classes
         sz_correct_class = torch.numel(correct_class)
         nz_correct_class = torch.count_nonzero(correct_class)
         # Only keeps the IoU of correct classes (set the incorrect ones to 0)
@@ -325,7 +335,11 @@ class BaseValidator:
                     labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
-                        correct[detections_idx[valid], i] = True
+                        if self.use_km_metrics:
+                            # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
+                            correct[detections_idx[valid], i] = labels_idx[valid]
+                        else:
+                            correct[detections_idx[valid], i] = True
             else:
                 matches = np.nonzero(iou_over_threshold)  # IoU > threshold and classes match
                 matches = np.array(matches).T
@@ -334,8 +348,16 @@ class BaseValidator:
                         matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                    correct[matches[:, 1].astype(int), i] = True
-        return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+                    if self.use_km_metrics:
+                        # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
+                        correct[matches[:, 1].astype(int), i] = matches[:, 0]
+                    else:
+                        correct[matches[:, 1].astype(int), i] = True
+        if self.use_km_metrics:
+            result = torch.tensor(correct, dtype=torch.int, device=pred_classes.device)
+        else:
+            result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+        return result
 
     def add_callback(self, event: str, callback):
         """Append the given callback to the specified event."""
