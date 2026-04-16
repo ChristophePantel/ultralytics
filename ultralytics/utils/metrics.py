@@ -959,7 +959,7 @@ def ap_per_class(
 
     Args:
         tp (np.ndarray): Binary array of shape (N,) indicating whether the detection is correct (True) or not (False) -- both the class and the bounding box.
-        # Array indicating the number of the ground truth data between 0 and M-1 associated to the positive detection or -1 if it is a false positive
+        # Array indicating the class number from the ground truth data associated to the positive detection or -1 if it is a false positive
         conf (np.ndarray): Array of shape (N,1) of confidence scores of the detections.
         pred_cls (np.ndarray): Array of shape (N,) of predicted classes of the detections.
         target_cls (np.ndarray): Array of shape (M,) of true classes of the targets.
@@ -989,7 +989,7 @@ def ap_per_class(
     # i is the indices of the confidence scores by descending order 
     i = np.argsort(-conf)
 
-    # re-order all the arrays (i is a list of indexes)
+    # re-order all the arrays (i is a list of indexes in the confidence descending order)
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
     # Find unique classes
@@ -998,7 +998,7 @@ def ap_per_class(
     # nt is the ground truth number of class instances for each expected class
     unique_classes, nt = np.unique(target_cls, return_counts=True)
 
-    # get the number of classes that are detected
+    # get the number of classes that are detected (not the total number of classes from the dataset)
     nc = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
@@ -1028,15 +1028,14 @@ def ap_per_class(
             # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
             n_l = nt[ci]  # number of labels in GT
             # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
-            i = pred_cls == c
-            
-        # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
-        tp_i = tp[i,:].astype(int)
-        # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
-        c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
-
-        # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
-        n_p = i.sum()  # number of predictions
+            i = pred_cls == c  
+            # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
+            tp_i = tp[i,:].astype(int)
+            # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
+            c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
+    
+            # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
+            n_p = i.sum()  # number of predictions
 
         # n_p == 0 the model has made no predictions for class c ; n_l no ground_truth for objects of this class 
         if n_p == 0 or n_l == 0:
@@ -1047,10 +1046,10 @@ def ap_per_class(
         # if i = [True False True False] and tp = [0 1 0 1]
         # tp[i] returns [0 0]
 
-        # FPC is the cumulative number of incorrect detections
+        # FPC is an array (N,IoI_threshold) that contains the accumulated number of incorrect detections from higher to lower confidence
         fpc = c_tp_i.cumsum(0) # accumulate the number of incorrect prediction (either the class or the bounding box, or both)
 
-        # TPC is the cumulative number of correct detections
+        # TPC is an array (N,IoI_threshold) that contains the accumulated number of correct detections from higher to lower confidence
         tpc = tp_i.cumsum(0)  # accumulate the number of correct prediction (correct class and correct bounding box)
 
         # Recall
