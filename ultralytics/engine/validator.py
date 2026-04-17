@@ -303,10 +303,7 @@ class BaseValidator:
         """
         # Dx10 matrix, where D - detections, 10 - IoU thresholds
         # TODO (CP/IRIT): use an integer instead of a boolean (ground truth number or -1 for background
-        if self.use_km_metrics:
-            correct = - np.ones((pred_classes.shape[0], self.iouv.shape[0])).astype(int)
-        else:
-            correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
         # LxD matrix where L - labels (rows), D - detections (columns)
         # TODO (CP/IRIT): Replace with multiclass comparaison using bce between true scores and predicted scores.
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
@@ -314,7 +311,9 @@ class BaseValidator:
         # TODO (CP/IRIT): Must integrate the class compatibility threshold
         if self.use_km_metrics:
             compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
-            correct_class = compatibility_matrix_tensor[true_classes[:, None].int(),pred_classes.int()] <= compatibility_threshold
+            distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
+            (values,indices) = torch.min(distances,0)
+            correct_class = distances <= compatibility_threshold
         else:
             correct_class = true_classes[:, None] == pred_classes
         sz_correct_class = torch.numel(correct_class)
@@ -348,15 +347,10 @@ class BaseValidator:
                         matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                    correct[matches[:, 1].astype(int), i] = True
                     if self.use_km_metrics:
-                        # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
-                        correct[matches[:, 1].astype(int), i] = matches[:, 0]
-                    else:
-                        correct[matches[:, 1].astype(int), i] = True
-        if self.use_km_metrics:
-            result = torch.tensor(correct, dtype=torch.int, device=pred_classes.device)
-        else:
-            result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+                        pred_classes[matches[:,1]] = true_classes[matches[:,0]]
+        result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
         return result
 
     def add_callback(self, event: str, callback):

@@ -1009,6 +1009,8 @@ def ap_per_class(
 
     # ci is the index of the class, c is the class
     # isolate one class at a time from the expected classes
+    # precisions = np.zeros(nc)
+    # recalls = np.zeros(nc)
     for ci, c in enumerate(unique_classes.astype(int)):
         # pred_cls is a list of predicted classes
         # i returns a list of boolean that says which in the list of predicted_class which ones has been predicted as c
@@ -1016,26 +1018,26 @@ def ap_per_class(
         # TODO (IRIT/CP): Compare classes according to knowledge model distance.
         # i = (distance[ pred_cls, c] <= threshold):
         # tp_i: contains the line where the class was correctly predicted, each line indicates if the bounding box is correct or not for each IoU threshold
-        if (use_km_metrics):
-            compatible_gt_classes = class_compatibility_test( target_cls.astype(int), c)
-            n_l = compatible_gt_classes.sum()
+        # if (use_km_metrics):
+        #     compatible_gt_classes = class_compatibility_test( target_cls.astype(int), c)
+        #     n_l = compatible_gt_classes.sum()
             # Indexes of the predictions whose label is c and bounding box is correct
             # i = (tp == c)
             # TODO (CP/IRIT): Should we use the class compatibility relation to include the similar classes ?
-            i = class_compatibility_test( pred_cls.astype(int), c)
+        #     i = class_compatibility_test( pred_cls.astype(int), c)
             
-        else:
-            # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
-            n_l = nt[ci]  # number of labels in GT
-            # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
-            i = pred_cls == c  
-            # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
-            tp_i = tp[i,:].astype(int)
-            # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
-            c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
-    
-            # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
-            n_p = i.sum()  # number of predictions
+        # else:
+        # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
+        n_l = nt[ci]  # number of labels in GT
+        # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
+        i = pred_cls == c  
+        # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
+        tp_i = tp[i,:].astype(int)
+        # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
+        c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
+
+        # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
+        n_p = i.sum()  # number of predictions
 
         # n_p == 0 the model has made no predictions for class c ; n_l no ground_truth for objects of this class 
         if n_p == 0 or n_l == 0:
@@ -1059,14 +1061,17 @@ def ap_per_class(
         #else:
         # TODO (CP/IRIT): when using the compatibility matrix, tpc is usually higher than n_l, should we take all the compatible labels ?
         recall = tpc / (n_l + eps)  # recall curve
+        # recalls[ci] = recall
         recall_0 = recall[:, 0] # extract fist IoU threshold
         r_curve[ci] = np.interp(-x, -conf[i], recall_0, left=0)  # negative x, xp because xp decreases
 
         # Precision
         precision = tpc / (tpc + fpc)  # precision curve
+        # precisions[ci] = precision
         precision_0 = precision[:, 0] # extract fist IoU threshold
         p_curve[ci] = np.interp(-x, -conf[i], precision_0, left=1)  # p at pr_score
 
+        print(c,np.mean(precision),np.mean(recall))
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
             ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
