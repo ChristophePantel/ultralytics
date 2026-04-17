@@ -184,7 +184,12 @@ class TaskAlignedAssigner(nn.Module):
         # target_labels: Class number for each anchor point in each image
         # target_bboxes: Bounding box for each anchor point in each image
         # target_scores: Score for each class for each anchor point in each image # bs, num_total_anchors, num_classes
-        target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
+        if self.use_km_scores:
+            target_labels, target_bboxes, target_scores, target_km_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
+        else:
+            target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_scores, gt_bboxes, target_gt_idx, fg_mask)
+            # Keep the expected scores for variants between 0 and 1
+            target_km_scores = target_scores
 
         # Normalize : TODO (CP/IRIT): There is probably an issue there...
         # Only keep the align metrics for the selected points (single_pos_mask is 0 for the unselected ones)
@@ -197,8 +202,6 @@ class TaskAlignedAssigner(nn.Module):
         # Add eps if the value is to small to avoid overshoot / NaN
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         
-        # Keep the expected scores for variants between 0 and 1
-        target_km_scores = target_scores
         # Combine the class score with the align metrics
         # DONE (CP/IRIT): score combines class score and bounding box score.
         target_scores = target_scores * norm_align_metric
@@ -443,54 +446,61 @@ class TaskAlignedAssigner(nn.Module):
         # TODO (CP/IRIT): is the clamp_ needed ?
         target_labels.clamp_(0) # Set the minimum to 0
         # save2debug( 'target_gt_idx.txt', target_gt_idx, True)
-
-        if self.use_km_scores:
-            # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
-            gt_score_size = gt_scores.shape[-1]
-            gt_scores_view = gt_scores.view(-1, gt_score_size)
-            target_scores_base  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
-        else:
-            # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
-            # 10x faster than F.one_hot()
-            # Create an int64 zero tensor of dimension batch size * anchor point number * class number
-            # TODO (CP/IRIT): Are the ground truth labels used ?
-            # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
-            batch_number = target_labels.shape[0]
-            anchor_point_number = target_labels.shape[1] # anchor points number
-            target_scores_base = torch.zeros(
-                (batch_number, anchor_point_number, self.num_classes),
-                dtype=torch.int64,
-                device=target_labels.device,
-                )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
-            # Adds a dimension at the end of target labels
-            target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
-            # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
-            target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
-            # neq_target_scores_base = torch.where((target_scores_base_km != target_scores_base))
-            # neq_image_indexes_base, neq_anchor_point_indexes_base, neq_class_indexes_base = neq_target_scores_base
-            # eq_target_scores_base = torch.where((target_scores_base_km == target_scores_base))
-            # eq_image_indexes_base, eq_anchor_point_indexes_base, eq_class_indexes_base = eq_target_scores_base
-            # neq_target_scores = torch.where((target_scores_km != target_scores))
-            # neq_image_indexes, neq_anchor_point_indexes, neq_class_indexes = neq_target_scores
-            # eq_target_scores = torch.where((target_scores_km == target_scores))
-            # eq_image_indexes, eq_anchor_point_indexes, eq_class_indexes = eq_target_scores
-            # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
-            # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
-            # save2debug( 'target_labels.txt', target_labels)
-            # save2debug( 'target_bboxes.txt', target_bboxes)
-            # save2debug( 'target_scores_base.txt', target_scores_base, True)
-            # save2debug( 'target_scores.txt', target_scores, True)
-            # save2debug('target_scores_base.txt', target_scores_base, True)
-            # save2debug( 'target_scores_km.txt', target_scores_km, True)
-
+        
         # Duplicate fg_mask class number times along the 3rd dimension
         # image_number, anchor_point_number, class_number
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
 
+        # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
+        # 10x faster than F.one_hot()
+        # Create an int64 zero tensor of dimension batch size * anchor point number * class number
+        # TODO (CP/IRIT): Are the ground truth labels used ?
+        # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
+        batch_number = target_labels.shape[0]
+        anchor_point_number = target_labels.shape[1] # anchor points number
+        target_scores_base = torch.zeros(
+            (batch_number, anchor_point_number, self.num_classes),
+            dtype=torch.int64,
+            device=target_labels.device,
+            )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
+        # Adds a dimension at the end of target labels
+        target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
+        # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
+        target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
+        # neq_target_scores_base = torch.where((target_scores_base_km != target_scores_base))
+        # neq_image_indexes_base, neq_anchor_point_indexes_base, neq_class_indexes_base = neq_target_scores_base
+        # eq_target_scores_base = torch.where((target_scores_base_km == target_scores_base))
+        # eq_image_indexes_base, eq_anchor_point_indexes_base, eq_class_indexes_base = eq_target_scores_base
+        # neq_target_scores = torch.where((target_scores_km != target_scores))
+        # neq_image_indexes, neq_anchor_point_indexes, neq_class_indexes = neq_target_scores
+        # eq_target_scores = torch.where((target_scores_km == target_scores))
+        # eq_image_indexes, eq_anchor_point_indexes, eq_class_indexes = eq_target_scores
+        # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
+        # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
+        # save2debug( 'target_labels.txt', target_labels)
+        # save2debug( 'target_bboxes.txt', target_bboxes)
+        # save2debug( 'target_scores_base.txt', target_scores_base, True)
+        # save2debug( 'target_scores.txt', target_scores, True)
+        # save2debug('target_scores_base.txt', target_scores_base, True)
+        # save2debug( 'target_scores_km.txt', target_scores_km, True)
+
         # Set to zero when fg_scores_mask is zero
         target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
+        
+        if self.use_km_scores:
+            # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
+            gt_score_size = gt_scores.shape[-1]
+            gt_scores_view = gt_scores.view(-1, gt_score_size)
+            target_km_scores_base  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
+            # Set to zero when fg_scores_mask is zero
+            target_km_scores = torch.where(fg_scores_mask > 0, target_km_scores_base, 0)
+        
+        if self.use_km_scores:
+            result = target_labels, target_bboxes, target_scores, target_km_scores
+        else:
+            result = target_labels, target_bboxes, target_scores
 
-        return target_labels, target_bboxes, target_scores
+        return result
 
     def select_candidates_in_gts(self, xy_centers, gt_bboxes, mask_gt, eps=1e-9):
         """Select positive anchor centers within ground truth bounding boxes.
