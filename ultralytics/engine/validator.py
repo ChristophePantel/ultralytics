@@ -234,6 +234,7 @@ class BaseValidator:
 
             # Loss
             with dt[2]:
+                # TODO (CP/IRIT): Also compute validation loss
                 if self.training:
                     self.loss += model.loss(batch, preds)[1]
 
@@ -309,13 +310,13 @@ class BaseValidator:
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
         # Has the ground truth class been correctly predicted ?
         # TODO (CP/IRIT): Must integrate the class compatibility threshold
-        if self.use_km_metrics:
-            compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
-            distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
-            (values,indices) = torch.min(distances,0)
-            correct_class = distances <= compatibility_threshold
-        else:
-            correct_class = true_classes[:, None] == pred_classes
+        # if self.use_km_metrics:
+        #     compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
+        #     distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
+        #     (values,indices) = torch.min(distances,0)
+        #     correct_class = distances <= compatibility_threshold
+        # else:
+        correct_class = true_classes[:, None] == pred_classes
         sz_correct_class = torch.numel(correct_class)
         nz_correct_class = torch.count_nonzero(correct_class)
         # Only keeps the IoU of correct classes (set the incorrect ones to 0)
@@ -334,11 +335,11 @@ class BaseValidator:
                     labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
-                        if self.use_km_metrics:
-                            # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
-                            correct[detections_idx[valid], i] = labels_idx[valid]
-                        else:
-                            correct[detections_idx[valid], i] = True
+                        # if self.use_km_metrics:
+                        #     # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
+                        #     correct[detections_idx[valid], i] = labels_idx[valid]
+                        # else:
+                        correct[detections_idx[valid], i] = True
             else:
                 matches = np.nonzero(iou_over_threshold)  # IoU > threshold and classes match
                 matches = np.array(matches).T
@@ -348,8 +349,8 @@ class BaseValidator:
                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
                     correct[matches[:, 1].astype(int), i] = True
-                    if self.use_km_metrics:
-                        pred_classes[matches[:,1]] = true_classes[matches[:,0]]
+                    # if self.use_km_metrics:
+                    #     pred_classes[matches[:,1]] = true_classes[matches[:,0]]
         result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
         return result
 

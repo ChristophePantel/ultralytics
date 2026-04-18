@@ -317,8 +317,12 @@ class BaseTrainer:
             if isinstance(self.args.freeze, int)
             else []
         )
+        
+        # DONE (CP/IRIT): Freeze additional specific parameters
+        freeze_parameters = self.args.freeze_parameters if isinstance(self.args.freeze_parameters, list) else []
+        
         always_freeze_names = [".dfl"]  # always freeze these layers
-        freeze_layer_names = [f"model.{x}." for x in freeze_list] + always_freeze_names
+        freeze_layer_names = [f"model.{x}." for x in freeze_list] + freeze_parameters + always_freeze_names
         self.freeze_layer_names = freeze_layer_names
         for k, v in self.model.named_parameters():
             # v.register_hook(lambda x: torch.nan_to_num(x))  # NaN to 0 (commented for erratic training results)

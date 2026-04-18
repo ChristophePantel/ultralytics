@@ -6,6 +6,8 @@ import time
 import torch
 import torch.nn as nn
 
+import numpy as np
+
 from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import batch_probiou, box_iou
 from ultralytics.utils.ops import xywh2xyxy
@@ -29,6 +31,9 @@ def non_max_suppression(
     end2end: bool = False,
     return_idxs: bool = False,
     use_km_scores : bool = False,
+    use_km_metrics : bool = False,
+    km_metrics_threshold : int = 0,
+    class_compatibility_matrix : np.ndarray = None,
     use_variant_selection : bool = False,
     class_variants = None,
     variant_to_class = None,
@@ -172,6 +177,9 @@ def non_max_suppression(
                 selected_variants_scores = selected_variants_scores.unsqueeze(1)
                 # selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
                 selected_classes_from_variants = variant_to_class[selected_variants]
+                # if use_km_metrics:
+                #     selected_classes_from_variants = best
+                
                 # cpu = torch.device('cpu')
                 # selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
                 # variant_to_class_decoder = torch.tensor([variant_to_class[i] for i in range(len(variant_to_class))],device=selected_variant.device)

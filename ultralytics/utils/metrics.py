@@ -1030,7 +1030,7 @@ def ap_per_class(
         # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
         n_l = nt[ci]  # number of labels in GT
         # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
-        i = pred_cls == c  
+        i = (pred_cls == c)  
         # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
         tp_i = tp[i,:].astype(int)
         # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
@@ -1071,7 +1071,7 @@ def ap_per_class(
         precision_0 = precision[:, 0] # extract fist IoU threshold
         p_curve[ci] = np.interp(-x, -conf[i], precision_0, left=1)  # p at pr_score
 
-        print(c,np.mean(precision),np.mean(recall))
+        # print(c,np.mean(precision),np.mean(recall))
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
             ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])

@@ -61,10 +61,10 @@ class DetectionValidator(BaseValidator):
         self.args.task = "detect"
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
-        if self.use_km_metrics:
-            self.metrics = KnowledgeModelDetMetrics(threshold=self.km_metrics_threshold)
-        else:
-            self.metrics = DetMetrics()
+        # if self.use_km_metrics:
+        #     self.metrics = KnowledgeModelDetMetrics(threshold=self.km_metrics_threshold)
+        # else:
+        self.metrics = DetMetrics()
         self.bce_calculator = nn.BCELoss(reduction="none")
         self.count = 0
 
@@ -134,12 +134,13 @@ class DetectionValidator(BaseValidator):
         self.seen = 0
         self.jdict = []
         self.metrics.names = model.names
-        if (self.use_km_metrics):
-            self.class_compatibility_matrix = km.get_class_compatibility_matrix( self.nc, self.refinement, self.composition)
-            self.metrics.set_class_compatibility_matrix(self.class_compatibility_matrix)
-            self.confusion_matrix = KnowledgeModelConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize, class_compatibility_matrix=self.class_compatibility_matrix, threshold=0) # amount=self.km_metrics_threshold)
-        else:
-            self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
+        # if (self.use_km_metrics):
+        #     self.class_compatibility_matrix = km.get_class_compatibility_matrix( self.nc, self.refinement, self.composition)
+        #     self.compatibility_matrix_tensor = torch.from_numpy(self.class_compatibility_matrix)
+        #     self.metrics.set_class_compatibility_matrix(self.class_compatibility_matrix)
+        #     self.confusion_matrix = KnowledgeModelConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize, class_compatibility_matrix=self.class_compatibility_matrix, threshold=0) # amount=self.km_metrics_threshold)
+        # else:
+        self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
         # TODO (CP/IRIT): Add a confusion matrix for variants.
         # TODO (CP/IRIT): Add variant_names in model
         # self.variant_confusion_matrix = ConfusionMatrix(names=model.variant_names, save_matches=self.args.plots and self.args.visualize)
@@ -367,10 +368,10 @@ class DetectionValidator(BaseValidator):
         pred_scores = preds["scores"]
         bce = self.scores_bce( batch_scores, pred_scores)
         # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
-        if self.use_km_metrics:
-            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
-        else:
-            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
+        # if self.use_km_metrics:
+        #     result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
+        # else:
+        result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
         return result
 
     def scores_bce(self, batch_scores, prediction_scores):
