@@ -350,8 +350,8 @@ class KnowledgeBasedLoss(nn.Module):
         self.power = power
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
-        self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
-        self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
+        self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
+        self.km_metrics_threshold = getattr(model.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
         self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
@@ -385,78 +385,91 @@ class KnowledgeBasedLoss(nn.Module):
         predicate_s = torch.zeros(source_number)
         for idx_s, s in enumerate(sources):
             targets_from_s = list(targets_from_source[s])
-            # p_c(o)
-            source_scores = pred_scores[:, :, s:s+1]
+            # p_c(o): indexed by o for a given s
+            source_scores = pred_scores[:, :, s]
             # p_d(o)
             indexes = torch.tensor(targets_from_s,device=pred_scores.device)
             target_scores = pred_scores.index_select( 2, indexes)
             # max(p_d(o))
-            target_scores_max = target_scores.max()
-            # p_s(o) - p_s(o) * max(p_t(o))
+            target_scores_max = torch.amax(target_scores,2)
+            # p_s(o) - p_s(o) * max(p_t(o)): indexed by s and o
             predicate_s_o = source_scores - source_scores * target_scores_max
-            # p-mean on O
-            predicate_s[idx_s] = torch.pow(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
-        # mean for s in sources
-        return torch.mean(predicate_s)
+            # p-mean for o in O
+            predicate_s[idx_s] = torch.pow(predicate_s_o,power).mean(dim=(0,1))
+        # p-mean for s in sources
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
     
     # All of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
-    # sources : indexes for the sources
-    # targets_from_source : list of targets for a given source
+    # forall s in S, forall t in T(s), forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
+    # sources : indexes for the sources (S)
+    # targets_from_source : list of targets for a given source (S -> T)
     def conjunction_loss(self, pred_scores, targets_from_source, power=3.0):
+        # O = batch_size x anchor_point_size
         batch_size, anchor_point_size, class_number = pred_scores.shape
         sources = list(targets_from_source )
+        # S
         source_number = len(sources)
+        # indexed by s in S
         predicate_s = torch.zeros(source_number)
         for idx_s, s in enumerate(sources):
-            # p_s(o)
+            # p_s(o): for a given s in S indexed by o in O
             source_scores = pred_scores[:,:,s:s+1]
+            # T(s) for a given s in S
             targets_from_s = list(targets_from_source[s])
             indexes = torch.tensor(targets_from_s,device=pred_scores.device)
             s_targets_number = len(targets_from_s)
-            # p_t(o)
+            # p_t(o): indexed by t in T(s) and o in O
             target_scores_t = pred_scores.index_select( 2, indexes)
-            # p_s(o) - p_s(o) * p_t(o)
+            # p_s(o) - p_s(o) * p_t(o): for a given s indexed by t and o
             predicate_s_t_o = source_scores - source_scores * target_scores_t
-            # moyenne sur O
-            predicate_s_t = torch.pow(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
-            # moyenne sur A
+            # p-mean for o in O: indexed by t in T(s)
+            predicate_s_t = torch.pow(predicate_s_t_o,power).mean(dim=(0,1))
+            # p-mean for t in T(s)
             predicate_s[idx_s] = torch.mean(predicate_s_t)
-        # moyenne sur C \ R
-        return torch.mean(predicate_s)    
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
     
-    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> ~ p_e(o)
     # sources : class indexes for the domain
     # targets_from_source : class indexes for the co-domain
     def exclusion_loss(self, pred_scores, targets_from_source, power=3.0):
         batch_size, anchor_point_size, class_number = pred_scores.shape
         sources = list(targets_from_source )
         source_number = len(sources)
+        # indexed by s in S
         predicate_s = torch.zeros(source_number)
         for idx_s, s in enumerate(sources):
-            # p_s(o)
+            # p_s(o) for a given s in S
             source_scores = pred_scores[:,:,s:s+1]
+            # T(s) for a given s in S
             targets_from_s = list(targets_from_source[s])
             s_targets_number = len(targets_from_s)
+            # indexed by t in T(s) for a given s in S
             predicate_s_t = torch.zeros(s_targets_number)
             if s_targets_number > 1:
                 for idx_t, t in enumerate(targets_from_s):
+                    # T(s) \ { t } for a given s in S and t in T(s)
                     targets_except_t = targets_from_s.copy()
                     targets_except_t.remove(t)
-                    # p_t(o)
+                    # p_t(o) for a given t
                     target_scores_t = pred_scores[:,:, t:t+1]
-                    # p_e(o)
+                    # p_e(o) for a given t in T(s) and s in S
                     indexes = torch.tensor(targets_except_t,device=pred_scores.device)
                     target_scores_e = pred_scores.index_select( 2, indexes)
-                    # p_t(o) * p_e(o)
+                    # p_t(o) * p_e(o) 
                     predicate_s_t_e_o = target_scores_t * target_scores_e
-                    # moyenne sur O
-                    predicate_s_t_e = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
-                    # moyenne sur e in T(s) \ { t }
+                    # p-mean for o in O
+                    predicate_s_t_e = torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1))
+                    # p-mean on e in T(s) \ { t }
                     predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
-            # moyenne sur t in T(s)
+            # p-mean for t in T(s)
             predicate_s[idx_s] = torch.mean(predicate_s_t)
-        # moyenne sur s in S
-        return torch.mean(predicate_s)
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""

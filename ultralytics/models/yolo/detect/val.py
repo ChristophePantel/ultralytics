@@ -161,6 +161,7 @@ class DetectionValidator(BaseValidator):
             (list[dict[str, torch.Tensor]]): Processed predictions after NMS, where each dict contains 'bboxes', 'conf',
                 'cls', and 'extra' tensors.
         """
+        # TODO (CP/IRIT): Add Message Passing Inference
         outputs = nms.non_max_suppression(
             preds,
             self.args.conf,
