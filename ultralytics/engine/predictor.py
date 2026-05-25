@@ -32,6 +32,7 @@ Usage - formats:
                               yolo26n_rknn_model         # Rockchip RKNN
                               yolo26n_executorch_model   # PyTorch Executorch
                               yolo26n_axelera_model      # Axelera AI
+                              yolo26n_deepx_model        # DeepX
 """
 
 from __future__ import annotations
@@ -128,6 +129,7 @@ class BasePredictor:
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
         self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(self.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)

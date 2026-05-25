@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ultralytics.utils.metrics import OKS_SIGMA, RLE_WEIGHT
+from ultralytics.utils.metrics import CITYSCAPES_WEIGHT, OKS_SIGMA, RLE_WEIGHT
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
@@ -350,9 +351,10 @@ class KnowledgeBasedLoss(nn.Module):
         self.power = power
         self.use_scores = getattr( model.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
-        self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
-        self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
+        self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
+        self.km_metrics_threshold = getattr(model.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(model.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
@@ -379,84 +381,109 @@ class KnowledgeBasedLoss(nn.Module):
     # origin_indexes : class indexes for the domain
     # targets_from_source : class indexes for the co-domain
     def disjunction_loss(self, pred_scores, targets_from_source, power=3.0):
+        # O = batch_size x anchor_point_size
         batch_size, anchor_point_size, class_number = pred_scores.shape
+        # S
         sources = list(targets_from_source )
         source_number = len(sources)
+        # indexed by s in S
         predicate_s = torch.zeros(source_number)
+        # for each s in S
         for idx_s, s in enumerate(sources):
+            # t in T(s)
             targets_from_s = list(targets_from_source[s])
-            # p_c(o)
-            source_scores = pred_scores[:, :, s:s+1]
-            # p_d(o)
+            # p_s(o): indexed by o for a given s
+            source_scores = pred_scores[:, :, s]
+            # T(s)
             indexes = torch.tensor(targets_from_s,device=pred_scores.device)
+            # p_t(o): indexed by o in O and by t in T(s) for a given s in S
             target_scores = pred_scores.index_select( 2, indexes)
-            # max(p_d(o))
-            target_scores_max = target_scores.max()
-            # p_s(o) - p_s(o) * max(p_t(o))
+            # max(p_t(o)) for t in T(s) 
+            target_scores_max = torch.amax(target_scores,2)
+            # p_s(o) - p_s(o) * max(p_t(o)): indexed by s and o
             predicate_s_o = source_scores - source_scores * target_scores_max
-            # p-mean on O
-            predicate_s[idx_s] = torch.pow(torch.pow(predicate_s_o,power).mean(dim=(0,1)),1/power)
-        # mean for s in sources
-        return torch.mean(predicate_s)
+            # p-mean for o in O for a given s in S, o (dim 1) is defined for each image in a batch (dim 0)
+            predicate_s[idx_s] = torch.pow(predicate_s_o,power).mean(dim=(0,1))
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
     
     # All of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
-    # sources : indexes for the sources
-    # targets_from_source : list of targets for a given source
+    # forall s in S, forall t in T(s), forall o in O, p_s(o) -> /\_{t in T(s)} p_t(o)
+    # sources : indexes for the sources (S)
+    # targets_from_source : list of targets for a given source (S -> T)
     def conjunction_loss(self, pred_scores, targets_from_source, power=3.0):
+        # O = batch_size x anchor_point_size
         batch_size, anchor_point_size, class_number = pred_scores.shape
+        # S
         sources = list(targets_from_source )
         source_number = len(sources)
+        # indexed by s in S
         predicate_s = torch.zeros(source_number)
+        # for each s in S
         for idx_s, s in enumerate(sources):
-            # p_s(o)
+            # p_s(o): for a given s in S indexed by o in O
             source_scores = pred_scores[:,:,s:s+1]
+            # T(s) for a given s in S
             targets_from_s = list(targets_from_source[s])
             indexes = torch.tensor(targets_from_s,device=pred_scores.device)
             s_targets_number = len(targets_from_s)
-            # p_t(o)
+            # p_t(o): indexed by t in T(s) and o in O
             target_scores_t = pred_scores.index_select( 2, indexes)
-            # p_s(o) - p_s(o) * p_t(o)
+            # p_s(o) - p_s(o) * p_t(o): for a given s indexed by t and o
             predicate_s_t_o = source_scores - source_scores * target_scores_t
-            # moyenne sur O
-            predicate_s_t = torch.pow(torch.pow(predicate_s_t_o,power).mean(dim=(0,1)),1/power)
-            # moyenne sur A
+            # p-mean for o in O: indexed by t in T(s) for a given s in S, o (dim 1) is defined for each image in a batch (dim 0)
+            predicate_s_t = torch.pow(predicate_s_t_o,power).mean(dim=(0,1))
+            # p-mean for t in T(s)
             predicate_s[idx_s] = torch.mean(predicate_s_t)
-        # moyenne sur C \ R
-        return torch.mean(predicate_s)    
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
     
-    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # Only one of the targets for a given valid source must be valid : forall s in S, forall t in T(s), forall o in O, p_t(o) -> /\_{e in T(s) \ { t }} ~ p_e(o)
+    # forall s in S, forall t in T(s), forall e in T(s) \ { t }, forall o in O, p_t(o) -> ~ p_e(o)
     # sources : class indexes for the domain
     # targets_from_source : class indexes for the co-domain
     def exclusion_loss(self, pred_scores, targets_from_source, power=3.0):
+        # O = batch_size x anchor_point_size
         batch_size, anchor_point_size, class_number = pred_scores.shape
+        # S
         sources = list(targets_from_source )
         source_number = len(sources)
+        # indexed by s in S
         predicate_s = torch.zeros(source_number)
+        # for each s in S
         for idx_s, s in enumerate(sources):
-            # p_s(o)
+            # p_s(o) for a given s in S
             source_scores = pred_scores[:,:,s:s+1]
+            # T(s) for a given s in S
             targets_from_s = list(targets_from_source[s])
             s_targets_number = len(targets_from_s)
+            # indexed by t in T(s) for a given s in S
             predicate_s_t = torch.zeros(s_targets_number)
             if s_targets_number > 1:
+                # for each t in T(s) for a given s in S
                 for idx_t, t in enumerate(targets_from_s):
+                    # T(s) \ { t } for a given t in T(s) and s in S
                     targets_except_t = targets_from_s.copy()
                     targets_except_t.remove(t)
-                    # p_t(o)
+                    # p_t(o) for a given t in T(s) and s in S
                     target_scores_t = pred_scores[:,:, t:t+1]
-                    # p_e(o)
                     indexes = torch.tensor(targets_except_t,device=pred_scores.device)
+                    # p_e(o) for a given e in T(s) \ { t } and t in T(s) and s in S
                     target_scores_e = pred_scores.index_select( 2, indexes)
-                    # p_t(o) * p_e(o)
+                    # p_t(o) * p_e(o) indexed by o in O and e in T(s) \ { t } and t in T(s) and s in S
+                    # TODO (CP/IRIT): Check the appropriate dimension and size
                     predicate_s_t_e_o = target_scores_t * target_scores_e
-                    # moyenne sur O
-                    predicate_s_t_e = torch.pow(torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1)),1/power)
-                    # moyenne sur e in T(s) \ { t }
+                    # p-mean for o in O: indexed by e in T(s) \ { t } and t in T(s) for a given s in S, o (dim 1) is defined for each image in a batch (dim 0)
+                    predicate_s_t_e = torch.pow(predicate_s_t_e_o,power).mean(dim=(0,1))
+                    # p-mean on e in T(s) \ { t }
                     predicate_s_t[idx_t] = torch.mean(predicate_s_t_e)
-            # moyenne sur t in T(s)
+            # p-mean for t in T(s)
             predicate_s[idx_s] = torch.mean(predicate_s_t)
-        # moyenne sur s in S
-        return torch.mean(predicate_s)
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
 
     def forward(self, pred_scores: torch.Tensor, target_scores: torch.Tensor) -> torch.Tensor:
         """Compute knowledge based loss for class predication score."""
@@ -500,27 +527,44 @@ class KnowledgeBasedLoss(nn.Module):
             CE_loss = 0.0
             D_loss = 0.0
             DE_loss = 0.0
-        return (self.specialization_weight * S_loss
+        result = (self.specialization_weight * S_loss
             + self.composition_weight * C_loss 
             + self.specialization_exclusion_weight * SE_loss 
             + self.composition_exclusion_weight * CE_loss 
             + self.generalization_weight * G_loss 
             + self.decomposition_weight * D_loss)
+        return result
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
 
-    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
+    def __init__(
+        self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None
+    ):  # model must be de-paralleled
         """Initialize v8DetectionLoss with model parameters and task-aligned assignment settings."""
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
+        
+        self.use_scores = getattr( h, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( h, 'use_km', False)
+        self.use_km_metrics = self.use_km and getattr( h, 'use_km_metrics', False)
+        self.km_metrics_threshold = getattr(h, 'km_metrics_threshold', 0)
+        self.use_km_scores = self.use_km and getattr( h, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(h, 'use_km_inference', False)
+        self.use_variant_selection = self.use_km_scores and getattr(h, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr( h, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(h, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(h, 'use_composition', False)
 
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         self.hyp = h # hyperparameters
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
-        self.no = m.nc + m.reg_max * 4 # number of predicted features
+        if self.use_km_scores:
+            self.no = 2 * m.nc + m.reg_max * 4 # number of predicted features
+        else :
+            self.no = m.nc + m.reg_max * 4 # number of predicted features
         self.reg_max = m.reg_max
         self.device = device
 
@@ -531,19 +575,10 @@ class v8DetectionLoss:
         if self.class_weights is not None:
             self.class_weights = self.class_weights.to(device).view(1, 1, -1)
 
-        self.use_scores = getattr( model.args, 'use_scores', False)
-        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
-        self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
-        self.km_metrics_threshold = getattr(model.args, 'km_metrics_threshold', 0)
-        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
-        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
-        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
-        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
-        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
         if self.use_km_losses:
             self.km_loss = KnowledgeBasedLoss(model)
         else:
-            km_loss = None
+            self.km_loss = None
 
         self.assigner = TaskAlignedAssigner(
             topk=tal_topk,
@@ -736,8 +771,9 @@ class v8DetectionLoss:
             loss[km_index] *= self.hyp.km  # km gain
         loss[dfl_index] *= self.hyp.dfl  # dfl gain
         
-        has_nan = math.isnan(loss[box_index]) or math.isnan(loss[cls_index]) or math.isnan(loss[dfl_index])
-        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km_losses else has_nan
+        detached_loss = loss.detach()
+        has_nan = math.isnan(detached_loss[box_index]) or math.isnan(detached_loss[cls_index]) or math.isnan(detached_loss[dfl_index])
+        has_nan = has_nan or math.isnan(detached_loss[km_index]) if self.use_km_losses else has_nan
         
         if has_nan:
             print("NaN occured in loss computation.")
@@ -745,7 +781,7 @@ class v8DetectionLoss:
         return (
             (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
             loss,
-            loss.detach(),
+            detached_loss,
         )  # loss(box, cls, dfl)
 
     def parse_output(
@@ -776,7 +812,9 @@ class v8DetectionLoss:
 class v8SegmentationLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 segmentation."""
 
-    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
+    def __init__(
+        self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None
+    ):  # model must be de-paralleled
         """Initialize the v8SegmentationLoss class with model parameters and mask overlap setting."""
         super().__init__(model, tal_topk, tal_topk2)
         self.overlap = model.args.overlap_mask
@@ -785,12 +823,11 @@ class v8SegmentationLoss(v8DetectionLoss):
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the combined loss for detection and segmentation."""
         pred_masks, proto = preds["mask_coefficient"].permute(0, 2, 1).contiguous(), preds["proto"]
-        loss = torch.zeros(5, device=self.device)  # box, seg, cls, dfl, semseg
+        loss = torch.zeros(5, device=self.device)  # box, seg, cls, dfl, semantic
         if isinstance(proto, tuple) and len(proto) == 2:
-            proto, pred_semseg = proto
+            proto, pred_semantic = proto
         else:
-            pred_semseg = None
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
+            pred_semantic = None
         (fg_mask, target_gt_idx, target_bboxes, _, _), det_loss, _ = self.get_assigned_targets_and_loss(preds, batch)
         # NOTE: re-assign index for consistency for now. Need to be removed in the future.
         loss[0], loss[2], loss[3] = det_loss[0], det_loss[1], det_loss[2]
@@ -816,7 +853,7 @@ class v8SegmentationLoss(v8DetectionLoss):
                 pred_masks,
                 imgsz,
             )
-            if pred_semseg is not None:
+            if pred_semantic is not None:
                 sem_masks = batch["sem_masks"].to(self.device)  # NxHxW
                 sem_masks = F.one_hot(sem_masks.long(), num_classes=self.nc).permute(0, 3, 1, 2).float()  # NxCxHxW
 
@@ -831,17 +868,17 @@ class v8SegmentationLoss(v8DetectionLoss):
                             continue
                         sem_masks[i, :, instance_mask_i.sum(dim=0) == 0] = 0
 
-                loss[4] = self.bcedice_loss(pred_semseg, sem_masks)
+                loss[4] = self.bcedice_loss(pred_semantic, sem_masks)
                 loss[4] *= self.hyp.box  # seg gain
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
             loss[1] += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
-            if pred_semseg is not None:
-                loss[4] += (pred_semseg * 0).sum()
+            if pred_semantic is not None:
+                loss[4] += (pred_semantic * 0).sum()
 
         loss[1] *= self.hyp.box  # seg gain
-        return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl, semseg)
+        return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl, semantic)
 
     @staticmethod
     def single_mask_loss(
@@ -934,7 +971,7 @@ class v8SegmentationLoss(v8DetectionLoss):
 class v8PoseLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 pose estimation."""
 
-    def __init__(self, model, tal_topk: int = 10, tal_topk2: int = 10):  # model must be de-paralleled
+    def __init__(self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int = 10):  # model must be de-paralleled
         """Initialize v8PoseLoss with model parameters and keypoint-specific loss functions."""
         super().__init__(model, tal_topk, tal_topk2)
         self.kpt_shape = model.model[-1].kpt_shape
@@ -1093,7 +1130,9 @@ class v8PoseLoss(v8DetectionLoss):
 class PoseLoss26(v8PoseLoss):
     """Criterion class for computing training losses for YOLOv8 pose estimation with RLE loss support."""
 
-    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):  # model must be de-paralleled
+    def __init__(
+        self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None
+    ):  # model must be de-paralleled
         """Initialize PoseLoss26 with model parameters and keypoint-specific loss functions including RLE loss."""
         super().__init__(model, tal_topk, tal_topk2)
         is_pose = self.kpt_shape == [17, 3]
@@ -1176,6 +1215,9 @@ class PoseLoss26(v8PoseLoss):
         Returns:
             (torch.Tensor): The RLE loss.
         """
+        if not kpt_mask.any():
+            return pred_kpt[..., :0].sum()
+
         pred_kpt_visible = pred_kpt[kpt_mask]
         gt_kpt_visible = gt_kpt[kpt_mask]
         pred_coords = pred_kpt_visible[:, 0:2]
@@ -1187,11 +1229,13 @@ class PoseLoss26(v8PoseLoss):
 
         pred_sigma = pred_sigma.sigmoid()
         error = (pred_coords - gt_coords) / (pred_sigma + 1e-9)
+        if not error.numel():
+            return pred_kpt[..., :0].sum()
 
         # Filter out NaN and Inf values to prevent MultivariateNormal validation errors
         valid_mask = ~(torch.isnan(error) | torch.isinf(error)).any(dim=-1)
         if not valid_mask.any():
-            return torch.tensor(0.0, device=pred_kpt.device)
+            return pred_kpt[..., :0].sum()
 
         error = error[valid_mask]
         error = error.clamp(-100, 100)  # Prevent numerical instability
@@ -1273,7 +1317,7 @@ class v8ClassificationLoss:
 class v8OBBLoss(v8DetectionLoss):
     """Calculates losses for object detection, classification, and box distribution in rotated YOLO models."""
 
-    def __init__(self, model, tal_topk=10, tal_topk2: int | None = None):
+    def __init__(self, model: torch.nn.Module, tal_topk=10, tal_topk2: int | None = None):
         """Initialize v8OBBLoss with model, assigner, and rotated bbox loss; model must be de-paralleled."""
         super().__init__(model, tal_topk=tal_topk)
         self.assigner = RotatedTaskAlignedAssigner(
@@ -1439,7 +1483,7 @@ class v8OBBLoss(v8DetectionLoss):
 class E2EDetectLoss:
     """Criterion class for computing training losses for end-to-end detection."""
 
-    def __init__(self, model):
+    def __init__(self, model: torch.nn.Module):
         """Initialize E2EDetectLoss with one-to-many and one-to-one detection losses using the provided model."""
         self.one2many = v8DetectionLoss(model, tal_topk=10)
         self.one2one = v8DetectionLoss(model, tal_topk=1)
@@ -1457,7 +1501,7 @@ class E2EDetectLoss:
 class E2ELoss:
     """Criterion class for computing training losses for end-to-end detection."""
 
-    def __init__(self, model, loss_fn=v8DetectionLoss):
+    def __init__(self, model: torch.nn.Module, loss_fn=v8DetectionLoss):
         """Initialize E2ELoss with one-to-many and one-to-one detection losses using the provided model."""
         self.one2many = loss_fn(model, tal_topk=10)
         self.one2one = loss_fn(model, tal_topk=7, tal_topk2=1)
@@ -1492,7 +1536,7 @@ class E2ELoss:
 class TVPDetectLoss:
     """Criterion class for computing training losses for text-visual prompt detection."""
 
-    def __init__(self, model, tal_topk=10, tal_topk2: int | None = None):
+    def __init__(self, model: torch.nn.Module, tal_topk=10, tal_topk2: int | None = None):
         """Initialize TVPDetectLoss with task-prompt and visual-prompt criteria using the provided model."""
         self.vp_criterion = v8DetectionLoss(model, tal_topk, tal_topk2)
         # NOTE: store following info as it's changeable in __call__
@@ -1534,7 +1578,7 @@ class TVPDetectLoss:
 class TVPSegmentLoss(TVPDetectLoss):
     """Criterion class for computing training losses for text-visual prompt segmentation."""
 
-    def __init__(self, model, tal_topk=10):
+    def __init__(self, model: torch.nn.Module, tal_topk=10):
         """Initialize TVPSegmentLoss with task-prompt and visual-prompt criteria using the provided model."""
         super().__init__(model)
         self.vp_criterion = v8SegmentationLoss(model, tal_topk)
@@ -1554,3 +1598,120 @@ class TVPSegmentLoss(TVPDetectLoss):
         vp_loss = self.vp_criterion(preds, batch)
         cls_loss = vp_loss[0][2]
         return cls_loss, vp_loss[1]
+
+
+class SemanticSegmentationLoss(nn.Module):
+    """Loss function for semantic segmentation using cross-entropy and Dice terms.
+
+    Attributes:
+        nc (int): Number of semantic classes.
+        ce (nn.CrossEntropyLoss): Cross-entropy loss with ignore_index=255.
+    """
+
+    def __init__(self, model: torch.nn.Module):
+        """Initialize semantic segmentation loss.
+
+        Args:
+            model (torch.nn.Module): Model containing the SemanticSegment head.
+        """
+        super().__init__()
+        m = model.model[-1]
+        self.nc = m.nc
+        self.device = next(model.parameters()).device
+        self.dtype = next(model.parameters()).dtype
+        data_name = Path(str(getattr(model.args, "data", "") or "")).stem.lower()
+        self.use_cityscapes_weight = data_name in {"cityscapes", "cityscapes8"} and self.nc == len(CITYSCAPES_WEIGHT)
+        if self.nc == 1:
+            self.ce = nn.BCEWithLogitsLoss()
+        else:
+            self.ce = nn.CrossEntropyLoss(ignore_index=255).to(device=self.device, dtype=self.dtype)
+            if self.use_cityscapes_weight:
+                # Non-persistent: weight is a deterministic constant, no need to serialize into ckpt state_dict.
+                weight = torch.from_numpy(CITYSCAPES_WEIGHT).to(device=self.device, dtype=self.dtype)
+                self.ce.register_buffer("weight", weight, persistent=False)
+
+    def _resize_masks(self, masks, target_shape):
+        """Resize masks to match prediction spatial dimensions."""
+        if masks.shape[1:] != target_shape:
+            return (
+                F.interpolate(masks.float().unsqueeze(1), size=target_shape, mode="nearest").squeeze(1).to(torch.int32)
+            )
+        return masks
+
+    def _ce_loss(self, preds, masks):
+        """Compute cross-entropy on flattened pixels to avoid the CUDA nll_loss2d path."""
+        if self.nc == 1:
+            flat = masks.reshape(-1)
+            valid = flat != 255
+            logits = preds.reshape(-1)[valid]
+            target = flat[valid].float()
+        else:
+            logits = preds.permute(0, 2, 3, 1).reshape(-1, self.nc)
+            target = masks.reshape(-1).long()
+        return self.ce(logits, target)
+
+    def _dice_loss(self, preds, masks):
+        """Compute Dice loss excluding ignore pixels."""
+        if self.nc == 1:
+            return self._binary_dice_loss(preds, masks)
+        flat_target = masks.reshape(-1)
+        valid = flat_target != 255
+        if not valid.any():
+            return preds.sum() * 0
+
+        pred_soft = F.softmax(preds, dim=1)
+        target = flat_target[valid].long()
+        flat_pred = pred_soft.float().permute(0, 2, 3, 1).reshape(-1, self.nc)[valid]
+        intersection = torch.zeros(self.nc, device=preds.device, dtype=torch.float32)
+        intersection.scatter_add_(0, target, flat_pred.gather(1, target[:, None]).squeeze(1))
+        pred_sum = flat_pred.sum(dim=0)
+        target_sum = torch.bincount(target, minlength=self.nc).to(device=preds.device, dtype=torch.float32)
+        cardinality = pred_sum + target_sum
+        return (1.0 - (2.0 * intersection + 1.0) / (cardinality + 1.0)).mean()
+
+    def _binary_dice_loss(self, preds, masks):
+        """Compute Dice loss for single-class (binary) segmentation.
+
+        Pixels with value 255 are excluded from Dice terms to match BCE valid-pixel filtering.
+        """
+        valid = (masks != 255).float()
+        pred_soft = preds.squeeze(1).sigmoid()
+        target = (masks == 1).float()
+        intersection = (pred_soft * target * valid).sum()
+        cardinality = ((pred_soft + target) * valid).sum()
+        return 1.0 - (2.0 * intersection + 1.0) / (cardinality + 1.0)
+
+    def forward(self, preds, batch):
+        """Compute semantic segmentation loss with optional auxiliary loss.
+
+        Args:
+            preds (torch.Tensor | tuple): Main logits [B, nc, H', W'], or (main, aux) tuple.
+            batch (dict): Batch dict with 'semantic_mask' [B, H, W] containing class IDs (255=ignore).
+
+        Returns:
+            (tuple[torch.Tensor, torch.Tensor]): (total_loss * batch_size, detached loss items [ce, dice, aux]).
+        """
+        # Unpack auxiliary logits when present.
+        aux_logits = None
+        if isinstance(preds, tuple):
+            preds, aux_logits = preds
+
+        masks = batch["semantic_mask"].to(preds.device)
+        if preds.shape[2:] != masks.shape[1:]:
+            preds = F.interpolate(preds, size=masks.shape[1:], mode="bilinear", align_corners=False)
+
+        # Main cross-entropy and Dice loss.
+        ce_loss = self._ce_loss(preds, masks)
+        dice_loss = self._dice_loss(preds, masks)
+        total = ce_loss + dice_loss
+
+        # Auxiliary cross-entropy loss. Match ce_loss dtype so torch.stack below succeeds under AMP.
+        aux_loss = torch.tensor(0.0, device=preds.device, dtype=ce_loss.dtype)
+        if aux_logits is not None:
+            if aux_logits.shape[2:] != masks.shape[1:]:
+                aux_logits = F.interpolate(aux_logits, size=masks.shape[1:], mode="bilinear", align_corners=False)
+            aux_loss = self._ce_loss(aux_logits, masks) * 0.4
+            total += aux_loss
+
+        loss_items = torch.stack([ce_loss, dice_loss, aux_loss]).detach()
+        return total * preds.shape[0], loss_items

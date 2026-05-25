@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+import tarfile
 import urllib
 import zipfile
 from copy import copy
@@ -38,6 +39,12 @@ from ultralytics.utils import (
 )
 from ultralytics.utils.downloads import download, safe_download
 from ultralytics.utils.torch_utils import TORCH_1_11, TORCH_1_13
+
+
+def skip_rpi_semantic():
+    """Skip semantic segmentation tests on Raspberry Pi due to memory constraints."""
+    if IS_RASPBERRYPI:
+        pytest.skip("Semantic segmentation tests are skipped on Raspberry Pi due to memory constraints.")
 
 
 def test_model_forward():
@@ -111,6 +118,8 @@ def test_predict_csv_single_row(tmp_path):
 @pytest.mark.parametrize("model_name", MODELS)
 def test_predict_img(model_name):
     """Test YOLO model predictions on various image input types and sources, including online images."""
+    if IS_RASPBERRYPI and model_name == "yolo26n-sem.pt":
+        skip_rpi_semantic()
     channels = 1 if model_name == "yolo11n-grayscale.pt" else 3
     model = YOLO(WEIGHTS_DIR / model_name)
     im = cv2.imread(str(SOURCE), flags=cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR)  # uint8 NumPy array
@@ -134,6 +143,8 @@ def test_predict_img(model_name):
 @pytest.mark.parametrize("model", MODELS)
 def test_predict_visualize(model):
     """Test model prediction methods with 'visualize=True' to generate prediction visualizations."""
+    if IS_RASPBERRYPI and model == "yolo26n-sem.pt":
+        skip_rpi_semantic()
     YOLO(WEIGHTS_DIR / model)(SOURCE, imgsz=32, visualize=True)
 
 
@@ -204,7 +215,7 @@ def test_track_stream(model, tmp_path):
 
     Note imgsz=160 required for tracking for higher confidence and better matches.
     """
-    if model == "yolo26n-cls.pt":  # classification model not supported for tracking
+    if model in {"yolo26n-cls.pt", "yolo26n-sem.pt"}:  # classification and semantic segmentation not supported
         return
     video_url = f"{ASSETS_URL}/decelera_portrait_min.mov"
     model = YOLO(model)
@@ -222,6 +233,8 @@ def test_track_stream(model, tmp_path):
 @pytest.mark.parametrize("task,weight,data", TASK_MODEL_DATA)
 def test_val(task: str, weight: str, data: str) -> None:
     """Test the validation mode of the YOLO model."""
+    if IS_RASPBERRYPI and task == "semantic":
+        skip_rpi_semantic()
     model = YOLO(weight)
     for plots in {True, False}:  # Test both cases i.e. plots=True and plots=False
         metrics = model.val(data=data, imgsz=32, plots=plots)
@@ -244,6 +257,7 @@ def test_train_scratch():
 
 
 @pytest.mark.skipif(not ONLINE, reason="environment is offline")
+@pytest.mark.skipif(IS_RASPBERRYPI, reason="Edge devices not intended for training")
 def test_train_ndjson():
     """Test training the YOLO model using NDJSON format dataset."""
     model = YOLO(WEIGHTS_DIR / "yolo26n.pt")
@@ -251,6 +265,7 @@ def test_train_ndjson():
 
 
 @pytest.mark.parametrize("scls", [False, True])
+@pytest.mark.skipif(IS_RASPBERRYPI, reason="Edge devices not intended for training")
 def test_train_pretrained(scls):
     """Test training of the YOLO model starting from a pre-trained checkpoint."""
     model = YOLO(WEIGHTS_DIR / "yolo26n-seg.pt")
@@ -306,10 +321,19 @@ def test_predict_callback_and_setup():
 @pytest.mark.parametrize("model", MODELS)
 def test_results(model: str, tmp_path):
     """Test YOLO model results processing and output in various formats."""
+    if IS_RASPBERRYPI and model == "yolo26n-sem.pt":
+        skip_rpi_semantic()
     im = "https://cdn.jsdelivr.net/gh/ultralytics/assets@main/im/boats.jpg" if model == "yolo26n-obb.pt" else SOURCE
-    results = YOLO(WEIGHTS_DIR / model)([im, im], imgsz=160)
+    is_semantic = "semantic" in model or "-sem" in model
+    results = YOLO(WEIGHTS_DIR / model)([im, im], imgsz=32 if is_semantic else 160)
     for r in results:
-        assert len(r), f"'{model}' results should not be empty!"
+        if is_semantic:
+            assert r.semantic_mask is not None and r.semantic_mask.shape == r.orig_shape, (
+                f"'{model}' semantic_mask should match the original image shape!"
+            )
+            assert r.semantic_mask.data.dtype == torch.uint8, f"'{model}' semantic_mask should use compact class IDs!"
+        else:
+            assert len(r), f"'{model}' results should not be empty!"
         r = r.cpu().numpy()
         print(r, len(r), r.path)  # print numpy attributes
         r = r.to(device="cpu", dtype=torch.float32)
@@ -363,6 +387,8 @@ def test_data_utils(tmp_path):
     # with WorkingDirectory(ROOT.parent / 'tests'):
 
     for task in TASKS:
+        if task == "semantic":  # HUB stats do not support semantic segmentation datasets yet.
+            continue
         file = Path(TASK2DATA[task]).with_suffix(".zip")  # i.e. coco8.zip
         download(f"https://github.com/ultralytics/hub/raw/main/example_datasets/{file}", unzip=False, dir=tmp_path)
         stats = HUBDatasetStats(tmp_path / file, task=task)
@@ -392,6 +418,34 @@ def test_safe_download_unzips_local_path_archive(tmp_path):
     assert extracted == expected_path, f"Extracted path {extracted} != expected {expected_path}"
     assert (extracted / "data.yaml").is_file(), f"data.yaml not found in {extracted}"
     assert (extracted / "images" / "val").is_dir(), f"images/val not found in {extracted}"
+
+
+def test_safe_download_skips_unsafe_archive_members(tmp_path):
+    """Test safe_download() skips archive members that would extract outside the target directory."""
+    archive = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("../unsafe.txt", "bad")
+        zf.writestr("safe/file.txt", "ok")
+
+    extracted = safe_download(archive, dir=tmp_path / "datasets", unzip=True, progress=False)
+
+    assert not (tmp_path / "unsafe.txt").exists()
+    assert (extracted / "safe/file.txt").is_file()
+
+
+def test_safe_download_skips_unsafe_tar_members(tmp_path):
+    """Test safe_download() skips tar members that would extract outside the target directory."""
+    source = tmp_path / "safe.txt"
+    source.write_text("ok")
+    archive = tmp_path / "unsafe.tar"
+    with tarfile.open(archive, "w") as tar:
+        tar.add(source, arcname="../unsafe.txt")
+        tar.add(source, arcname="safe.txt")
+
+    extracted = safe_download(archive, dir=tmp_path / "datasets", unzip=True, progress=False)
+
+    assert not (tmp_path / "unsafe.txt").exists()
+    assert (extracted / "safe.txt").is_file()
 
 
 @pytest.mark.skipif(not ONLINE, reason="environment is offline")
@@ -478,6 +532,9 @@ def test_cfg_init():
     assert smart_value("eval('1+1')") == "eval('1+1')"
     assert smart_value("exec('x=1')") == "exec('x=1')"
 
+    assert smart_value("zipfile.ZIP_DEFLATED") == zipfile.ZIP_DEFLATED
+    assert smart_value("zipfile.Path") == "zipfile.Path"
+
 
 def test_utils_init():
     """Test initialization utilities in the Ultralytics library."""
@@ -549,7 +606,7 @@ def test_utils_ops():
 
 def test_utils_files(tmp_path):
     """Test file handling utilities including file age, date, and paths with spaces."""
-    from ultralytics.utils.files import file_age, file_date, get_latest_run, spaces_in_path
+    from ultralytics.utils.files import file_age, file_date, get_latest_run, increment_path, spaces_in_path
 
     file_age(SOURCE)
     file_date(SOURCE)
@@ -559,6 +616,14 @@ def test_utils_files(tmp_path):
     path.mkdir(parents=True, exist_ok=True)
     with spaces_in_path(path) as new_path:
         print(new_path)
+
+    exp_dir = tmp_path / "runs" / "exp"
+    exp_dir.mkdir(parents=True)
+    assert increment_path(exp_dir) == tmp_path / "runs" / "exp-2"
+
+    results_file = exp_dir / "results.txt"
+    results_file.touch()
+    assert increment_path(results_file) == exp_dir / "results-2.txt"
 
 
 @pytest.mark.slow
@@ -677,6 +742,7 @@ def test_model_tune():
 
 @pytest.mark.slow
 @pytest.mark.skipif(not ONLINE or not checks.IS_PYTHON_MINIMUM_3_10, reason="environment is offline")
+@pytest.mark.skipif(not checks.check_requirements("ray", install=False), reason="ray[tune] not installed")
 def test_model_tune_ray():
     """Tune YOLO model for performance improvement."""
     YOLO("yolo26n-cls.pt").tune(
@@ -829,6 +895,8 @@ def test_multichannel():
 @pytest.mark.parametrize("task,model,data", TASK_MODEL_DATA)
 def test_grayscale(task: str, model: str, data: str, tmp_path) -> None:
     """Test YOLO model grayscale training, validation, and prediction functionality."""
+    if IS_RASPBERRYPI and task == "semantic":
+        skip_rpi_semantic()
     if task == "classify":  # not support grayscale classification yet
         return
     grayscale_data = tmp_path / f"{Path(data).stem}-grayscale.yaml"
@@ -849,3 +917,11 @@ def test_grayscale(task: str, model: str, data: str, tmp_path) -> None:
 
     model = YOLO(export_model, task=task)
     model.predict(source=im, imgsz=32)
+
+
+def test_semantic_polygon_data():
+    """Test YOLO semantic segmentation model with polygon data."""
+    skip_rpi_semantic()
+    model = YOLO("yolo26n-sem.pt")
+    model.train(data="coco8-seg.yaml", epochs=1, imgsz=32, close_mosaic=1)
+    model.val(data="coco8-seg.yaml")

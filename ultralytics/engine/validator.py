@@ -23,6 +23,7 @@ Usage - formats:
                           yolo26n_rknn_model         # Rockchip RKNN
                           yolo26n_executorch_model   # ExecuTorch
                           yolo26n_axelera_model      # Axelera AI
+                          yolo26n_deepx_model        # DeepX
 """
 
 from __future__ import annotations
@@ -36,12 +37,19 @@ import torch
 import torch.distributed as dist
 
 from ultralytics.cfg import get_cfg, get_save_dir
-from ultralytics.data.utils import check_cls_dataset, check_det_dataset
+from ultralytics.data.utils import check_cls_dataset, check_det_dataset, convert_ndjson_to_yolo_if_needed
 from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.utils import LOGGER, LOCAL_RANK, RANK, TQDM, callbacks, colorstr, emojis
+from ultralytics.utils import LOCAL_RANK, LOGGER, RANK, TQDM, callbacks, colorstr, emojis
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.utils.ops import Profile
-from ultralytics.utils.torch_utils import attempt_compile, select_device, smart_inference_mode, unwrap_model
+from ultralytics.utils.torch_utils import (
+    attempt_compile,
+    select_device,
+    smart_inference_mode,
+    torch_distributed_zero_first,
+    unwrap_model,
+)
 
 # TODO (CP/IRIT): Adapt to multi class prediction
 class BaseValidator:
@@ -123,6 +131,7 @@ class BaseValidator:
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
         self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(self.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
@@ -176,6 +185,8 @@ class BaseValidator:
                     model.end2end = self.args.end2end
                 if model.end2end:
                     model.set_head_attr(max_det=self.args.max_det, agnostic_nms=self.args.agnostic_nms)
+            with torch_distributed_zero_first(LOCAL_RANK):
+                self.args.data = convert_ndjson_to_yolo_if_needed(self.args.data)
             model = AutoBackend(
                 model=model or self.args.model,
                 device=select_device(self.args.device) if RANK == -1 else torch.device("cuda", RANK),
@@ -310,13 +321,13 @@ class BaseValidator:
         # TODO (CP/IRIT): Replace with class vectors instead of simple class
         # Has the ground truth class been correctly predicted ?
         # TODO (CP/IRIT): Must integrate the class compatibility threshold
-        # if self.use_km_metrics:
-        #     compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
-        #     distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
-        #     (values,indices) = torch.min(distances,0)
-        #     correct_class = distances <= compatibility_threshold
-        # else:
-        correct_class = true_classes[:, None] == pred_classes
+        if self.use_km_metrics:
+            compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.device)
+            distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
+            (values,indices) = torch.min(distances,0)
+            correct_class = distances <= compatibility_threshold
+        else:
+            correct_class = true_classes[:, None] == pred_classes
         sz_correct_class = torch.numel(correct_class)
         nz_correct_class = torch.count_nonzero(correct_class)
         # Only keeps the IoU of correct classes (set the incorrect ones to 0)
@@ -335,11 +346,11 @@ class BaseValidator:
                     labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
                     valid = cost_matrix[labels_idx, detections_idx] > 0
                     if valid.any():
-                        # if self.use_km_metrics:
-                        #     # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
-                        #     correct[detections_idx[valid], i] = labels_idx[valid]
-                        # else:
-                        correct[detections_idx[valid], i] = True
+                        if self.use_km_metrics:
+                            # sets the values to the ground truth class (and keeps -1 when the class is incorrect or the predicted bounding box does not fit the ground truth bounding box
+                            correct[detections_idx[valid], i] = labels_idx[valid]
+                        else:
+                            correct[detections_idx[valid], i] = True
             else:
                 matches = np.nonzero(iou_over_threshold)  # IoU > threshold and classes match
                 matches = np.array(matches).T
@@ -349,8 +360,8 @@ class BaseValidator:
                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
                     correct[matches[:, 1].astype(int), i] = True
-                    # if self.use_km_metrics:
-                    #     pred_classes[matches[:,1]] = true_classes[matches[:,0]]
+                    if self.use_km_metrics:
+                        pred_classes[matches[:,1]] = true_classes[matches[:,0]]
         result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
         return result
 

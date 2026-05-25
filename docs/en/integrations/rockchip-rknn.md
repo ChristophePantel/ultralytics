@@ -14,7 +14,7 @@ When deploying computer vision models on embedded devices, especially those powe
 
 !!! note
 
-    This guide has been tested with [Radxa Rock 5B](https://radxa.com/products/rock5/5b/) which is based on Rockchip RK3588 and [Radxa Zero 3W](https://radxa.com/products/zeros/zero3w/) which is based on Rockchip RK3566. It is expected to work across other Rockchip-based devices that support [rknn-toolkit2](https://github.com/airockchip/rknn-toolkit2) such as RK3576, RK3568, RK3562, RV1103, RV1106, RV1103B, RV1106B, RK2118 and RV1126B.
+    This guide has been tested with [Radxa Rock 5B](https://radxa.com/products/rock5/5b/) which is based on Rockchip RK3588 and [Radxa Zero 3W](https://radxa.com/products/zeros/zero3w/) which is based on Rockchip RK3566. It is expected to work across other Rockchip-based devices that support [rknn-toolkit2](https://github.com/airockchip/rknn-toolkit2) such as RK3576, RK3568, RK3562, RK2118 and RV1126B. Targets that only support INT8 inference (RV1103, RV1106, RV1103B, RV1106B) are not yet supported because Ultralytics RKNN export currently produces FP16 models only.
 
 ## What is Rockchip?
 
@@ -80,7 +80,7 @@ For detailed instructions and best practices related to the installation process
         model = YOLO("yolo26n.pt")
 
         # Export the model to RKNN format
-        # 'name' can be one of rk3588, rk3576, rk3566, rk3568, rk3562, rv1103, rv1106, rv1103b, rv1106b, rk2118, rv1126b
+        # 'name' can be one of rk3588, rk3576, rk3566, rk3568, rk3562, rk2118, rv1126b (FP16). INT8-only targets rv1103, rv1106, rv1103b, rv1106b are not yet supported.
         model.export(format="rknn", name="rk3588")  # creates '/yolo26n_rknn_model'
         ```
 
@@ -88,19 +88,19 @@ For detailed instructions and best practices related to the installation process
 
         ```bash
         # Export a YOLO26n PyTorch model to RKNN format
-        # 'name' can be one of rk3588, rk3576, rk3566, rk3568, rk3562, rv1103, rv1106, rv1103b, rv1106b, rk2118, rv1126b
+        # 'name' can be one of rk3588, rk3576, rk3566, rk3568, rk3562, rk2118, rv1126b (FP16). INT8-only targets rv1103, rv1106, rv1103b, rv1106b are not yet supported.
         yolo export model=yolo26n.pt format=rknn name=rk3588 # creates '/yolo26n_rknn_model'
         ```
 
 ### Export Arguments
 
-| Argument | Type             | Default    | Description                                                                                                                             |
-| -------- | ---------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `format` | `str`            | `'rknn'`   | Target format for the exported model, defining compatibility with various deployment environments.                                      |
-| `imgsz`  | `int` or `tuple` | `640`      | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.       |
-| `batch`  | `int`            | `1`        | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode. |
-| `name`   | `str`            | `'rk3588'` | Specifies the Rockchip model (rk3588, rk3576, rk3566, rk3568, rk3562, rv1103, rv1106, rv1103b, rv1106b, rk2118, rv1126b)                |
-| `device` | `str`            | `None`     | Specifies the device for exporting: GPU (`device=0`), CPU (`device=cpu`).                                                               |
+| Argument | Type             | Default    | Description                                                                                                                                                                         |
+| -------- | ---------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format` | `str`            | `'rknn'`   | Target format for the exported model, defining compatibility with various deployment environments.                                                                                  |
+| `imgsz`  | `int` or `tuple` | `640`      | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                   |
+| `batch`  | `int`            | `1`        | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                             |
+| `name`   | `str`            | `'rk3588'` | Specifies the Rockchip target. FP16-supported: rk3588, rk3576, rk3566, rk3568, rk3562, rk2118, rv1126b. INT8-only targets (rv1103, rv1106, rv1103b, rv1106b) are not yet supported. |
+| `device` | `str`            | `None`     | Specifies the device for exporting: GPU (`device=0`), CPU (`device=cpu`).                                                                                                           |
 
 !!! tip
 
@@ -226,11 +226,11 @@ RKNN models are specifically designed to leverage the hardware acceleration capa
 
 ### Can I deploy RKNN models on devices from other manufacturers like NVIDIA or Google?
 
-RKNN models are specifically optimized for Rockchip platforms and their integrated NPUs. While you can technically run an RKNN model on other platforms using software emulation, you will not benefit from the hardware acceleration provided by Rockchip devices. For optimal performance on other platforms, it's recommended to export your Ultralytics YOLO models to formats specifically designed for those platforms, such as TensorRT for NVIDIA GPUs or [TensorFlow Lite](https://docs.ultralytics.com/integrations/tflite/) for Google's Edge TPU. Ultralytics supports exporting to a wide range of formats, ensuring compatibility with various hardware accelerators.
+RKNN models are specifically optimized for Rockchip platforms and their integrated NPUs. While you can technically run an RKNN model on other platforms using software emulation, you will not benefit from the hardware acceleration provided by Rockchip devices. For optimal performance on other platforms, it's recommended to export your Ultralytics YOLO models to formats specifically designed for those platforms, such as TensorRT for NVIDIA GPUs or [TensorFlow Lite](https://docs.ultralytics.com/integrations/tflite) for Google's Edge TPU. Ultralytics supports exporting to a wide range of formats, ensuring compatibility with various hardware accelerators.
 
 ### What Rockchip platforms are supported for RKNN model deployment?
 
-The Ultralytics YOLO export to RKNN format supports a wide range of Rockchip platforms, including the popular RK3588, RK3576, RK3566, RK3568, RK3562, RV1103, RV1106, RV1103B, RV1106B, RK2118 and RV1126B. These platforms are commonly found in devices from manufacturers like Radxa, ASUS, Pine64, Orange Pi, Odroid, Khadas, and Banana Pi. This broad support ensures that you can deploy your optimized RKNN models on various Rockchip-powered devices, from single-board computers to industrial systems, taking full advantage of their AI acceleration capabilities for enhanced performance in your computer vision applications.
+The Ultralytics YOLO export to RKNN format currently supports Rockchip platforms with FP16 inference: RK3588, RK3576, RK3566, RK3568, RK3562, RK2118 and RV1126B. INT8-only targets (RV1103, RV1106, RV1103B, RV1106B) are not yet supported because their NPUs require quantization, which is on the roadmap. These platforms are commonly found in devices from manufacturers like Radxa, ASUS, Pine64, Orange Pi, Odroid, Khadas, and Banana Pi, allowing you to deploy your optimized RKNN models on a range of Rockchip-powered devices from single-board computers to industrial systems.
 
 ### How does the performance of RKNN models compare to other formats on Rockchip devices?
 
