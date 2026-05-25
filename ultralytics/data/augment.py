@@ -2239,6 +2239,7 @@ class Format(BaseTransform):
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
+        nc: int = 80, # Default Coco class number
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2265,6 +2266,7 @@ class Format(BaseTransform):
         self.mask_overlap = mask_overlap
         self.batch_idx = batch_idx  # keep the batch indexes
         self.bgr = bgr
+        self.nc = nc
 
     def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Compute formatting parameters shared across image and instance formatting.
@@ -2324,6 +2326,7 @@ class Format(BaseTransform):
         h = params.get("h", 0)
         w = params.get("w", 0)
         nl = params.get("nl", 0)
+        nc = params.get("nc", 63) # TODO (CP/IRIT): quick hack to be corrected....
 
         if self.return_mask:
             if nl:
@@ -2351,7 +2354,7 @@ class Format(BaseTransform):
             labels["sem_masks"] = sem_masks.float()
 
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
-        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, num_class)
+        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, nc)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
             labels["keypoints"] = (

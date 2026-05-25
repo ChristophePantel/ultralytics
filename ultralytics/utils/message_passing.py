@@ -23,6 +23,37 @@ def disjunction_message(self, pred_scores, targets_from_source):
     result = predicate_s_o
     return result
 
+    # One of the targets for a given valid source must be valid : forall s in S, forall o in O, p_s(o) -> \/_{t in T(s)} p_t(o)
+    # origin_indexes : class indexes for the domain
+    # targets_from_source : class indexes for the co-domain
+    def disjunction_message(self, pred_scores, targets_from_source, power=3.0):
+        # O = batch_size x anchor_point_size
+        batch_size, anchor_point_size, class_number = pred_scores.shape
+        # S
+        sources = list(targets_from_source )
+        source_number = len(sources)
+        # indexed by s in S
+        predicate_s = torch.zeros(source_number)
+        # for each s in S
+        for idx_s, s in enumerate(sources):
+            # t in T(s)
+            targets_from_s = list(targets_from_source[s])
+            # p_s(o): indexed by o for a given s
+            source_scores = pred_scores[:, :, s]
+            # T(s)
+            indexes = torch.tensor(targets_from_s,device=pred_scores.device)
+            # p_t(o): indexed by o in O and by t in T(s) for a given s in S
+            target_scores = pred_scores.index_select( 2, indexes)
+            # max(p_t(o)) for t in T(s) 
+            target_scores_max = torch.amax(target_scores,2)
+            # p_s(o) - p_s(o) * max(p_t(o)): indexed by s and o
+            predicate_s_o = source_scores - source_scores * target_scores_max
+            # p-mean for o in O for a given s in S, o (dim 1) is defined for each image in a batch (dim 0)
+            predicate_s[idx_s] = torch.pow(predicate_s_o,power).mean(dim=(0,1))
+        # p-mean for s in S
+        result = torch.pow(torch.mean(predicate_s),1/power)
+        return result
+
 # Conjunction: generalisation / composition
 def conjunction_message(self, pred_scores, targets_from_source):
     batch_size, anchor_point_size, class_number = pred_scores.shape
