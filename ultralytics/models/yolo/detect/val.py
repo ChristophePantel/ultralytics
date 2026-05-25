@@ -396,10 +396,10 @@ class DetectionValidator(BaseValidator):
         pred_scores = preds["scores"]
         bce = self.scores_bce( batch_scores, pred_scores)
         # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
-        # if self.use_km_metrics:
-        #     result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
-        # else:
-        result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
+        if self.use_km_metrics:
+            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
+        else:
+            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
         return result
 
     def scores_bce(self, batch_scores, prediction_scores):
