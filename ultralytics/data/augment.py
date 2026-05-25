@@ -2318,6 +2318,7 @@ class Format(BaseTransform):
             (dict[str, Any]): Updated labels with formatted instance tensors.
         """
         cls = params.get("cls", np.array([]))
+        scores = params.get("scores", np.array([]))
         instances = params.get("instances")
         assert instances is not None, "instances are required for Format.apply_instances"
         h = params.get("h", 0)

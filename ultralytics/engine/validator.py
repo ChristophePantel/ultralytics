@@ -131,6 +131,7 @@ class BaseValidator:
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
         self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(self.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
@@ -320,7 +321,7 @@ class BaseValidator:
         # Has the ground truth class been correctly predicted ?
         # TODO (CP/IRIT): Must integrate the class compatibility threshold
         if self.use_km_metrics:
-            compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.get_device())
+            compatibility_matrix_tensor = torch.from_numpy(compatibility_matrix).to(pred_classes.device)
             distances = compatibility_matrix_tensor[pred_classes.int(),true_classes[:, None].int()]
             (values,indices) = torch.min(distances,0)
             correct_class = distances <= compatibility_threshold

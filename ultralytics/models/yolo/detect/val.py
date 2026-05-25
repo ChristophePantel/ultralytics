@@ -162,6 +162,9 @@ class DetectionValidator(BaseValidator):
                 'cls', and 'extra' tensors.
         """
         # TODO (CP/IRIT): Add Message Passing Inference
+        # Enforce Knowledge Model Conformity at Inference Time
+        if self.use_km_inference:
+            preds = km.conforms_to(preds)
         outputs = nms.non_max_suppression(
             preds,
             self.args.conf,
@@ -180,6 +183,7 @@ class DetectionValidator(BaseValidator):
             class_variants=getattr(self, 'class_variants',None),
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
+        # Split results field by field
         return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores

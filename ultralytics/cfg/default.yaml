@@ -43,8 +43,9 @@ compile: False # (bool | str) enable torch.compile() backend='inductor'; True="d
 use_scores: False # (bool) use class scores instead of class labels
 use_km: False # (bool) use knowledge model if available
 use_km_metrics: False # (bool) use knowledge model metrics -- class compatibility matrix -- if available
-km_metrics_threshold: 1 # (int) number of knowledge model metrics produced -- thresholf for the class compatibility metrics
-use_km_scores: True # (bool) use knowledge model scores if available
+km_metrics_threshold: 0 # (int) number of knowledge model metrics produced -- thresholf for the class compatibility metrics
+use_km_scores: False # (bool) use knowledge model scores if available
+use_km_inference: False # (bool) use knowledge model inference if available
 use_variant_selection: False # (bool) select main class based on knowledge model scores if available
 use_km_losses: False # (bool) use knowledge model losses if available
 use_refinement: False # (bool) use refinement relation if available
@@ -117,7 +118,7 @@ weight_decay: 0.0005 # (float) weight decay (L2 regularization)
 warmup_epochs: 3.0 # (float) warmup epochs (fractions allowed)
 warmup_momentum: 0.8 # (float) initial momentum during warmup
 warmup_bias_lr: 0.1 # (float) bias learning rate during warmup
-km: 500.0 # 1000.0 # (float) knowledge model loss gain
+km: 10.0 # 1000.0 # (float) knowledge model loss gain
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) classification loss gain
 cls_pw: 0.0 # (float) class weights power for handling class imbalance (0.0=disable, 1.0=full inverse frequency)

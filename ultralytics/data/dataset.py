@@ -90,6 +90,7 @@ class YOLODataset(BaseDataset):
         self.use_km_metrics = self.use_km and kwargs["hyp"].get("use_km_metrics",False)
         self.km_metrics_threshold = kwargs["hyp"].get('km_metrics_km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and kwargs["hyp"].get("use_km_scores",False)
+        self.use_km_inference = self.use_km and kwargs["hyp"].get("use_km_inference",False)
         self.use_variant_selection = self.use_km_scores and kwargs["hyp"].get("use_variant_selection",False)
         self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_losses",False)
         self.use_refinement = self.use_km_losses and kwargs["hyp"].get("use_refinement",False)

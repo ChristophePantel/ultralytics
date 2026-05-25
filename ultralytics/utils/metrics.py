@@ -1102,7 +1102,7 @@ def ap_per_class(
         precision_0 = precision[:, 0] # extract fist IoU threshold
         p_curve[ci] = np.interp(-x, -conf[i], precision_0, left=1)  # p at pr_score
 
-        print(c,np.mean(precision),np.mean(recall))
+        # print(c,np.mean(precision),np.mean(recall))
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
             ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])

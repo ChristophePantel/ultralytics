@@ -99,10 +99,14 @@ class Detect(nn.Module):
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = reg_max  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
-        self.no = nc + self.reg_max * 4  # number of outputs per anchor
-        self.stride = torch.zeros(self.nl)  # strides computed during build
+        # TODO (CP/IRIT): Add nc outputs for class scores
         use_km_scores = True
         self.use_km_scores = use_km_scores
+        if self.use_km_scores:
+            self.no = 2 * nc + self.reg_max * 4  # number of outputs per anchor
+        else:
+            self.no = nc + self.reg_max * 4  # number of outputs per anchor
+        self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
         # cv2 predicts the bounding boxes coordinates
         self.cv2 = nn.ModuleList(
@@ -288,6 +292,7 @@ class Detect(nn.Module):
 
     def get_topk_index(self, scores: torch.Tensor, max_det: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Get top-k indices from scores.
+        TODO (CP/IRIT): Should class score map be used ?
 
         Args:
             scores (torch.Tensor): Scores tensor with shape (batch_size, num_anchors, num_classes).
@@ -314,6 +319,8 @@ class Detect(nn.Module):
     def fuse(self) -> None:
         """Remove the one2many head for inference optimization."""
         self.cv2 = self.cv3 = None
+        if self.use_km_scores:
+            self.cv3_km = None
 
 
 class Segment(Detect):

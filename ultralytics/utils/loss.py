@@ -354,6 +354,7 @@ class KnowledgeBasedLoss(nn.Module):
         self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
         self.km_metrics_threshold = getattr(model.args, 'km_metrics_threshold', 0)
         self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(model.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
@@ -526,12 +527,13 @@ class KnowledgeBasedLoss(nn.Module):
             CE_loss = 0.0
             D_loss = 0.0
             DE_loss = 0.0
-        return (self.specialization_weight * S_loss
+        result = (self.specialization_weight * S_loss
             + self.composition_weight * C_loss 
             + self.specialization_exclusion_weight * SE_loss 
             + self.composition_exclusion_weight * CE_loss 
             + self.generalization_weight * G_loss 
             + self.decomposition_weight * D_loss)
+        return result
 
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
@@ -542,13 +544,27 @@ class v8DetectionLoss:
         """Initialize v8DetectionLoss with model parameters and task-aligned assignment settings."""
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
+        
+        self.use_scores = getattr( h, 'use_scores', False)
+        self.use_km = self.use_scores and getattr( h, 'use_km', False)
+        self.use_km_metrics = self.use_km and getattr( h, 'use_km_metrics', False)
+        self.km_metrics_threshold = getattr(h, 'km_metrics_threshold', 0)
+        self.use_km_scores = self.use_km and getattr( h, 'use_km_scores', False)
+        self.use_km_inference = self.use_km and getattr(h, 'use_km_inference', False)
+        self.use_variant_selection = self.use_km_scores and getattr(h, 'use_variant_selection', False)
+        self.use_km_losses = self.use_km and getattr( h, 'use_km_losses', False)
+        self.use_refinement = self.use_km_losses and getattr(h, 'use_refinement', False)
+        self.use_composition = self.use_km_losses and getattr(h, 'use_composition', False)
 
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         self.hyp = h # hyperparameters
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
-        self.no = m.nc + m.reg_max * 4 # number of predicted features
+        if self.use_km_scores:
+            self.no = 2 * m.nc + m.reg_max * 4 # number of predicted features
+        else :
+            self.no = m.nc + m.reg_max * 4 # number of predicted features
         self.reg_max = m.reg_max
         self.device = device
 
@@ -559,19 +575,10 @@ class v8DetectionLoss:
         if self.class_weights is not None:
             self.class_weights = self.class_weights.to(device).view(1, 1, -1)
 
-        self.use_scores = getattr( model.args, 'use_scores', False)
-        self.use_km = self.use_scores and getattr( model.args, 'use_km', False)
-        self.use_km_metrics = self.use_km and getattr( model.args, 'use_km_metrics', False)
-        self.km_metrics_threshold = getattr(model.args, 'km_metrics_threshold', 0)
-        self.use_km_scores = self.use_km and getattr( model.args, 'use_km_scores', False)
-        self.use_variant_selection = self.use_km_scores and getattr(model.args, 'use_variant_selection', False)
-        self.use_km_losses = self.use_km and getattr( model.args, 'use_km_losses', False)
-        self.use_refinement = self.use_km_losses and getattr(model.args, 'use_refinement', False)
-        self.use_composition = self.use_km_losses and getattr(model.args, 'use_composition', False)
         if self.use_km_losses:
             self.km_loss = KnowledgeBasedLoss(model)
         else:
-            km_loss = None
+            self.km_loss = None
 
         self.assigner = TaskAlignedAssigner(
             topk=tal_topk,
@@ -764,8 +771,9 @@ class v8DetectionLoss:
             loss[km_index] *= self.hyp.km  # km gain
         loss[dfl_index] *= self.hyp.dfl  # dfl gain
         
-        has_nan = math.isnan(loss[box_index]) or math.isnan(loss[cls_index]) or math.isnan(loss[dfl_index])
-        has_nan = has_nan or math.isnan(loss[km_index]) if self.use_km_losses else has_nan
+        detached_loss = loss.detach()
+        has_nan = math.isnan(detached_loss[box_index]) or math.isnan(detached_loss[cls_index]) or math.isnan(detached_loss[dfl_index])
+        has_nan = has_nan or math.isnan(detached_loss[km_index]) if self.use_km_losses else has_nan
         
         if has_nan:
             print("NaN occured in loss computation.")
@@ -773,7 +781,7 @@ class v8DetectionLoss:
         return (
             (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
             loss,
-            loss.detach(),
+            detached_loss,
         )  # loss(box, cls, dfl)
 
     def parse_output(
