@@ -6,11 +6,15 @@ keywords: CoreML export, Core ML, YOLO26 CoreML, Apple Neural Engine, ANE, mlpac
 
 # CoreML Export for YOLO26 Models
 
-Apple ships dedicated AI silicon — the Neural Engine — in every modern iPhone, iPad, and Mac, and [CoreML](https://developer.apple.com/documentation/coreml) is the only way to program it. Exporting [Ultralytics YOLO26](https://github.com/ultralytics/ultralytics) models to CoreML turns a trained `.pt` checkpoint into a native `.mlpackage` that runs all six YOLO tasks on-device at single-digit milliseconds, with no network connection and no data leaving the device.
+Apple ships dedicated AI silicon — the Neural Engine — in every modern iPhone, iPad, and Mac, and [CoreML](https://developer.apple.com/documentation/coreml) is Ultralytics' supported path for deploying models to it today. Exporting [Ultralytics YOLO26](https://github.com/ultralytics/ultralytics) models to CoreML turns a trained `.pt` checkpoint into a native `.mlpackage` that runs all six YOLO tasks on-device at single-digit milliseconds, with no network connection and no data leaving the device.
 
 !!! tip "Run YOLO on the Apple Neural Engine today with the official mobile apps"
 
     The official [Ultralytics YOLO iOS SDK](https://github.com/ultralytics/yolo-ios-app) and [Flutter plugin](https://github.com/ultralytics/yolo-flutter-app) run CoreML exports on the Apple Neural Engine out of the box — real-time camera inference, single-image prediction, and automatic model download for all six YOLO26 tasks. For Android NPU deployment, see the [Qualcomm QNN integration](qnn.md).
+
+!!! note "Apple's future Core AI format"
+
+    Apple has introduced the new [Core AI framework and `.aimodel` format](coreai.md) for the iOS 27 and macOS 27 generation. Ultralytics Core AI export is planned for Q4 2026 but is not available yet. CoreML remains the supported format for current Ultralytics releases and broader Apple device compatibility.
 
 <p align="center">
   <br>
@@ -143,15 +147,15 @@ The CoreML format supports the [Export](../modes/export.md), [Predict](../modes/
 
 ### Export Arguments
 
-| Argument   | Type             | Default    | Description                                                                                                                                                                                                                                                                                               |
-| ---------- | ---------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `format`   | `str`            | `'coreml'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                                                        |
-| `imgsz`    | `int` or `tuple` | `640`      | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                                                         |
-| `quantize` | `int` or `str`   | `None`     | Quantization precision (weight-only for CoreML): `16` (FP16, halves model size with negligible accuracy impact — a good default for the Neural Engine) or `8` (INT8, smallest models; the official Ultralytics app models ship as INT8); `32`/unset is FP32. Replaces the deprecated `half`/`int8` flags. |
-| `nms`      | `bool`           | `False`    | Embeds a CoreML NMS pipeline. Not needed for NMS-free YOLO26; use for earlier models like YOLO11.                                                                                                                                                                                                         |
-| `dynamic`  | `bool`           | `False`    | Allows dynamic input sizes, enhancing flexibility in handling varying image dimensions.                                                                                                                                                                                                                   |
-| `batch`    | `int`            | `1`        | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                                                                                                                                                   |
-| `device`   | `str`            | `None`     | Specifies the device for exporting: GPU (`device=0`), CPU (`device=cpu`), MPS for Apple silicon (`device=mps`).                                                                                                                                                                                           |
+| Argument   | Type             | Default    | Description                                                                                                                                                                                  |
+| ---------- | ---------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`   | `str`            | `'coreml'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                           |
+| `imgsz`    | `int` or `tuple` | `640`      | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                            |
+| `quantize` | `int` or `str`   | `None`     | Quantization precision (weight-only for CoreML): `16` (FP16), `8` (INT8), `"w8a16"` (INT8 weights with FP16 activations), or `32`/unset (FP32). Replaces the deprecated `half`/`int8` flags. |
+| `nms`      | `bool`           | `False`    | Embeds a CoreML NMS pipeline. Not needed for NMS-free YOLO26; use for earlier models like YOLO11.                                                                                            |
+| `dynamic`  | `bool`           | `False`    | Allows dynamic input sizes, enhancing flexibility in handling varying image dimensions.                                                                                                      |
+| `batch`    | `int`            | `1`        | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                                      |
+| `device`   | `str`            | `None`     | Specifies the device for exporting: GPU (`device=0`), CPU (`device=cpu`), MPS for Apple silicon (`device=mps`).                                                                              |
 
 For more details about the export process, visit the [Ultralytics documentation page on exporting](../modes/export.md).
 

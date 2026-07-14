@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ultralytics.cfg import TASK2DATA, get_cfg, get_save_dir
+from ultralytics.cfg import TASK2DATA, _handle_deprecation, get_cfg, get_save_dir
 from ultralytics.engine.results import Results
 from ultralytics.nn.tasks import guess_model_task, load_checkpoint, yaml_model_load
 from ultralytics.utils import (
@@ -151,7 +152,7 @@ class Model(torch.nn.Module):
         source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
         stream: bool = False,
         **kwargs: Any,
-    ) -> list:
+    ) -> Iterator[Results | torch.Tensor] | list[Results] | list[torch.Tensor]:
         """Alias for the predict method, enabling the model instance to be callable for predictions.
 
         This method simplifies the process of making predictions by allowing the model instance to be called directly
@@ -165,8 +166,8 @@ class Model(torch.nn.Module):
             **kwargs (Any): Additional keyword arguments to configure the prediction process.
 
         Returns:
-            (list[ultralytics.engine.results.Results]): A list of prediction results, each encapsulated in a Results
-                object.
+            (Iterator[ultralytics.engine.results.Results | torch.Tensor] | list[ultralytics.engine.results.Results] |
+            list[torch.Tensor]): Prediction results or embeddings, streamed when `stream=True`.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")
@@ -451,11 +452,12 @@ class Model(torch.nn.Module):
         source: str | Path | int | list | tuple | np.ndarray | torch.Tensor = None,
         stream: bool = False,
         **kwargs: Any,
-    ) -> list:
+    ) -> Iterator[torch.Tensor] | list[torch.Tensor]:
         """Generate image embeddings based on the provided source.
 
-        This method is a wrapper around the 'predict()' method, focusing on generating embeddings from an image
-        source. It allows customization of the embedding process through various keyword arguments.
+        This method is a wrapper around the 'predict()' method, returning feature embeddings from image sources. By
+        default, embeddings are extracted from the second-to-last model layer. Pass `embed=[layer_index]` in `kwargs` to
+        select specific layers.
 
         Args:
             source (str | Path | int | list | tuple | np.ndarray | torch.Tensor): The source of the image for generating
@@ -464,13 +466,15 @@ class Model(torch.nn.Module):
             **kwargs (Any): Additional keyword arguments for configuring the embedding process.
 
         Returns:
-            (list[torch.Tensor]): A list containing the image embeddings.
+            (Iterator[torch.Tensor] | list[torch.Tensor]): Image embeddings, streamed when `stream=True`.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")
             >>> image = "https://ultralytics.com/images/bus.jpg"
             >>> embeddings = model.embed(image)
+            >>> results = model.predict(image)
             >>> print(embeddings[0].shape)
+            >>> print(results[0].boxes.shape)
         """
         if not kwargs.get("embed"):
             kwargs["embed"] = [len(self.model.model) - 2]  # embed second-to-last layer if no indices passed
@@ -482,7 +486,7 @@ class Model(torch.nn.Module):
         stream: bool = False,
         predictor=None,
         **kwargs: Any,
-    ) -> list[Results]:
+    ) -> Iterator[Results | torch.Tensor] | list[Results] | list[torch.Tensor]:
         """Perform predictions on the given image source using the YOLO model.
 
         This method facilitates the prediction process, allowing various configurations through keyword arguments. It
@@ -496,11 +500,12 @@ class Model(torch.nn.Module):
             stream (bool): If True, treats the input source as a continuous stream for predictions.
             predictor (BasePredictor, optional): An instance of a custom predictor class for making predictions. If
                 None, the method uses a default predictor.
-            **kwargs (Any): Additional keyword arguments for configuring the prediction process.
+            **kwargs (Any): Additional keyword arguments for configuring the prediction process. These include `embed`
+                for returning feature embeddings from specified layers.
 
         Returns:
-            (list[ultralytics.engine.results.Results]): A list of prediction results, each encapsulated in a Results
-                object.
+            (Iterator[ultralytics.engine.results.Results | torch.Tensor] | list[ultralytics.engine.results.Results] |
+            list[torch.Tensor]): Prediction results or embeddings, streamed when `stream=True`.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")
@@ -521,7 +526,7 @@ class Model(torch.nn.Module):
             x in ARGV for x in ("predict", "track", "mode=predict", "mode=track")
         )
 
-        custom = {"conf": 0.25, "batch": 1, "save": is_cli, "mode": "predict", "rect": True}  # method defaults
+        custom = {"conf": 0.25, "batch": 1, "save": is_cli, "mode": "predict", "rect": True, "embed": None}
         args = {**self.overrides, **custom, **kwargs}  # highest priority args on the right
         prompts = args.pop("prompts", None)  # for SAM-type models
 
@@ -651,9 +656,10 @@ class Model(torch.nn.Module):
         from .exporter import export_formats
 
         custom = {"verbose": False}  # method defaults
+        kwargs = _handle_deprecation(kwargs)  # forward legacy flags (e.g. half/int8 -> quantize) before merging
         args = {**DEFAULT_CFG_DICT, **self.model.args, **custom, **kwargs, "mode": "benchmark"}
         fmts = export_formats()
-        export_args = set(dict(zip(fmts["Argument"], fmts["Arguments"])).get(format, [])) - {
+        export_args = set(dict(zip(fmts["Argument"], fmts["Arguments"])).get(format.lower(), [])) - {
             "batch",
             "data",
             "quantize",
@@ -776,8 +782,12 @@ class Model(torch.nn.Module):
         if isinstance(args.get("data"), (list, tuple)):  # fine-tune a single base model across multiple datasets
             from ultralytics.engine.trainer import MultiTrainer
 
+            use_python_trainer = trainer is not None or self.callbacks != callbacks.get_default_callbacks()
             self.trainer = MultiTrainer(
-                trainer or self._smart_load("trainer"), args, self.model, _callbacks=self.callbacks
+                (trainer or self._smart_load("trainer")) if use_python_trainer else None,
+                args,
+                self.model,
+                _callbacks=self.callbacks,
             )
             self.metrics = self.trainer.train()
             return self.metrics

@@ -25,7 +25,7 @@ from torch import distributed as dist
 from torch import nn, optim
 
 from ultralytics import __version__
-from ultralytics.cfg import get_cfg, get_save_dir
+from ultralytics.cfg import _YOLO_CLI_COMMAND, get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset, convert_ndjson_to_yolo_if_needed
 from ultralytics.nn.distill_model import DistillationModel
 from ultralytics.nn.tasks import load_checkpoint
@@ -57,6 +57,7 @@ from ultralytics.utils.torch_utils import (
     convert_optimizer_state_dict_to_fp16,
     init_seeds,
     one_cycle,
+    parse_device,
     select_device,
     strip_optimizer,
     torch_distributed_zero_first,
@@ -126,9 +127,8 @@ class BaseTrainer:
         self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
         self.check_resume(overrides)
+        self.args.device = parse_device(self.args.device)  # canonical string, resolves '-1' auto-selection once
         self.device = select_device(self.args.device)
-        # Update "-1" devices so post-training val does not repeat search
-        self.args.device = os.getenv("CUDA_VISIBLE_DEVICES") if "cuda" in str(self.device) else str(self.device)
         self.validator = None
         self.metrics = None
         self.plots = {}
@@ -163,16 +163,10 @@ class BaseTrainer:
         # Callbacks - initialize early so on_pretrain_routine_start can capture original args.data
         self.callbacks = _callbacks or callbacks.get_default_callbacks()
 
-        if isinstance(self.args.device, str) and len(self.args.device):  # i.e. device='0' or device='0,1,2,3'
-            world_size = len(self.args.device.split(","))
-        elif isinstance(self.args.device, (tuple, list)):  # i.e. device=[0, 1, 2, 3] (multi-GPU from CLI is list)
-            world_size = len(self.args.device)
-        elif self.args.device in {"cpu", "mps"}:  # i.e. device='cpu' or 'mps'
+        if self.device.type in {"cpu", "mps"}:
             world_size = 0
-        elif torch.cuda.is_available():  # i.e. device=None or device='' or device=number
-            world_size = 1  # default to device 0
-        else:  # i.e. device=None or device=''
-            world_size = 0
+        else:  # i.e. device='0', '0,1,2,3', 'npu:0', or '' auto-selecting a single GPU
+            world_size = len(self.args.device.split(",")) if self.args.device else 1
 
         self.ddp = world_size > 1 and "LOCAL_RANK" not in os.environ
         self.world_size = world_size
@@ -256,8 +250,9 @@ class BaseTrainer:
 
     def _setup_ddp(self):
         """Initialize and set the DistributedDataParallel parameters for training."""
-        torch.cuda.set_device(RANK)
-        self.device = torch.device("cuda", RANK)
+        index = int(self.args.device.split(",")[LOCAL_RANK])  # world_size > 1 guarantees a multi-device string
+        torch.cuda.set_device(index)
+        self.device = torch.device("cuda", index)
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"  # set to enforce timeout
         dist.init_process_group(
             backend="nccl" if dist.is_nccl_available() else "gloo",
@@ -361,8 +356,9 @@ class BaseTrainer:
             # o2m+o2o pose loss branches) under torch.compile.
             self.model = nn.parallel.DistributedDataParallel(
                 self.model,
-                device_ids=[RANK],
+                device_ids=[self.device.index],
                 static_graph=bool(self.args.compile),
+                broadcast_buffers=False,
                 find_unused_parameters=not bool(self.args.compile),
             )
 
@@ -441,16 +437,18 @@ class BaseTrainer:
                     self.accumulate = max(1, int(np.interp(ni, xi, [1, self.args.nbs / self.batch_size]).round()))
                     for x in self.optimizer.param_groups:
                         # Bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
-                        x["lr"] = np.interp(
-                            ni,
-                            xi,
-                            [
-                                self.args.warmup_bias_lr if x.get("param_group") == "bias" else 0.0,
-                                x["initial_lr"] * self.lf(epoch),
-                            ],
+                        x["lr"] = float(
+                            np.interp(
+                                ni,
+                                xi,
+                                [
+                                    self.args.warmup_bias_lr if x.get("param_group") == "bias" else 0.0,
+                                    x["initial_lr"] * self.lf(epoch),
+                                ],
+                            )
                         )
                         if "momentum" in x:
-                            x["momentum"] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
+                            x["momentum"] = float(np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum]))
 
                 # Forward
                 try:
@@ -599,6 +597,9 @@ class BaseTrainer:
                 self.plot_metrics()
             self.run_callbacks("on_train_end")
         self._clear_memory()
+        for loader in (self.train_loader, self.test_loader):
+            if hasattr(loader, "close"):
+                loader.close()  # shut down persistent dataloader workers so none survive to interpreter exit
         unset_deterministic()
         self.run_callbacks("teardown")
 
@@ -662,12 +663,19 @@ class BaseTrainer:
         """Save model training checkpoints with additional metadata."""
         import io
 
-        # Skip only genuinely non-finite fp32 EMA weights; fp16 overflow is handled on the saved copy below.
+        # A transient NaN/Inf permanently poisons the EMA running average (ema = decay*ema + (1-decay)*model), so
+        # save_model would otherwise skip every epoch and the run would finish with no checkpoint on valid input.
+        # Resync each poisoned EMA tensor from the live model where finite; any tensor that is non-finite in both is
+        # left for the nan_to_num_ pass below, so a usable checkpoint is always written.
         ema = unwrap_model(self.ema.ema)
         if not all(torch.isfinite(v).all() for v in ema.state_dict().values() if isinstance(v, torch.Tensor)):
-            LOGGER.warning(f"Skipping checkpoint save at epoch {self.epoch}: EMA contains NaN/Inf")
-            return False
+            model_sd = unwrap_model(self.model).state_dict()
+            for k, v in ema.state_dict().items():
+                if isinstance(v, torch.Tensor) and not torch.isfinite(v).all() and torch.isfinite(model_sd[k]).all():
+                    v.copy_(model_sd[k])
         ema = deepcopy(ema).half()
+        if hasattr(ema, "criterion"):
+            ema.criterion = None  # strip training-only state from the serialization snapshot
         # Clamp fp16 serialization overflow without mutating the live EMA.
         for v in ema.state_dict().values():
             if isinstance(v, torch.Tensor) and v.is_floating_point():
@@ -928,6 +936,7 @@ class BaseTrainer:
                     "val",
                     "plots",
                     "distill_model",
+                    "save_dir",
                 ):  # allow arg updates to reduce memory or update device on resume
                     if k in overrides:
                         setattr(self.args, k, overrides[k])
@@ -1080,7 +1089,7 @@ class BaseTrainer:
             g = [x.values() for x in g[:3]]  # convert to list of params
 
         optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "MuSGD", "auto"}
-        name = {x.lower(): x for x in optimizers}.get(name.lower())
+        name = {x.lower(): x for x in optimizers}.get(str(name).lower(), str(name))
         if name in {"Adam", "Adamax", "AdamW", "NAdam", "RAdam"}:
             optim_args = dict(lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
         elif name == "RMSProp":
@@ -1133,11 +1142,11 @@ class MultiTrainer:
     chart. The base model object is left unchanged; each dataset's fine-tuned weights live in its own run directory.
 
     Attributes:
-        trainer (type[BaseTrainer]): Task trainer class instantiated once per dataset.
+        trainer (type[BaseTrainer] | None): Task trainer class for Python runs, or None for CLI subprocess runs.
         args (dict): Training arguments shared across datasets; its `data` key holds the dataset collection.
         model (torch.nn.Module): Base model whose weights seed each per-dataset fine-tune.
         callbacks (dict | None): Callbacks forwarded to each per-dataset trainer.
-        trainers (list[BaseTrainer]): Completed per-dataset trainers (hold results.csv, save_dir, and metrics).
+        trainers (list[SimpleNamespace]): Completed per-dataset run records.
         metrics (dict): Mapping of each run name (e.g. coco8, coco8-2) to its training-metrics dict from the checkpoint.
         save_dir (Path | None): Sweep directory holding the per-dataset runs and the results JSON/plot.
 
@@ -1153,7 +1162,7 @@ class MultiTrainer:
         """Initialize MultiTrainer with a task trainer class, shared training arguments, and the base model.
 
         Args:
-            trainer (type[BaseTrainer]): Task trainer class to run once per dataset.
+            trainer (type[BaseTrainer] | None): Task trainer class to run once per dataset. None uses CLI subprocesses.
             args (dict): Training arguments; the `data` key holds the list/tuple of datasets to fine-tune on.
             model (torch.nn.Module): Base model whose weights seed each per-dataset fine-tune.
             _callbacks (dict, optional): Callback functions forwarded to each per-dataset trainer.
@@ -1170,6 +1179,8 @@ class MultiTrainer:
         """Fine-tune the base model on each dataset in series and return a {dataset: metrics} mapping."""
         from types import SimpleNamespace
 
+        from ultralytics.utils.patches import torch_load, torch_save
+
         datasets = self.args["data"]
         # Group every per-dataset run and the summary plot under one sweep directory, e.g. runs/detect/multitrain
         sweep = SimpleNamespace(
@@ -1179,35 +1190,70 @@ class MultiTrainer:
             exist_ok=self.args.get("exist_ok", False),
         )
         self.save_dir = get_save_dir(sweep, name="multitrain")
-        for i, data in enumerate(datasets):
-            LOGGER.info(f"\n{colorstr('blue', 'bold', f'MultiTrainer {i + 1}/{len(datasets)}:')} fine-tuning on {data}")
-            try:
-                overrides = {
-                    **self.args,
-                    "data": data,
-                    "project": str(self.save_dir),  # nest per-dataset runs inside the sweep directory
-                    "name": Path(str(data)).stem,
-                    "resume": False,
-                    "session": None,
-                }
-                trainer = self.trainer(overrides=overrides, _callbacks=self.callbacks)
-                trainer.model = trainer.get_model(weights=self.model, cfg=self.model.yaml)  # seed each run from base
-                trainer.train()
-                self.trainers.append(trainer)
-                # Key by the unique run name (e.g. coco8, coco8-2) so repeated datasets do not collapse. Use the
-                # in-memory metrics; only under DDP (validator ran in a subprocess) reload them from the checkpoint.
-                metrics = getattr(trainer.validator, "metrics", None)
-                if metrics is not None:
-                    metrics = metrics.results_dict
-                else:
-                    from ultralytics.utils.patches import torch_load
-
-                    ckpt = trainer.best if trainer.best.exists() else trainer.last
-                    metrics = torch_load(ckpt)["train_metrics"] if ckpt.exists() else None
-                self.metrics[trainer.save_dir.name] = metrics
-            except Exception as e:  # one bad dataset should not abort the whole sweep
-                LOGGER.error(f"MultiTrainer: fine-tuning on {data} failed, skipping: {e}")
-                self.metrics[Path(str(data)).stem] = None
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        base_model = self.save_dir / "multitrain_base.pt" if self.trainer is None else None
+        if base_model:
+            torch_save(
+                {"model": deepcopy(self.model).half(), "train_args": getattr(self.model, "args", {})}, base_model
+            )
+        try:
+            for i, data in enumerate(datasets):
+                LOGGER.info(
+                    f"\n{colorstr('blue', 'bold', f'MultiTrainer {i + 1}/{len(datasets)}:')} fine-tuning on {data}"
+                )
+                name = Path(str(data)).stem
+                run_name = name
+                try:
+                    overrides = {
+                        **self.args,
+                        "data": data,
+                        "project": str(self.save_dir),  # nest per-dataset runs inside the sweep directory
+                        "name": name,
+                        "resume": False,
+                        "session": None,
+                    }
+                    run = SimpleNamespace(
+                        project=overrides["project"],
+                        name=overrides["name"],
+                        task=overrides.get("task"),
+                        mode="train",
+                        exist_ok=overrides.get("exist_ok", False),
+                        save_dir=None,
+                    )
+                    save_dir = get_save_dir(run)
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    run_name = save_dir.name
+                    overrides["save_dir"] = str(save_dir)
+                    if self.trainer is None:
+                        overrides["model"] = str(base_model)
+                        overrides["pretrained"] = True
+                        subprocess.run(
+                            [
+                                *_YOLO_CLI_COMMAND,
+                                "train",
+                                *(f"{k}={v}" for k, v in overrides.items() if k != "session"),
+                            ],
+                            check=True,
+                        )
+                    else:
+                        trainer = self.trainer(overrides=overrides, _callbacks=self.callbacks)
+                        trainer.model = trainer.get_model(weights=self.model, cfg=self.model.yaml)
+                        trainer.train()
+                    best, last = save_dir / "weights" / "best.pt", save_dir / "weights" / "last.pt"
+                    ckpt = best if best.exists() else last
+                    metrics = None
+                    if self.trainer is not None:
+                        metrics = getattr(getattr(trainer, "validator", None), "metrics", None)
+                        if metrics is not None:
+                            metrics = metrics.results_dict
+                    self.metrics[run_name] = metrics or (torch_load(ckpt)["train_metrics"] if ckpt.exists() else None)
+                    self.trainers.append(SimpleNamespace(save_dir=save_dir, best=best, last=last))
+                except Exception as e:  # one bad dataset should not abort the whole sweep
+                    LOGGER.error(f"MultiTrainer: fine-tuning on {data} failed, skipping: {e}")
+                    self.metrics[run_name] = None
+        finally:
+            if base_model:
+                base_model.unlink(missing_ok=True)
         if RANK in {-1, 0} and self.trainers:
             self.save_dir.mkdir(parents=True, exist_ok=True)
             self.save_results()  # JSON of per-dataset + mean metrics for programmatic post-processing
