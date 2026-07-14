@@ -144,7 +144,12 @@ def non_max_suppression(
             continue
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        predicted_boxes, predicted_scores, predicted_km_scores, predicted_masks = selected_image_prediction.split((4, nc, nc, extra), 1) # bounding box, scores, additional data
+        # predicted_scores: confidence map : associate to each class a confidence for the box as this class (between 0 and infnty)
+        # predicted_km_scores: class map : associate to each class a confidence that the object is of this class (between 0 and 1)
+        if self.use_km_scores:
+            predicted_boxes, predicted_scores, predicted_km_scores, predicted_masks = selected_image_prediction.split((4, nc, nc, extra), 1) # bounding box, scores, additional data
+        else:
+            predicted_boxes, predicted_scores, predicted_masks = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
 
         if multi_label:
             # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants instead of simple predicted score

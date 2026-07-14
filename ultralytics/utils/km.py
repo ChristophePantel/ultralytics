@@ -220,32 +220,63 @@ def class_names_to_codes(class_names, class_name_to_code):
     return class_codes
 
 # Build the variant of an element according to the relation (paths in the relation whose root is the element)
-def element_variants(element, relation):
+def element_variants(element, relation, names):
+    """
+    Args:
+        element: root of the variants
+        relation: hierarchical relation (Directed Acyclic Graph) that is used to build all branches
+    Returns: 
+    """
+    # Root of the variants
     singleton_element = frozenset({element})
+    singleton_name = names[element]
+    # Set of all variants of the root
+    results = {}
+    # If the root has successor in the relation
     if element in relation:
-        result = frozenset( {} )
+        # For each root successor
         for target in relation[element]:
-            for variant in element_variants( target, relation):
-                result = result.union( { variant.union( singleton_element ) } )
+            # Build the variants of the successor
+            target_results = element_variants( target, relation, names)
+            for variant_name in target_results:
+                # Add the root to the built variants
+                # Merge by the way the various identical variants
+                results[singleton_name + '_' + variant_name] = target_results.union( singleton_element )
     else:
-        result = frozenset( { singleton_element } )
-    return result     
+        # If the root has no successors in the relation, there is a single variant containing the root
+        results[singleton_name] = frozenset( { singleton_element } )
+    return results
+
+def variant_name(variant,names):
+    name = names[variant[0]]
+    for index in range(1,len(variant)):
+        name = name + "_" + names[variant[index]]
+    return name
 
 # Build the variants of all the elements according to the relation (paths in the relation whose roots are the elements)
-def variants(elements,abstracts,relation):
+def variants( elements, abstracts, relation, names):
+    """
+    Args:
+        elements: classes whose variants will be built
+        abstracts: classes from elements that do not lead to variants (abstract classes currently, composite later one)
+        relation: composition relation
+    """
     variant_to_element = {}
     code = 0
-    result = {}
+    results = {}
+    variant_names = {}
     all_variants = frozenset()
     for element in elements:
         if element not in abstracts:
-            for variant in element_variants(element,relation):
-                if variant not in all_variants:
-                    all_variants = all_variants.union({variant})
-                    result[code] = variant
+            element_results = element_variants( element, relation, names)
+            for variant_name in element_results :
+                if element_results[variant_name] not in all_variants:
+                    all_variants = all_variants.union( { element_results[variant_name] })
+                    results[code] = element_results[variant_name]
                     variant_to_element[code] = element
+                    variant_names[code] = variant_name
                     code = code + 1
-    return result, variant_to_element
+    return results, variant_to_element
 
 def non_empty_keys(relation):
     non_empty_keys_results = list(relation.keys())

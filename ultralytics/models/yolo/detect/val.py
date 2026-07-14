@@ -119,6 +119,7 @@ class DetectionValidator(BaseValidator):
                 self.variants = model.variants
             else:
                 self.variants = model.model.variants
+            self.nv = len(self.variants)
             if hasattr(model, 'variant_to_class'):
                 self.variant_to_class = model.variant_to_class
             else:
@@ -144,7 +145,8 @@ class DetectionValidator(BaseValidator):
             self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.args.plots and self.args.visualize)
         # TODO (CP/IRIT): Add a confusion matrix for variants.
         # TODO (CP/IRIT): Add variant_names in model
-        # self.variant_confusion_matrix = ConfusionMatrix(names=model.variant_names, save_matches=self.args.plots and self.args.visualize)
+        # if (self.use_km):
+        #    self.variant_confusion_matrix = ConfusionMatrix(names=model.variant_names, save_matches=self.args.plots and self.args.visualize)
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
