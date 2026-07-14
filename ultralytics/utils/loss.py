@@ -563,10 +563,9 @@ class v8DetectionLoss:
         self.hyp = h # hyperparameters
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
+        self.no = m.nc + m.reg_max * 4 # number of predicted features
         if self.use_km_scores:
-            self.no = 2 * m.nc + m.reg_max * 4 # number of predicted features
-        else :
-            self.no = m.nc + m.reg_max * 4 # number of predicted features
+            self.no = self.no + m.nc # adding the class score map used for km loss functions
         self.reg_max = m.reg_max
         self.device = device
 
@@ -693,8 +692,10 @@ class v8DetectionLoss:
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT) : are the ground truth labels used ?
-        gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
-
+        if self.use_score:
+            gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
+        else:
+            gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
         # Identify future positive anchor points
         # Sum the components of each bounding boxes
         gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
@@ -725,7 +726,7 @@ class v8DetectionLoss:
         )
 
         target_scores_sum = max(target_scores.sum(), 1)
-        
+
         # Cls loss with optional class weighting
         bce_loss = self.bce(pred_scores, target_scores.to(dtype))  # (bs, num_anchors, nc)
         if self.class_weights is not None:
