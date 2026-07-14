@@ -81,10 +81,11 @@ def non_max_suppression(
     anchor_point_number = prediction.shape[-1]
 
     if anchor_point_number == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6) / only 6 anchor points
-        output = [pred[pred[:, 4] > conf_thres][:max_det] for pred in prediction]
+        output = [pred[pred[:, 4] > conf_thres] for pred in prediction]
+
         if classes is not None:
             output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
-        return output
+        return [pred[:max_det] for pred in output]  # apply max_det after classes filter
 
     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
     # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
@@ -230,7 +231,7 @@ def non_max_suppression(
             i = TorchNMS.fast_nms(candidate_boxes, selected_image_scores, iou_thres, iou_func=batch_probiou)
         else:
             candidate_boxes = selected_image_prediction[:, :4] + widened_class_indexes  # boxes (offset by class) 
-            # Speed strategy: torchvision for val or already loaded (faster), TorchNMS for predict (lower latency)
+            # Speed strategy: torchvision if already imported (preloaded by warmup/val/streams), else TorchNMS (no slow import)
             if "torchvision" in sys.modules:
                 import torchvision  # scope as slow import
 
