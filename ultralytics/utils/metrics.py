@@ -1053,6 +1053,7 @@ def ap_per_class(
 
         # n_p == 0 the model has made no predictions for class c ; n_l no ground_truth for objects of this class 
         if n_p == 0 or n_l == 0:
+            prec_values.append(np.zeros_like(x))  # keep one row per class, aligned with `ap` and `names`
             continue
 
         # Accumulate FPs and TPs
