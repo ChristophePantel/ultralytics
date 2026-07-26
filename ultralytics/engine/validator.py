@@ -116,7 +116,7 @@ class BaseValidator:
         """
         import torchvision  # noqa (import here so torchvision import time not recorded in postprocess time)
 
-        self.args = get_cfg(overrides=args) # TODO (CP/IRIT): Should inherit the args from the model being validated.
+        self.args = get_cfg(overrides=args)
         self.dataloader = dataloader
         self.stride = None
         self.data = None
@@ -128,6 +128,7 @@ class BaseValidator:
         self.stats = None
         self.confusion_matrix = None
         self.nc = None
+        # (CP/IRIT) start: inherit knowledge model configuration parameters
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
@@ -138,7 +139,8 @@ class BaseValidator:
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
         self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
-        # TODO (CP/IRIT): Adding no detection metrics
+        # (CP/IRIT) end: inherit knowledge model configuration parameters
+        # (CP/IRIT): Adding no detection metrics
         self.no_detection = None
         self.iouv = None
         self.jdict = None
@@ -396,7 +398,7 @@ class BaseValidator:
         for callback in self.callbacks.get(event, []):
             callback(self)
 
-    def get_dataloader(self, dataset_path, batch_size, model):
+    def get_dataloader(self, dataset_path, batch_size, model=None): # (CP/IRIT): Add model parameter
         """Get data loader from dataset path and batch size."""
         raise NotImplementedError("get_dataloader function not implemented for this validator")
 

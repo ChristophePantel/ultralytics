@@ -210,6 +210,7 @@ def verify_image(args: tuple) -> tuple:
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
     return (im_file, cls), nf, nc, msg
 
+
 def verify_image_depth(args: tuple) -> tuple:
     """Verify that an image and its paired depth .npy map exist and are readable."""
     im_file, depth_file, prefix = args
@@ -230,6 +231,7 @@ def verify_image_depth(args: tuple) -> tuple:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/depth: {e}"
     return None, None, nf, nm, nc, msg
+
 
 def verify_image_mask(args: tuple) -> tuple:
     """Verify that an image and its semantic mask exist, are readable, and have matching shapes."""

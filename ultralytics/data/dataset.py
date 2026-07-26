@@ -54,7 +54,6 @@ DATASET_CACHE_VERSION = "1.0.4"
 class YOLODataset(BaseDataset):
     """Dataset class for loading object detection and/or segmentation labels in YOLO format.
 
-
     This class supports loading data for object detection, instance segmentation, pose estimation, and oriented bounding
     box (OBB) tasks using the YOLO format.
     # TODO (CP/IRIT): Should the tensors be built on CPU or GPU ?
@@ -91,6 +90,7 @@ class YOLODataset(BaseDataset):
             *args (Any): Additional positional arguments for the parent class.
             **kwargs (Any): Additional keyword arguments for the parent class.
         """
+        # (CP/IRIT) start: Add knowledge models configuration parameters
         self.use_scores = kwargs["hyp"].get("use_scores",False)
         self.use_km = self.use_scores and kwargs["hyp"].get("use_km",False)
         self.use_km_metrics = self.use_km and kwargs["hyp"].get("use_km_metrics",False)
@@ -101,6 +101,7 @@ class YOLODataset(BaseDataset):
         self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_losses",False)
         self.use_refinement = self.use_km_losses and kwargs["hyp"].get("use_refinement",False)
         self.use_composition = self.use_km_losses and kwargs["hyp"].get("use_composition",False)
+        # (CP/IRIT) end: Add knowledge models configuration parameters
         self.use_segments = task == "segment"
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
@@ -207,7 +208,7 @@ class YOLODataset(BaseDataset):
             repeat(nkpt),
             repeat(ndim),
             repeat(self.single_cls),
-            repeat(self.use_km_scores),
+            repeat(self.use_km_scores), # (CP/IRIT) Add knowledge model scores parameter
         )
                     
 
@@ -220,9 +221,8 @@ class YOLODataset(BaseDataset):
         Returns:
             (tuple): (label dict or None, missing, found, empty, corrupt, message).
         """
-        # im_file, core_class, variant, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
-        
-        im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
+        # im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
+        im_file, core_class, variant, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
         label = (
             {
                 "im_file": im_file,
@@ -447,7 +447,7 @@ class YOLODataset(BaseDataset):
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb", "sem_masks"}:
+            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb", "sem_masks"}: # (CP/IRIT) Add knowledge model scores
                 value = torch.cat(value, 0)
             new_batch[k] = value
         if "batch_idx" in new_batch:

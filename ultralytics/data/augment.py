@@ -754,12 +754,12 @@ class Mosaic(BaseMixTransform):
         if not mosaic_labels:
             return {}
         cls = []
-        scores = []
+        scores = []  # (CP/IRIT): Add scores
         instances = []
         imgsz = self.imgsz * 2  # mosaic imgsz
         for labels in mosaic_labels:
             cls.append(labels["cls"])
-            scores.append(labels["scores"])
+            scores.append(labels["scores"])  # (CP/IRIT): Add scores
             instances.append(labels["instances"])
         # Final labels
         final_labels = {
@@ -767,13 +767,13 @@ class Mosaic(BaseMixTransform):
             "ori_shape": mosaic_labels[0]["ori_shape"],
             "resized_shape": (imgsz, imgsz),
             "cls": np.concatenate(cls, 0),
-            "scores": np.concatenate(scores,0),
+            "scores": np.concatenate(scores,0), # (CP/IRIT): Add scores
             "instances": Instances.concatenate(instances, axis=0),
         }
         final_labels["instances"].clip(imgsz, imgsz)
         good = final_labels["instances"].remove_zero_area_boxes()
         final_labels["cls"] = final_labels["cls"][good]
-        final_labels["scores"] = final_labels["scores"][good]
+        final_labels["scores"] = final_labels["scores"][good] # (CP/IRIT): Add scores
         if "texts" in mosaic_labels[0]:
             final_labels["texts"] = mosaic_labels[0]["texts"]
         return final_labels
@@ -855,9 +855,8 @@ class MixUp(BaseMixTransform):
         """
         labels2 = labels["mix_labels"][0]
         labels["instances"] = Instances.concatenate([labels["instances"], labels2["instances"]], axis=0)
-         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
-        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"]], 0)
+        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"]], 0)  # (CP/IRIT): Add scores
         return labels
 
     def apply_semantic(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1027,9 +1026,8 @@ class CutMix(BaseMixTransform):
         instances2.clip(x2 - x1, y2 - y1)
         instances2.add_padding(x1, y1)
 
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"][indexes2]], axis=0)
-        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"][indexes2]], axis=0)
+        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"][indexes2]], axis=0)  # (CP/IRIT): Add scores
         labels["instances"] = Instances.concatenate([labels["instances"], instances2], axis=0)
         return labels
 
@@ -1219,7 +1217,7 @@ class RandomPerspective(BaseTransform):
             (dict): Updated labels with transformed and filtered instances.
         """
         cls = labels["cls"]
-        scores =  labels["scores"]
+        scores =  labels["scores"]  # (CP/IRIT): Add scores
         instances = labels.pop("instances")
         instances.convert_bbox(format="xyxy")
         instances.denormalize(*params["orig_shape"][::-1])
@@ -1249,7 +1247,7 @@ class RandomPerspective(BaseTransform):
         )
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
-        labels["scores"] = scores[i]
+        labels["scores"] = scores[i]  # (CP/IRIT): Add scores
         return labels
 
     def apply_bboxes(self, bboxes: np.ndarray, M: np.ndarray) -> np.ndarray:
@@ -2049,7 +2047,7 @@ class CopyPaste(BaseMixTransform):
         instances2 = params["instances2"]
         selected = params["selected"]
         cls = labels["cls"]
-        scores =  labels["scores"]
+        scores =  labels["scores"] # (CP/IRIT): Add scores
         labels2_cls = params.get("labels2_cls")
 
         for j in selected:
@@ -2057,7 +2055,7 @@ class CopyPaste(BaseMixTransform):
             instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
 
         labels["cls"] = cls
-        labels["scores"] = scores
+        labels["scores"] = scores # (CP/IRIT): Add scores
         labels["instances"] = instances
         return labels
 
@@ -2303,7 +2301,6 @@ class Format(BaseTransform):
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
-        nc: int = 80, # Default Coco class number
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2330,7 +2327,6 @@ class Format(BaseTransform):
         self.mask_overlap = mask_overlap
         self.batch_idx = batch_idx  # keep the batch indexes
         self.bgr = bgr
-        self.nc = nc
 
     def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Compute formatting parameters shared across image and instance formatting.
@@ -2346,9 +2342,8 @@ class Format(BaseTransform):
         """
         img = labels.get("img")
         h, w = img.shape[:2] if img is not None else (0, 0)
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels.pop("cls", np.array([]))
-        scores = labels.pop("scores", np.array([]))
+        scores = labels.pop("scores", np.array([])) # (CP/IRIT): Add scores
         instances = labels.pop("instances", None)
         if instances is not None:
             instances.convert_bbox(format=self.bbox_format)
@@ -2384,13 +2379,12 @@ class Format(BaseTransform):
             (dict[str, Any]): Updated labels with formatted instance tensors.
         """
         cls = params.get("cls", np.array([]))
-        scores = params.get("scores", np.array([]))
+        scores = params.get("scores", np.array([])) # (CP/IRIT): Add scores
         instances = params.get("instances")
         assert instances is not None, "instances are required for Format.apply_instances"
         h = params.get("h", 0)
         w = params.get("w", 0)
         nl = params.get("nl", 0)
-        nc = params.get("nc", 63) # TODO (CP/IRIT): quick hack to be corrected....
 
         if self.return_mask:
             if self.mask_ratio > min(h, w):
@@ -2420,9 +2414,8 @@ class Format(BaseTransform):
                 sem_masks = torch.zeros(h // self.mask_ratio, w // self.mask_ratio)
             labels["masks"] = masks
             labels["sem_masks"] = sem_masks.float()
-
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
-        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, nc)
+        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, nc) # (CP/IRIT): Add scores
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
             labels["keypoints"] = (

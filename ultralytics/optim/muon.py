@@ -35,7 +35,7 @@ def zeropower_via_newtonschulz5(G: torch.Tensor, eps: float = 1e-7) -> torch.Ten
         - Does not produce exact UV^T but works well empirically for neural network optimization.
     """
     assert G.ndim in {2, 3}
-    # TODO (CP/IRIT): Bug on MPS if return type is bfloat16 instead of original type
+    # DONE (CP/IRIT): Bug on MPS if return type is bfloat16 instead of original type
     G_dtype = G.dtype
     X = G.reshape(-1, G.size(-2), G.size(-1)).bfloat16()
     X /= X.norm(dim=(-2, -1), keepdim=True) + eps  # ensure top singular value <= 1
@@ -49,7 +49,7 @@ def zeropower_via_newtonschulz5(G: torch.Tensor, eps: float = 1e-7) -> torch.Ten
     if G.size(-2) > G.size(-1):
         X = X.transpose(-2, -1)
     X = X.reshape(G.shape)
-    # TODO (CP/IRIT): Bug on MPS if return type is bfloat16 instead of original type
+    # DONE (CP/IRIT): Bug on MPS if return type is bfloat16 instead of original type
     return X.to(dtype=G_dtype)
 
 
@@ -222,7 +222,7 @@ class MuSGD(optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-        # TODO (CP/IRIT): Debug traces to find MPS type issue
+        # DONE (CP/IRIT): Debug traces to find MPS type issue
         # step = 0
         for group in self.param_groups:
             params = [p for p in group["params"] if p.grad is not None]

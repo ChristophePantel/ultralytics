@@ -125,6 +125,7 @@ class BasePredictor:
             _callbacks (dict, optional): Dictionary of callback functions.
         """
         self.args = get_cfg(cfg, overrides)
+        # (CP/IRIT) start: inherit knowledge model configuration parameters
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
@@ -135,6 +136,7 @@ class BasePredictor:
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
         self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
+        # (CP/IRIT) end: inherit knowledge model configuration parameters
         self.save_dir = get_save_dir(self.args)
         if self.args.conf is None:
             self.args.conf = 0.25  # default conf=0.25
@@ -417,6 +419,7 @@ class BasePredictor:
             if model.end2end:
                 # Keep head top-k >= 300 so `classes` filtering in NMS sees all candidates before `max_det` truncation
                 model.set_head_attr(max_det=max(self.args.max_det, 300), agnostic_nms=self.args.agnostic_nms)
+        # (CP/IRIT) start: inherit knowledge model data
         if self.use_km:
             if hasattr(model, 'refinement'):
                 self.refinement = model.refinement
@@ -440,6 +443,7 @@ class BasePredictor:
             # class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
             # generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
             self.class_variants = km.encode_variants(self.nc, self.variants)
+            # (CP/IRIT) end: inherit knowledge model data
 
         self.model = AutoBackend(
             model=model or self.args.model,

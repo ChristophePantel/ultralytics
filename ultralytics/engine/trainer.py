@@ -127,6 +127,7 @@ class BaseTrainer:
         """
         self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
+        # (CP/IRIT) start: inherit knowledge model configuration parameters
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
@@ -137,6 +138,7 @@ class BaseTrainer:
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
         self.use_refinement = self.use_km_losses and getattr(self.args, 'use_refinement', False)
         self.use_composition = self.use_km_losses and getattr(self.args, 'use_composition', False)
+        # (CP/IRIT) end: inherit knowledge model configuration parameters
         self.check_resume(overrides)
         self.args.device = parse_device(self.args.device)  # canonical string, resolves '-1' auto-selection once
         self.device = select_device(self.args.device)
@@ -334,10 +336,8 @@ class BaseTrainer:
             if isinstance(self.args.freeze, int)
             else []
         )
-        
         # DONE (CP/IRIT): Freeze additional specific parameters
         freeze_parameters = self.args.freeze_parameters if isinstance(self.args.freeze_parameters, list) else []
-        
         always_freeze_names = [".dfl"]  # always freeze these layers
         freeze_layer_names = [f"model.{x}." for x in freeze_list] + freeze_parameters + always_freeze_names
         if isinstance(unwrap_model(self.model), DistillationModel):
