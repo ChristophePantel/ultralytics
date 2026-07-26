@@ -89,8 +89,12 @@ def non_max_suppression(
 
     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
     # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
-    nc = nc or ((prediction.shape[1] - 4))//2  # number of classes when using both hybrid scores and km scores 
-    extra = prediction.shape[1] - 2 * nc - 4  # number of extra info when using both hybrid scores and km scores 
+    if use_km_scores then:
+        nc = nc or ((prediction.shape[1] - 4))//2  # number of classes when using both hybrid scores and km scores 
+        extra = prediction.shape[1] - 2 * nc - 4  # number of extra info when using both hybrid scores and km scores 
+    else:
+        nc = nc or (prediction.shape[1] - 4)  # number of classes
+        extra = prediction.shape[1] - nc - 4  # number of extra info
     # mask start index / end of scores
     mk = 4 + nc # start km scores index when using both hybrid scores and km scores
     mi = mk + nc  # mask start index  when using both hybrid scores and km scores
