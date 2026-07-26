@@ -81,15 +81,19 @@ def non_max_suppression(
     anchor_point_number = prediction.shape[-1]
 
     if anchor_point_number == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6) / only 6 anchor points
-        output = [pred[pred[:, 4] > conf_thres] for pred in prediction]
-
-        if classes is not None:
-            output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
-        return [pred[:max_det] for pred in output]  # apply max_det after classes filter
-
+        output, keepi = [], []
+        for pred in prediction:
+            mask = pred[:, 4] > conf_thres
+            if classes is not None:
+                mask &= (pred[:, 5:6] == classes).any(1)
+            idx = mask.nonzero(as_tuple=False).view(-1)[:max_det] # apply max_det after classes filter
+            output.append(pred[idx])
+            keepi.append(idx)
+        return (output, keepi) if return_idxs else output
+    
     bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
     # TODO (CP/IRIT): Why is nc set to the prediction number of classes when it is 0 (for example, detection case) ?
-    if use_km_scores then:
+    if use_km_scores:
         nc = nc or ((prediction.shape[1] - 4))//2  # number of classes when using both hybrid scores and km scores 
         extra = prediction.shape[1] - 2 * nc - 4  # number of extra info when using both hybrid scores and km scores 
     else:

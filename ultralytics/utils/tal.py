@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from . import LOGGER
 from .metrics import bbox_iou, probiou
@@ -290,23 +290,12 @@ class TaskAlignedAssigner(nn.Module):
         sz_overlaps = torch.numel(overlaps)
         bbox_scores = torch.zeros([self.bs, self.n_max_boxes, anchor_point_number], dtype=pd_scores.dtype, device=pd_scores.device)
 
-        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, bs, max_num_obj
-        # for each batch, vector of max_num_obj value of batch indexes
-        # Image index for each ground truth bounding box in each image
-        ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # bs, max_num_obj
-        
-        # TODO (CP/IRIT): Purpose of ind[1]
-        # for each batch, vector of max_num_obj class indexes
-        # suppress last unused dimension
-        # Class index for each ground truth bounding box in each image
-        # TODO (CP/IRIT): Take the scores from all classes, not only the main class
-        # Tensor of class indexes for each object in each omage
-        ind[1] = gt_labels.squeeze(-1) # bs, max_num_obj
-        
+        batch_ind = torch.arange(self.bs, device=pd_scores.device)[:, None]  # bs, 1
+
         # Get the scores of each grid for each gt cls
         # Predicted confidence score for each anchor point for each ground truth object in each image 
-        selected_pd_scores = pd_scores[ind[0], :, ind[1]] # bs, max_num_obj, h*w
-        
+        selected_pd_scores = pd_scores[batch_ind, :, gt_labels.squeeze(-1).long()] # bs, max_num_obj, h*w
+
         # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
         sz_bbox_scores = torch.numel(bbox_scores)
         sz_pd_scores_ind = torch.numel(selected_pd_scores)
@@ -316,13 +305,13 @@ class TaskAlignedAssigner(nn.Module):
         
         # Select the scores for the anchor points in a given ground truth object from a given image
         pd_scores_masked = selected_pd_scores[mask_gt]
-        
+
         # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
         sz_pd_scores_masked = torch.numel(pd_scores_masked)
         nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
         assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
         # END DEBUG
-        
+
         # The score of the bounding box is the score of the class associated to the bounding box
         # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
         # Predicted scores for the anchor points in a given ground truth object from a given image, others are 0
@@ -384,12 +373,9 @@ class TaskAlignedAssigner(nn.Module):
         # (b, max_num_obj, topk)
         topk_idxs.masked_fill_(~topk_mask, 0)
 
-        # (b, max_num_obj, topk, h*w) -> (b, max_num_obj, h*w)
+        # Count how many of the topk lists select each anchor; scatter_add_ accumulates duplicate indices in one pass
         count_tensor = torch.zeros(metrics.shape, dtype=torch.int8, device=topk_idxs.device)
-        ones = torch.ones_like(topk_idxs[:, :, :1], dtype=torch.int8, device=topk_idxs.device)
-        for k in range(self.topk):
-            # Expand topk_idxs for each value of k and add 1 at the specified positions
-            count_tensor.scatter_add_(-1, topk_idxs[:, :, k : k + 1], ones)
+        count_tensor.scatter_add_(-1, topk_idxs, torch.ones_like(topk_idxs, dtype=torch.int8))
         # Filter invalid bboxes
         count_tensor.masked_fill_(count_tensor > 1, 0)
 
@@ -453,14 +439,15 @@ class TaskAlignedAssigner(nn.Module):
 
         # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
         # 10x faster than F.one_hot()
+
         # Create an int64 zero tensor of dimension batch size * anchor point number * class number
         # TODO (CP/IRIT): Are the ground truth labels used ?
         # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
         batch_number = target_labels.shape[0]
         anchor_point_number = target_labels.shape[1] # anchor points number
-        target_scores_base = torch.zeros(
+        target_scores = torch.zeros(
             (batch_number, anchor_point_number, self.num_classes),
-            dtype=torch.int64,
+            dtype=torch.int8,
             device=target_labels.device,
             )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
         # Adds a dimension at the end of target labels
@@ -538,12 +525,16 @@ class TaskAlignedAssigner(nn.Module):
 
         n_anchors = xy_centers.shape[0]
         bs, n_boxes, _ = gt_bboxes.shape
-        lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
+        # lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
+        lt, rb = gt_bboxes.unsqueeze(2).chunk(2, 3)  # (b, n_boxes, 1, 2) left-top, right-bottom
         anchors_lt = xy_centers[None] - lt # positive when center over left top 
+        positive_anchors_lt = anchors_lt > eps
         rb_anchors = rb - xy_centers[None] # positive when center under right bottom
-        anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
-        anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 
-        positive_anchor_points = anchors_bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
+        positive_anchors_rb = anchors_rb > eps
+        # anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
+        # anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 
+        # positive_anchor_points = anchors_bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
+        positive_anchor_points = (positive_anchors_lt & positive_anchors_rb).all(3)
 
         # positive_anchor_points_count = positive_anchor_points.sum(1)
         # image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)

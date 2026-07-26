@@ -81,7 +81,7 @@ class BaseValidator:
         plots (dict): Dictionary to store plots for visualization.
         callbacks (dict): Dictionary to store various callback functions.
         stride (int): Model stride for padding calculations.
-        loss (torch.Tensor): Accumulated loss during training validation.
+        loss (dict): Accumulated loss items during training validation.
 
     Methods:
         __call__: Execute validation process, running inference on dataloader and computing performance metrics.
@@ -175,7 +175,7 @@ class BaseValidator:
             if trainer.args.compile and hasattr(model, "_orig_mod"):
                 model = model._orig_mod  # validate non-compiled original model to avoid issues
             model = model.float()
-            self.loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
+            self.loss = {k: torch.zeros_like(v) for k, v in trainer.loss_items.items()}
             self.args.plots &= trainer.stopper.possible_stop or (trainer.epoch == trainer.epochs - 1)
             model.eval()
         else:
@@ -203,6 +203,15 @@ class BaseValidator:
             self.args.quantize = 16 if model.fp16 else None  # record actual inference precision
             stride, fmt = model.stride, model.format
             pt = fmt == "pt"
+            # Same gate as predictor.setup_model: NHWC is lossless only for native PyTorch models on CUDA.
+            channels_last = self.args.channels_last and self.device.type == "cuda" and pt
+            if self.args.channels_last and not channels_last:
+                LOGGER.warning(
+                    f"'channels_last=True' applies only to native PyTorch models on CUDA, ignoring for "
+                    f"format='{fmt}' on '{self.device.type}'."
+                )
+            if channels_last:
+                model.to(memory_format=torch.channels_last)
             imgsz = check_imgsz(self.args.imgsz, stride=stride)
             if fmt not in {"pt", "torchscript"} and not getattr(model, "dynamic", False):
                 self.args.batch = model.metadata.get("batch", 1)  # export.py models default to batch-size 1
@@ -216,6 +225,7 @@ class BaseValidator:
                 "pose",
                 "obb",
                 "semantic",
+                "depth",
             }:
                 self.data = check_det_dataset(self.args.data, split=self.args.split)
             else:
@@ -230,7 +240,7 @@ class BaseValidator:
 
             model.eval()
             if self.args.compile:
-                model = attempt_compile(model, device=self.device)
+                model = attempt_compile(model, device=self.device, mode=self.args.compile)
             model.warmup(imgsz=(1 if pt else self.args.batch, self.data["channels"], imgsz, imgsz))  # warmup
 
         self.run_callbacks("on_val_start")
@@ -255,11 +265,12 @@ class BaseValidator:
                 with dt[1]:
                     preds = model(batch["img"], augment=augment)
 
-            # Loss
-            with dt[2]:
-                # TODO (CP/IRIT): Also compute validation loss
-                if self.training:
-                    self.loss += model.loss(batch, preds)[1]
+                # Loss
+                with dt[2]:
+                    # TODO (CP/IRIT): Also compute validation loss
+                    if self.training:
+                        for k, v in model.loss(batch, preds)[1].items():
+                            self.loss[k] += v
 
             # Postprocess
             with dt[3]:
@@ -283,12 +294,14 @@ class BaseValidator:
 
         if self.training:
             # Reduce loss across all GPUs
-            loss = self.loss.clone().detach()
+            loss = {k: v.clone().detach() for k, v in self.loss.items()}
             if trainer.world_size > 1:
-                dist.reduce(loss, dst=0, op=dist.ReduceOp.AVG)
+                for v in loss.values():
+                    dist.reduce(v, dst=0, op=dist.ReduceOp.AVG)
             if RANK > 0:
                 return
-            results = {**stats, **trainer.label_loss_items(loss.cpu() / len(self.dataloader), prefix="val")}
+            loss = {k: v.cpu() / len(self.dataloader) for k, v in loss.items()}
+            results = {**stats, **trainer.label_loss_items(loss, prefix="val")}
             return {k: round(float(v), 5) for k, v in results.items()}  # return results as 5 decimal place floats
         else:
             if RANK > 0:
@@ -371,7 +384,7 @@ class BaseValidator:
                     correct[matches[:, 1].astype(int), i] = True
                     if self.use_km_metrics:
                         pred_classes[matches[:,1]] = true_classes[matches[:,0]]
-        result = torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+        result = torch.from_numpy(correct)
         return result
 
     def add_callback(self, event: str, callback):
@@ -401,15 +414,12 @@ class BaseValidator:
 
     def init_metrics(self, model):
         """Initialize performance metrics for the YOLO model."""
-        pass
 
     def update_metrics(self, preds, batch):
         """Update metrics based on predictions and batch."""
-        pass
 
     def finalize_metrics(self):
         """Finalize and return all metrics."""
-        pass
 
     def get_stats(self):
         """Return statistics about the model's performance."""
@@ -417,15 +427,12 @@ class BaseValidator:
 
     def gather_stats(self):
         """Gather statistics from all the GPUs during DDP training to GPU 0."""
-        pass
 
     def print_results(self):
         """Print the results of the model's predictions."""
-        pass
 
     def get_desc(self):
         """Get description of the YOLO model."""
-        pass
 
     @property
     def metric_keys(self):
@@ -433,24 +440,17 @@ class BaseValidator:
         return []
 
     def on_plot(self, name, data=None):
-        """Register plots for visualization, deduplicating by type."""
-        plot_type = data.get("type") if data else None
-        if plot_type and any((v.get("data") or {}).get("type") == plot_type for v in self.plots.values()):
-            return  # Skip duplicate plot types
+        """Register a plot by its unique path for visualization and logging."""
         self.plots[Path(name)] = {"data": data, "timestamp": time.time()}
 
     def plot_val_samples(self, batch, ni):
         """Plot validation samples during training."""
-        pass
 
     def plot_predictions(self, batch, preds, ni):
         """Plot YOLO model predictions on batch images."""
-        pass
 
     def pred_to_json(self, preds, batch):
         """Convert predictions to JSON format."""
-        pass
 
     def eval_json(self, stats):
         """Evaluate and return JSON format of prediction statistics."""
-        pass
