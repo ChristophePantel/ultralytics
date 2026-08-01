@@ -396,21 +396,21 @@ class ConfusionMatrix(DataExportMixin):
         
         # Loop through the batch items (such as bounding boxes, class labels, etc).
         # batch can either be GT or detections 
-        # batch is a dictionnary with k being the key and either 'bboxes", "cls", "conf", keypoints' or 'masks'
+        # batch is a dictionary with k being the key and either 'bboxes", "cls", "conf", keypoints' or 'masks'
         # v is the values of each
         for k, v in batch.items():
 
             # TODO (CP/IRIT): should "scores" be managed in the same way ?
             # Exemple : self.matches[TP]["bboxes"] means the True Positives for the bounding boxes 
             if k in {"bboxes", "cls", "conf", "keypoints"}:
-                # (CP/IRIT) : why v[[idx]] ? => in order to keeps batch dimension, not only bounding box dimnesions 
+                # (CP/IRIT) : why v[[idx]] ? => in order to keeps batch dimension, not only bounding box dimensions 
                 # (batch, size) and not (size, )
                 self.matches[mtype][k] += v[[idx]]
             elif k == "masks":
                 # NOTE: masks.max() > 1.0 means overlap_mask=True with (1, H, W) shape
                 self.matches[mtype][k] += [v[0] == idx + 1] if v.max() > 1.0 else [v[idx]]
 
-    # (CP/IRIT) : This procedure does not interest us for oru task 
+    # (CP/IRIT) : This procedure does not interest us for our task 
     def process_cls_preds(self, preds: list[torch.Tensor], targets: list[torch.Tensor]) -> None:
         """Update confusion matrix for classification task.
 
@@ -469,9 +469,9 @@ class ConfusionMatrix(DataExportMixin):
                 detections = {k: detections[k][detections["conf"] > conf] for k in detections}
                  # detection_classes is the list of predicted classes converted from from float to int then tensor to list 
                 detection_classes = detections["cls"].int().tolist()
-                # (i is the index and gc is the predicted class number)
+                # (i is the index and dc is the predicted class number)
                 for i, dc in enumerate(detection_classes):
-                    # self.nc represents no ground turth match (on the extra column)
+                    # self.nc represents no ground truth match (on the extra column)
                     self.matrix[dc, self.nc] += 1  # FP
                     self._append_matches("FP", detections, i)
             return
@@ -498,7 +498,7 @@ class ConfusionMatrix(DataExportMixin):
         # Filter detections by confidence threshold
         detections = {k: detections[k][detections["conf"] > conf] for k in detections}
         # first convert gt_cls from float to int then tensor to list 
-        # gt_classes is the list of ground ttruth classes 
+        # gt_classes is the list of ground truth classes 
         gt_classes = gt_cls.int().tolist()
         # first convert the detected classes from float to int then tensor to list 
         # detections["cls"] is the list of detected classes         
@@ -523,10 +523,6 @@ class ConfusionMatrix(DataExportMixin):
             if x[0].shape[0] > 1:
                 # sort according to iou value in reverse order ? meaning of [::-1]
                 matches = matches[matches[:, 2].argsort()[::-1]]
-                # remove bboxes that occurs several time keeping the highest iou
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                # sort according to iou value in reverse order ? meaning of [::-1]
-                matches = matches[matches[:, 2].argsort()[::-1]]
                 # remove gt_bboxes that occurs several time keeping the highest iou
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
         
@@ -534,7 +530,6 @@ class ConfusionMatrix(DataExportMixin):
         else:
             matches = np.zeros((0, 3))
 
-        # (CP/IRIT) Needed ? : n = matches.shape[0] > 0
         # m0: line indexes, i.e. gt_bboxes indexes
         # m1: column indexes, i.e. bboxes indexes
         # _:do not use iou
@@ -552,29 +547,17 @@ class ConfusionMatrix(DataExportMixin):
         # (i is the index and gc is the GT class number)
         # gc: ground truth class
         for i, gc in enumerate(gt_classes):
-            # indices for the matched gt_bboxes
-            # j = m0 == i
-            # existing matches and one for i
-            # if n and sum(j) == 1:
-                # dc: detected class
-                # dc = detection_classes[m1[j].item()]
+            # di: indices for the detected 
             if (di := gt_match[i].item()) >= 0:
                 # dc: detected class
                 dc = detection_classes[di]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
-                # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
-                # if self.is_compatible( dc, gc):
-                # if dc == gc:
-                    # When ground truth and predicted are identical, add to the true positive
-                    # self._append_matches("TP", detections, m1[j].item())
-                # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
+                # DONE(CP/IRIT): Use a distance between dc and gc to decide if it is a correct prediction or not
                 if self.is_compatible( dc, gc):
                 # if dc == gc:
                     self._append_matches("TP", detections, di)
                 else:
                     # else add to the false positive for the predicted and false negative for the ground truth
-                    # .tem() extract the value from the tensor
-                    # self._append_matches("FP", detections, m1[j].item())
                     self._append_matches("FP", detections, di)
                     self._append_matches("FN", batch, i)
             else:
@@ -588,8 +571,6 @@ class ConfusionMatrix(DataExportMixin):
 
         # (i is the index and dc is the detected class number)
         for i, dc in enumerate(detection_classes):
-            # if not any(m1 == i):
-                # self.nc represents no ground truth match (on the extra column)
             if i not in matched_det:
                 # self.nc represents no ground truth match (on the extra column)
                 self.matrix[dc, self.nc] += 1  # FP
