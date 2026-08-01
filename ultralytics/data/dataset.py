@@ -59,6 +59,7 @@ class YOLODataset(BaseDataset):
     # TODO (CP/IRIT): Should the tensors be built on CPU or GPU ?
 
     Attributes:
+        format_class (type[Format]): Formatter appended by build_transforms; subclasses override it per task.
         use_segments (bool): Indicates if segmentation masks should be used.
         use_keypoints (bool): Indicates if keypoints should be used for pose estimation.
         use_obb (bool): Indicates if oriented bounding boxes should be used.
@@ -80,6 +81,8 @@ class YOLODataset(BaseDataset):
         >>> dataset = YOLODataset(img_path="path/to/images", data={"names": {0: "person"}}, task="detect")
         >>> dataset.get_labels()
     """
+
+    format_class = Format
 
     def __init__(self, *args, data: dict | None = None, task: str = "detect", **kwargs):
         """Initialize the YOLODataset.
@@ -340,7 +343,7 @@ class YOLODataset(BaseDataset):
         else:
             transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False)])
         transforms.append(
-            Format(
+            self.format_class(
                 bbox_format="xywh",
                 normalize=True,
                 return_mask=self.use_segments,
@@ -468,6 +471,8 @@ class DepthDataset(YOLODataset):
         >>> dataset = DepthDataset(img_path="/data/nyu/images/train", data={"nc": 1})
     """
 
+    format_class = DepthFormat
+
     def _depth_path_for(self, im_file: str) -> str:
         """Map an image path to its companion depth .npy path (last 'images' path component → 'depth')."""
         parts = list(Path(im_file).parts)
@@ -553,7 +558,6 @@ class DepthDataset(YOLODataset):
         if not self.augment:
             # stretch the image instead of padding
             transforms[-2] = LetterBox(new_shape=(self.imgsz, self.imgsz), scale_fill=True)
-        transforms[-1] = DepthFormat()  # replace the last transform with DepthFormat
         return transforms
 
 
@@ -906,6 +910,8 @@ class SemanticDataset(YOLODataset):
         include_class (np.ndarray | None): Class ids to keep per pixel (None keeps all).
     """
 
+    format_class = SemanticFormat
+
     def __init__(self, *args, data: dict | None = None, **kwargs):
         """Initialize SemanticDataset.
 
@@ -1039,19 +1045,6 @@ class SemanticDataset(YOLODataset):
         if self.label_mapping:
             mask = self.convert_label(mask, inverse=False)
         return mask.astype(np.uint8, copy=False)
-
-    def build_transforms(self, hyp=None):
-        """Build transforms for semantic segmentation.
-
-        Args:
-            hyp (dict): Hyperparameters.
-
-        Returns:
-            (Compose): Composed transforms.
-        """
-        transforms = super().build_transforms(hyp)
-        transforms[-1] = SemanticFormat()  # replace the last transform with SemanticFormat
-        return transforms
 
     def convert_label(self, label, inverse=False):
         """Convert label values using the dataset's label mapping.
