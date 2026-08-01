@@ -450,7 +450,7 @@ class YOLODataset(BaseDataset):
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "scores", "segments", "obb", "sem_masks"}: # (CP/IRIT) Add knowledge model scores
+            if k in {"masks", "keypoints", "bboxes", "cls", "variant", "scores", "segments", "obb", "sem_masks"}: # (CP/IRIT) Add knowledge model scores
                 value = torch.cat(value, 0)
             new_batch[k] = value
         if "batch_idx" in new_batch:

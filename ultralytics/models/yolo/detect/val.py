@@ -82,7 +82,7 @@ class DetectionValidator(BaseValidator):
         batch["img"] = (batch["img"].half() if self.args.quantize == 16 else batch["img"].float()) / 255
         
         # TODO(CP/IRIT): manage "scores" in the same way
-        for k in {"batch_idx", "cls", "scores", "bboxes"}:
+        for k in {"batch_idx", "cls", "variant", "scores", "bboxes"}:
             batch[k] = batch[k].to(self.device, non_blocking=True)
 
         return batch
@@ -204,7 +204,7 @@ class DetectionValidator(BaseValidator):
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
         scores = batch["scores"][idx]
-        # variant = batch["variant"][idx]
+        variant = batch["variant"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
@@ -214,7 +214,7 @@ class DetectionValidator(BaseValidator):
             "cls": cls,
             "bboxes": bbox,
             "scores": scores,
-            # "variant":variant,
+            "variant":variant,
             "ori_shape": ori_shape,
             "imgsz": imgsz,
             "ratio_pad": ratio_pad,
@@ -251,7 +251,7 @@ class DetectionValidator(BaseValidator):
 
             cls = pbatch["cls"].cpu().numpy()
             scores = pbatch["scores"].cpu().numpy()
-            # variant = pbatch["variant"].cpu().numpy()
+            variant = pbatch["variant"].cpu().numpy()
             class_number = scores.shape[1]
             no_pred = predn["cls"].shape[0] == 0
             # if no_pred:
@@ -264,7 +264,7 @@ class DetectionValidator(BaseValidator):
                     # TODO (CP/IRIT): Add the target variant.
                     "target_cls": cls,
                     "target_scores": scores,
-                    # "target_variant":variant,
+                    "target_variant":variant,
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
