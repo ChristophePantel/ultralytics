@@ -131,6 +131,7 @@ def non_max_suppression(
     # TODO (CP/IRIT): Too small for later extraction when there are no results.
     output = [torch.zeros((0, 7 + 2 * nc + extra), device=prediction.device)] * bs
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
+    use_torchvision = prediction.device.type not in {"npu", "xpu"} and "torchvision" in sys.modules
     # Rename xi as image_index, x as image_prediction, xk as image_anchor_point_indexes
     for image_index, (image_prediction, image_anchor_point_indexes) in enumerate(zip(prediction, anchor_point_indexes)):
         # Apply constraints
@@ -240,7 +241,8 @@ def non_max_suppression(
         else:
             candidate_boxes = selected_image_prediction[:, :4] + widened_class_indexes  # boxes (offset by class) 
             # Speed strategy: torchvision if already imported (preloaded by warmup/val/streams), else TorchNMS (no slow import)
-            if "torchvision" in sys.modules:
+            # Use torchvision if already imported and supported; its NMS has no NPU/XPU kernels.
+            if use_torchvision:
                 import torchvision  # scope as slow import
 
                 selected_indexes = torchvision.ops.nms(candidate_boxes, selected_image_scores, iou_thres)

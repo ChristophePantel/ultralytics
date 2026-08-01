@@ -534,35 +534,48 @@ class ConfusionMatrix(DataExportMixin):
         else:
             matches = np.zeros((0, 3))
 
-        n = matches.shape[0] > 0
+        # (CP/IRIT) Needed ? : n = matches.shape[0] > 0
         # m0: line indexes, i.e. gt_bboxes indexes
         # m1: column indexes, i.e. bboxes indexes
         # _:do not use iou
         m0, m1, _ = matches.transpose().astype(int)
 
+        # matches is deduplicated on both columns, so each gt and each detection appears at most once
+        gt_match = np.full(len(gt_classes), -1)
+        gt_match[m0] = m1
+        matched_det = set(m1.tolist())
+        
         # -----------------------------
         # Process each ground-truth object
         # -----------------------------
-
+        
         # (i is the index and gc is the GT class number)
         # gc: ground truth class
         for i, gc in enumerate(gt_classes):
             # indices for the matched gt_bboxes
-            j = m0 == i
+            # j = m0 == i
             # existing matches and one for i
-            if n and sum(j) == 1:
+            # if n and sum(j) == 1:
                 # dc: detected class
-                dc = detection_classes[m1[j].item()]
+                # dc = detection_classes[m1[j].item()]
+            if (di := gt_match[i].item()) >= 0:
+                # dc: detected class
+                dc = detection_classes[di]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
+                # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
+                # if self.is_compatible( dc, gc):
+                # if dc == gc:
+                    # When ground truth and predicted are identical, add to the true positive
+                    # self._append_matches("TP", detections, m1[j].item())
                 # TODO (CP/IRIT): Should use a distance between dc and gc to decide if it is a correct prediction or not
                 if self.is_compatible( dc, gc):
                 # if dc == gc:
-                    # When ground truth and predicted are identical, add to the true positive
-                    self._append_matches("TP", detections, m1[j].item())
+                    self._append_matches("TP", detections, di)
                 else:
                     # else add to the false positive for the predicted and false negative for the ground truth
                     # .tem() extract the value from the tensor
-                    self._append_matches("FP", detections, m1[j].item())
+                    # self._append_matches("FP", detections, m1[j].item())
+                    self._append_matches("FP", detections, di)
                     self._append_matches("FN", batch, i)
             else:
                 # self.nc represents no prediction match (on the extra row)
@@ -575,8 +588,10 @@ class ConfusionMatrix(DataExportMixin):
 
         # (i is the index and dc is the detected class number)
         for i, dc in enumerate(detection_classes):
-            if not any(m1 == i):
-                # self.nc represents no ground turth match (on the extra column)
+            # if not any(m1 == i):
+                # self.nc represents no ground truth match (on the extra column)
+            if i not in matched_det:
+                # self.nc represents no ground truth match (on the extra column)
                 self.matrix[dc, self.nc] += 1  # FP
                 self._append_matches("FP", detections, i)
 
