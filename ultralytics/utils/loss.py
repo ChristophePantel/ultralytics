@@ -566,7 +566,7 @@ class v8DetectionLoss:
         self.nc = m.nc  # number of classes
         self.no = m.nc + m.reg_max * 4 # number of predicted features
         if self.use_km_scores:
-            self.no = self.no + m.nc # adding the class score map used for km loss functions
+            self.no = self.no + m.nc # (CP/IRIT) adding the class score map used for km loss functions
         self.reg_max = m.reg_max
         self.device = device
 
