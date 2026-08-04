@@ -7,13 +7,15 @@ import scipy.sparse.csgraph as spsg
 class VariantNotFound(Exception):
     pass
 
+# Introduce Wing genalizes AnimalWing and ArtefactWing
+# Introduce Artefact, Monitor
 def get_class_names():
     class_names = frozenset({
         'Aeroplane', #00
-       'Animal_Wing', #01
+       'AnimalWing', #01
        'Animal', #02
        'Arm', #03
-       'Artifact_Wing', #04
+       'ArtifactWing', #04
        'Beak', #05
        'Bicycle', #06
        'Bird', #07
@@ -25,11 +27,11 @@ def get_class_names():
        'Cap', #13
        'Car', #14
        'Cat', #15
-       'Chain_Wheel', #16
+       'ChainWheel', #16
        'Chair', #17
        'Coach', #18
        'Cow', #19
-       'Dining_Table', #20
+       'DiningTable', #20
        'Dog', #21
        'Door', #22
        'Ear', #23
@@ -41,12 +43,12 @@ def get_class_names():
        'Hand', #29
        'Handlebar', #30
        'Head', #31
-       'Headlight', #32
+       'HeadLight', #32
        'Hoof', #33
        'Horn', #34
        'Horse', #35
        'Leg', #36
-       'License_Plate', #37
+       'LicensePlate', #37
        'Locomotive', #38
        'Mirror', #39
        'Motorbike', #40
@@ -57,7 +59,7 @@ def get_class_names():
        'Person', #45
        'Plant', #46
        'Pot', #47
-       'Potted_Plant', #48
+       'PottedPlant', #48
        'Saddle', #49
        'Screen', #50
        'Sheep', #51
@@ -66,7 +68,7 @@ def get_class_names():
        'Tail', #54
        'Torso', #55
        'Train', #56
-       'TV_Monitor', #57
+       'TelevisionMonitor', #57
        'Vehicle', #58
        'Wheel', #59
        'Window', #60
@@ -102,7 +104,7 @@ def get_abstract_classes():
 def get_contained_classes():
     contained_classes = {
         "Animal" : frozenset([ "Eye", "Head", "Leg", "Neck", "Torso" ]),
-        "Bird" : frozenset(["Animal_Wing", "Beak", "Tail"]),
+        "Bird" : frozenset(["AnimalWing", "Beak", "Tail"]),
         "Cat" : frozenset(["Ear", "Tail"]),
         "Cow" : frozenset(["Ear", "Horn", "Muzzle", "Tail"]),
         "Dog" : frozenset(["Ear", "Muzzle", "Nose", "Tail"]),
@@ -110,18 +112,25 @@ def get_contained_classes():
         "Person" : frozenset(["Arm", "Ear", "Eyebrow", "Foot", "Hair", "Hand", "Mouth", "Nose"]),
         "Sheep" : frozenset(["Ear", "Horn", "Muzzle", "Tail"]),
         "Bottle" : frozenset(["Body", "Cap"]),
-        "Potted_Plant" : frozenset(["Plant", "Pot"]),
-        "TV_Monitor" : frozenset(["Screen"]),
-        "Aeroplane" : frozenset(["Artifact_Wing", "Body", "Engine", "Stern", "Wheel"]),
-        "Bicycle" : frozenset(["Chain_Wheel", "Handlebar", "Headlight", "Saddle", "Wheel"]),
-        "Bus" : frozenset(["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"]),
-        "Car" : frozenset(["Bodywork", "Door", "Headlight", "License_Plate", "Mirror", "Wheel", "Window"]),
-        "Motorbike" : frozenset(["Handlebar", "Headlight", "Saddle", "Wheel"]),
-        "Train" : frozenset([ "Coach", "Headlight", "Locomotive" ])
+        "PottedPlant" : frozenset(["Plant", "Pot"]),
+        "TelevisionMonitor" : frozenset(["Screen"]),
+        "Aeroplane" : frozenset(["ArtifactWing", "Body", "Engine", "Stern", "Wheel"]),
+        "Bicycle" : frozenset(["ChainWheel", "Handlebar", "HeadLight", "Saddle", "Wheel"]),
+        "Bus" : frozenset(["Bodywork", "Door", "HeadLight", "LicensePlate", "Mirror", "Wheel", "Window"]),
+        "Car" : frozenset(["Bodywork", "Door", "HeadLight", "LicensePlate", "Mirror", "Wheel", "Window"]),
+        "Motorbike" : frozenset(["Handlebar", "HeadLight", "Saddle", "Wheel"]),
+        "Train" : frozenset([ "Coach", "HeadLight", "Locomotive" ])
         }
     return contained_classes
 
 def associate_number_to_class_and_class_to_number(classe_names):
+    """
+    Args:
+        names
+    Returns:
+        dictionnary_number_to_class: associate a number to each name
+        dictionnary_class_to_number: associate a name to each number
+    """
     dictionnary_number_to_class = {}
     dictionnary_class_to_number = {}
     indice = 0
@@ -132,6 +141,10 @@ def associate_number_to_class_and_class_to_number(classe_names):
     return dictionnary_number_to_class, dictionnary_class_to_number
 
 def associate_codes_to_hierarchies(codes, named_hierarchy):
+    """
+    Args:
+    Returns:
+    """
     coded_named_hierarchy = {}
     for key in named_hierarchy:
         values = named_hierarchy.get(key)
@@ -145,6 +158,10 @@ def associate_codes_to_hierarchies(codes, named_hierarchy):
     return coded_named_hierarchy
 
 def invert_relation_v0(relation):
+    """
+    Args:
+    Returns:
+    """
     inverted_relation = {}
     for key in relation:
         inverted_relation[key] = frozenset()
@@ -157,6 +174,10 @@ def invert_relation_v0(relation):
     return inverted_relation 
 
 def followers(root,relation):
+    """
+    Args:
+    Returns: frozenset(int)
+    """
     result = frozenset({root})
     if root in relation:
         for target in relation[root]:
@@ -164,6 +185,11 @@ def followers(root,relation):
     return result     
 
 def transitive_closure(relation):
+    """
+    Args:
+        relation
+    Returns:
+    """
     transitive_dict = {}
     for key in relation:
         transitive_dict[key] = frozenset({})
@@ -172,6 +198,10 @@ def transitive_closure(relation):
     return transitive_dict
 
 def reflexive_transitive_closure(relation):
+    """
+    Args:
+    Returns:
+    """
     reflexive_transitive_dict = {}
     for key in relation:
         reflexive_transitive_dict[key] = frozenset({key})
@@ -180,6 +210,10 @@ def reflexive_transitive_closure(relation):
     return reflexive_transitive_dict
 
 def roots(relation):
+    """
+    Args:
+    Returns:
+    """
     values = frozenset()
     for key in relation:
         values = values.union(relation[key])
@@ -190,6 +224,10 @@ def roots(relation):
     return results 
 
 def leaves(relation):
+    """
+    Args:
+    Returns:
+    """
     values = frozenset()
     for key in relation:
         values = values.union(relation[key])
@@ -200,6 +238,10 @@ def leaves(relation):
     return results 
 
 def invert_relation(relation):
+    """
+    Args:
+    Returns:
+    """
     inverted_relation = {}
     for key in relation:
         values = relation.get(key)
@@ -211,6 +253,10 @@ def invert_relation(relation):
     return inverted_relation
 
 def class_names_to_codes(class_names, class_name_to_code):
+    """
+    Args:
+    Returns:
+    """
 # names is a set of names
 # name_to_code is the function that association a code to a name
 # returns is a set of codes for each name
@@ -241,13 +287,17 @@ def element_variants(element, relation, names):
             for variant_name in target_results:
                 # Add the root to the built variants
                 # Merge by the way the various identical variants
-                results[singleton_name + '_' + variant_name] = target_results.union( singleton_element )
+                results[singleton_name + '_' + variant_name] = target_results[variant_name].union( singleton_element )
     else:
         # If the root has no successors in the relation, there is a single variant containing the root
-        results[singleton_name] = frozenset( { singleton_element } )
+        results[singleton_name] = singleton_element
     return results
 
 def variant_name(variant,names):
+    """
+    Args:
+    Returns:
+    """
     name = names[variant[0]]
     for index in range(1,len(variant)):
         name = name + "_" + names[variant[index]]
@@ -276,9 +326,13 @@ def variants( elements, abstracts, relation, names):
                     variant_to_element[code] = element
                     variant_names[code] = variant_name
                     code = code + 1
-    return results, variant_to_element
+    return results, variant_to_element, variant_names
 
 def non_empty_keys(relation):
+    """
+    Args:
+    Returns:
+    """
     non_empty_keys_results = list(relation.keys())
     for key in relation:
         if relation[key] == []:
@@ -286,6 +340,10 @@ def non_empty_keys(relation):
     return non_empty_keys_results
 
 def expand(elements,relation):
+    """
+    Args:
+    Returns:
+    """
     result = {}
     for element in elements:
         if element in relation:
@@ -295,6 +353,10 @@ def expand(elements,relation):
     return result
 
 def resolve(elements,composition,refinement):
+    """
+    Args:
+    Returns:
+    """
     result = {}
     expanded_composition = expand(elements,composition)
     expanded_refinement = expand(elements,refinement)
@@ -306,6 +368,10 @@ def resolve(elements,composition,refinement):
     return result
 
 def generalize(elements,relation,refinement):
+    """
+    Args:
+    Returns:
+    """
     expanded_refinement = expand(elements,refinement)
     reflexive_transitive_refinement = reflexive_transitive_closure(expanded_refinement)
     result = {}
@@ -317,6 +383,10 @@ def generalize(elements,relation,refinement):
     return result
             
 def class_siblings(searched_class, ancestors):
+    """
+    Args:
+    Returns:
+    """
     siblings = []
     inverted_ancestors = invert_relation(ancestors)
     parents_searched_class = ancestors.get(searched_class)
@@ -328,6 +398,10 @@ def class_siblings(searched_class, ancestors):
     return siblings
 
 def encode_variants(class_number, class_variants):
+    """
+    Args:
+    Returns:
+    """
     result = torch.zeros((len(class_variants),class_number))
     for variant_index in class_variants:
         for class_index in class_variants[variant_index]:
@@ -335,6 +409,10 @@ def encode_variants(class_number, class_variants):
     return result
 
 def get_variant_code(variant_classes, variants):
+    """
+    Args:
+    Returns:
+    """
     # variant_classes : set of classes in the variant
     # variants : dict which associate to a variant number, the set of classes
     # Return : number of the variant
@@ -348,6 +426,10 @@ def get_variant_code(variant_classes, variants):
         return variant_number
     
 def get_candidate_variants(variant_classes, variant_to_classes):
+    """
+    Args:
+    Returns:
+    """
     if len(variant_classes) == 0:
         variant_set = frozenset()
     else:
@@ -409,6 +491,10 @@ def scores_bce(batch_scores, prediction_scores):
     return bce
 
 def get_class_compatibility_matrix(class_number, coded_class_hierarchy, coded_part_hierarchy):
+    """
+    Args:
+    Returns:
+    """
     knowledge_graph = sps.lil_array((class_number,class_number))
 
     for origin in coded_class_hierarchy.keys():

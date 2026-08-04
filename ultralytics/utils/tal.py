@@ -529,7 +529,7 @@ class TaskAlignedAssigner(nn.Module):
         lt, rb = gt_bboxes.unsqueeze(2).chunk(2, 3)  # (b, n_boxes, 1, 2) left-top, right-bottom
         anchors_lt = xy_centers[None] - lt # positive when center over left top 
         positive_anchors_lt = anchors_lt > eps
-        rb_anchors = rb - xy_centers[None] # positive when center under right bottom
+        anchors_rb = rb - xy_centers[None] # positive when center under right bottom
         positive_anchors_rb = anchors_rb > eps
         # anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
         # anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 

@@ -694,7 +694,7 @@ class v8DetectionLoss:
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         # Split between label and bounding box ground truth data
         # TODO (CP/IRIT) : are the ground truth labels used ?
-        if self.use_score:
+        if self.use_scores:
             gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
         else:
             gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy

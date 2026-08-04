@@ -1251,7 +1251,7 @@ class RandomPerspective(BaseTransform):
         )
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
-        abels["variant"] = variant[i]  # (CP/IRIT): Add variant
+        labels["variant"] = variant[i]  # (CP/IRIT): Add variant
         labels["scores"] = scores[i]  # (CP/IRIT): Add scores
         return labels
 
@@ -2397,6 +2397,7 @@ class Format(BaseTransform):
             (dict[str, Any]): Updated labels with formatted instance tensors.
         """
         cls = params.get("cls", np.array([]))
+        variant = params.get("variant", np.array([])) # (CP/IRIT): Add variant
         scores = params.get("scores", np.array([])) # (CP/IRIT): Add scores
         instances = params.get("instances")
         assert instances is not None, "instances are required for Format.apply_instances"
