@@ -128,7 +128,6 @@ class BaseTrainer:
             overrides (dict, optional): Configuration overrides.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
-        self.hub_session = overrides.pop("session", None)  # HUB
         self.args = get_cfg(cfg, overrides)
         self.check_resume(overrides)
         self.args.device = parse_device(self.args.device)  # canonical string, resolves '-1' auto-selection once
@@ -1082,6 +1081,7 @@ class BaseTrainer:
         self.start_epoch = start_epoch
         if start_epoch > (self.epochs - self.args.close_mosaic):
             self._close_dataloader_mosaic()
+            self.train_loader.reset()
 
     def _close_dataloader_mosaic(self):
         """Update dataloaders to stop using mosaic augmentation."""
@@ -1258,7 +1258,6 @@ class MultiTrainer:
                         "project": str(self.save_dir),  # nest per-dataset runs inside the sweep directory
                         "name": name,
                         "resume": False,
-                        "session": None,
                     }
                     run = SimpleNamespace(
                         project=overrides["project"],
@@ -1279,7 +1278,7 @@ class MultiTrainer:
                             [
                                 *_YOLO_CLI_COMMAND,
                                 "train",
-                                *(f"{k}={v}" for k, v in overrides.items() if k != "session"),
+                                *(f"{k}={v}" for k, v in overrides.items()),
                             ],
                             check=True,
                         )
