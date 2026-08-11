@@ -418,7 +418,7 @@ class BaseModel(torch.nn.Module):
         raise NotImplementedError("compute_loss() needs to be implemented by task heads")
 
 
-def _initialize_yolo_model(model, cfg, ch, nc, verbose):
+def _initialize_yolo_model(model, cfg, ch, nc, verbose, **kwargs): # (CP/IRIT): Add open configuration parameters
     """Initialize common YOLO model attributes from a YAML config."""
     model.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
     if model.yaml["backbone"][0][2] == "Silence":
@@ -432,7 +432,7 @@ def _initialize_yolo_model(model, cfg, ch, nc, verbose):
     if nc and nc != model.yaml["nc"]:
         LOGGER.info(f"Overriding model.yaml nc={model.yaml['nc']} with nc={nc}")
         model.yaml["nc"] = nc  # override YAML value
-    model.model, model.save = parse_model(deepcopy(model.yaml), ch=ch, verbose=verbose)  # model, savelist
+    model.model, model.save = parse_model(deepcopy(model.yaml), ch=ch, verbose=verbose, **kwargs)  # model, savelist (CP/IRIT): Add open configuration parameters
     model.names = {i: f"{i}" for i in range(model.yaml["nc"])}  # default names dict
     model.inplace = model.yaml.get("inplace", True)
 
@@ -465,7 +465,7 @@ class DetectionModel(BaseModel):
         >>> results = model.predict(image_tensor)
     """
 
-    def __init__(self, cfg="yolo26n.yaml", ch=3, nc=None, verbose=True):
+    def __init__(self, cfg="yolo26n.yaml", ch=3, nc=None, verbose=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO detection model with the given config and parameters.
 
         Args:
@@ -475,7 +475,7 @@ class DetectionModel(BaseModel):
             verbose (bool): Whether to display model information.
         """
         super().__init__()
-        _initialize_yolo_model(self, cfg, ch, nc, verbose)
+        _initialize_yolo_model(self, cfg, ch, nc, verbose, **kwargs) # (CP/IRIT): Add open configuration parameters
 
         # Build strides
         m = self.model[-1]  # Detect()
@@ -676,7 +676,7 @@ class SemanticSegmentationModel(BaseModel):
         >>> model = SemanticSegmentationModel("yolo26n-sem.yaml", ch=3, nc=19)
     """
 
-    def __init__(self, cfg="yolo26n-sem.yaml", ch=3, nc=None, verbose=True):
+    def __init__(self, cfg="yolo26n-sem.yaml", ch=3, nc=None, verbose=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO semantic segmentation model.
 
         Args:
@@ -686,7 +686,7 @@ class SemanticSegmentationModel(BaseModel):
             verbose (bool): Whether to display model information.
         """
         super().__init__()
-        _initialize_yolo_model(self, cfg, ch, nc, verbose)
+        _initialize_yolo_model(self, cfg, ch, nc, verbose, **kwargs) # (CP/IRIT): Add open configuration parameters
 
         # Build strides: track smallest spatial size across all layers to find the deepest
         # backbone stride (e.g. P5/32). Head input alone is insufficient: the FPN upsamples
@@ -1927,7 +1927,7 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     return model, ckpt
 
 
-def parse_model(d, ch, verbose=True):
+def parse_model(d, ch, verbose=True, **kwargs): # (CP/IRIT): Add open configuration parameters
     """Parse a YOLO model.yaml dictionary into a PyTorch model.
 
     Args:
@@ -2021,6 +2021,11 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+        }
+    )
+    torch_nn_classes = frozenset( 
+        {
+            nn.Upsample,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -2118,7 +2123,7 @@ def parse_model(d, ch, verbose=True):
         else:
             c2 = ch[f]
 
-        m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        m_ = torch.nn.Sequential(*((m(*args) if (m in torch_nn_classes) else m(*args,**kwargs)) for _ in range(n)),**kwargs) if n > 1 else (m(*args) if (m in torch_nn_classes) else m(*args,**kwargs))  # module # (CP/IRIT): Add open configuration parameters
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type

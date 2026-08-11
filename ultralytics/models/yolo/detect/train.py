@@ -196,7 +196,7 @@ class DetectionTrainer(BaseTrainer):
         model.class_weights = torch.from_numpy(weights).to(self.device)
         LOGGER.info(f"Class weights: {model.class_weights.cpu().numpy().round(3)}")
 
-    def get_model(self, cfg: str | None = None, weights: str | None = None, verbose: bool = True):
+    def get_model(self, cfg: str | None = None, weights: str | None = None, verbose: bool = True, **kwargs): # (CP/IRIT): Manage architecture adaptation for Knowledge Model
         """Return a YOLO detection model.
 
         Args:
@@ -208,7 +208,7 @@ class DetectionTrainer(BaseTrainer):
             (DetectionModel): YOLO detection model.
         """
         model = self.set_model_names_for_load(
-            DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
+            DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1, **kwargs) # (CP/IRIT): Manage architecture adaptation for Knowledge Model
         )
         if weights:
             model.load(weights)

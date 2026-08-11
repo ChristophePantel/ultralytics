@@ -96,9 +96,9 @@ class YOLODataset(BaseDataset):
         # (CP/IRIT) start: Add knowledge models configuration parameters
         self.use_scores = kwargs["hyp"].get("use_scores",False)
         self.use_km = self.use_scores and kwargs["hyp"].get("use_km",False)
+        self.use_km_scores = self.use_km and kwargs["hyp"].get("use_km_scores",False)
         self.use_km_metrics = self.use_km and kwargs["hyp"].get("use_km_metrics",False)
         self.km_metrics_threshold = kwargs["hyp"].get('km_metrics_km_metrics_threshold', 0)
-        self.use_km_scores = self.use_km and kwargs["hyp"].get("use_km_scores",False)
         self.use_km_inference = self.use_km and kwargs["hyp"].get("use_km_inference",False)
         self.use_variant_selection = self.use_km_scores and kwargs["hyp"].get("use_variant_selection",False)
         self.use_km_losses = self.use_km and kwargs["hyp"].get("use_km_losses",False)

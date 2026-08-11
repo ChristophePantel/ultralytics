@@ -186,7 +186,10 @@ class DetectionValidator(BaseValidator):
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
         # Split results field by field
-        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
+        if self.use_km_scores:
+            return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
+        else:
+            return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
@@ -258,22 +261,23 @@ class DetectionValidator(BaseValidator):
             #    print("No prediction has been produced.")
             if self.count >= 115:
                 pass
-            self.metrics.update_stats(
-                {
-                    **self._process_batch(predn, pbatch),
-                    # TODO (CP/IRIT): Add the target variant.
-                    "target_cls": cls,
-                    "target_scores": scores,
-                    "target_variant":variant,
-                    "target_img": np.unique(cls),
-                    "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
-                    "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy(),
-                    "pred_variant": np.zeros(0) if no_pred else predn["variant"].cpu().numpy(),
-                    "pred_km_scores": np.zeros((0,class_number)) if no_pred else predn["km_scores"].cpu().numpy(),
-                    "im_name": Path(pbatch["im_file"]).name,
-                }
-            )
+            stats = {
+                **self._process_batch(predn, pbatch),
+                # TODO (CP/IRIT): Add the target variant.
+                "target_cls": cls,
+                "target_scores": scores,
+                "target_variant":variant,
+                "target_img": np.unique(cls),
+                "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
+                "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
+                "pred_scores": np.zeros((0,class_number)) if no_pred else predn["scores"].cpu().numpy(),
+                "im_name": Path(pbatch["im_file"]).name,
+            }
+            if self.use_km_scores:
+                stats["pred_km_scores"] = np.zeros((0,class_number)) if no_pred else predn["km_scores"].cpu().numpy()
+                if self.use_variant_selection:
+                    stats["pred_variant"] = np.zeros(0) if no_pred else predn["variant"].cpu().numpy()
+            self.metrics.update_stats( stats )
             # Evaluate
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, pbatch, conf=self.args.conf)
@@ -546,6 +550,8 @@ class DetectionValidator(BaseValidator):
         box = ops.xyxy2xywh(predn["bboxes"])  # xywh
         box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
         for b, s, c in zip(box.tolist(), predn["conf"].tolist(), predn["cls"].tolist()):
+            if int(c) >= len(self.class_map):
+                print(c)
             self.jdict.append(
                 {
                     "image_id": image_id,

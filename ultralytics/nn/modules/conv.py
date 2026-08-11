@@ -48,7 +48,7 @@ class Conv(nn.Module):
 
     default_act = nn.SiLU()  # default activation
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Conv layer with given parameters.
 
         Args:
@@ -99,7 +99,7 @@ class Conv2(Conv):
         act (nn.Module): Activation function layer.
     """
 
-    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True):
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Conv2 layer with given parameters.
 
         Args:
@@ -113,7 +113,7 @@ class Conv2(Conv):
             act (bool | nn.Module): Activation function.
         """
         super().__init__(c1, c2, k, s, p, g=g, d=d, act=act)
-        self.cv2 = nn.Conv2d(c1, c2, 1, s, autopad(1, p, d), groups=g, dilation=d, bias=False)  # add 1x1 conv
+        self.cv2 = nn.Conv2d(c1, c2, 1, s, autopad(1, p, d), groups=g, dilation=d, bias=False)
 
     def forward(self, x):
         """Apply convolution, batch normalization and activation to input tensor.
@@ -157,7 +157,7 @@ class LightConv(nn.Module):
         conv2 (DWConv): Depthwise convolution layer.
     """
 
-    def __init__(self, c1, c2, k=1, act=None):
+    def __init__(self, c1, c2, k=1, act=None, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize LightConv layer with given parameters.
 
         Args:
@@ -168,8 +168,8 @@ class LightConv(nn.Module):
         """
         super().__init__()
         act = nn.ReLU() if act is None else act
-        self.conv1 = Conv(c1, c2, 1, act=False)
-        self.conv2 = DWConv(c2, c2, k, act=act)
+        self.conv1 = Conv(c1, c2, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.conv2 = DWConv(c2, c2, k, act=act, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x):
         """Apply 2 convolutions to input tensor.
@@ -186,7 +186,7 @@ class LightConv(nn.Module):
 class DWConv(Conv):
     """Depth-wise convolution module."""
 
-    def __init__(self, c1, c2, k=1, s=1, d=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, d=1, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize depth-wise convolution with given parameters.
 
         Args:
@@ -197,13 +197,13 @@ class DWConv(Conv):
             d (int): Dilation.
             act (bool | nn.Module): Activation function.
         """
-        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act, **kwargs) # (CP/IRIT): Add open configuration parameters
 
 
 class DWConvTranspose2d(nn.ConvTranspose2d):
     """Depth-wise transpose convolution module."""
 
-    def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0):
+    def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize depth-wise transpose convolution with given parameters.
 
         Args:
@@ -229,7 +229,7 @@ class ConvTranspose(nn.Module):
 
     default_act = nn.SiLU()  # default activation
 
-    def __init__(self, c1, c2, k=2, s=2, p=0, bn=True, act=True):
+    def __init__(self, c1, c2, k=2, s=2, p=0, bn=True, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ConvTranspose layer with given parameters.
 
         Args:
@@ -278,7 +278,7 @@ class Focus(nn.Module):
         conv (Conv): Convolution layer.
     """
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Focus module with given parameters.
 
         Args:
@@ -291,7 +291,7 @@ class Focus(nn.Module):
             act (bool | nn.Module): Activation function.
         """
         super().__init__()
-        self.conv = Conv(c1 * 4, c2, k, s, p, g, act=act)
+        self.conv = Conv(c1 * 4, c2, k, s, p, g, act=act, **kwargs) # (CP/IRIT): Add open configuration parameters
         # self.contract = Contract(gain=2)
 
     def forward(self, x):
@@ -322,7 +322,7 @@ class GhostConv(nn.Module):
         https://github.com/huawei-noah/Efficient-AI-Backbones
     """
 
-    def __init__(self, c1, c2, k=1, s=1, g=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, g=1, act=True, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Ghost Convolution module with given parameters.
 
         Args:
@@ -335,8 +335,8 @@ class GhostConv(nn.Module):
         """
         super().__init__()
         c_ = c2 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, k, s, None, g, act=act)
-        self.cv2 = Conv(c_, c_, 5, 1, None, c_, act=act)
+        self.cv1 = Conv(c1, c_, k, s, None, g, act=act, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c_, c_, 5, 1, None, c_, act=act, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x):
         """Apply Ghost Convolution to input tensor.
@@ -369,7 +369,7 @@ class RepConv(nn.Module):
 
     default_act = nn.SiLU()  # default activation
 
-    def __init__(self, c1, c2, k=3, s=1, p=1, g=1, d=1, act=True, bn=False, deploy=False):
+    def __init__(self, c1, c2, k=3, s=1, p=1, g=1, d=1, act=True, bn=False, deploy=False, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize RepConv module with given parameters.
 
         Args:
@@ -392,8 +392,8 @@ class RepConv(nn.Module):
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
 
         self.bn = nn.BatchNorm2d(num_features=c1) if bn and c2 == c1 and s == 1 else None
-        self.conv1 = Conv(c1, c2, k, s, p=p, g=g, act=False)
-        self.conv2 = Conv(c1, c2, 1, s, p=(p - k // 2), g=g, act=False)
+        self.conv1 = Conv(c1, c2, k, s, p=p, g=g, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.conv2 = Conv(c1, c2, 1, s, p=(p - k // 2), g=g, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward_fuse(self, x):
         """Forward pass for deploy mode.
@@ -524,7 +524,7 @@ class ChannelAttention(nn.Module):
         https://github.com/open-mmlab/mmdetection/tree/v3.0.0rc1/configs/rtmdet
     """
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters)
         """Initialize Channel-attention module.
 
         Args:
@@ -557,7 +557,7 @@ class SpatialAttention(nn.Module):
         act (nn.Sigmoid): Sigmoid activation for attention weights.
     """
 
-    def __init__(self, kernel_size=7):
+    def __init__(self, kernel_size=7, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Spatial-attention module.
 
         Args:
@@ -591,7 +591,7 @@ class CBAM(nn.Module):
         spatial_attention (SpatialAttention): Spatial attention module.
     """
 
-    def __init__(self, c1, kernel_size=7):
+    def __init__(self, c1, kernel_size=7, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CBAM with given parameters.
 
         Args:
@@ -599,8 +599,8 @@ class CBAM(nn.Module):
             kernel_size (int): Size of the convolutional kernel for spatial attention.
         """
         super().__init__()
-        self.channel_attention = ChannelAttention(c1)
-        self.spatial_attention = SpatialAttention(kernel_size)
+        self.channel_attention = ChannelAttention(c1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.spatial_attention = SpatialAttention(kernel_size, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x):
         """Apply channel and spatial attention sequentially to input tensor.
@@ -621,7 +621,7 @@ class Concat(nn.Module):
         d (int): Dimension along which to concatenate tensors.
     """
 
-    def __init__(self, dimension=1):
+    def __init__(self, dimension=1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Concat module.
 
         Args:
@@ -649,7 +649,7 @@ class Index(nn.Module):
         index (int): Index to select from input.
     """
 
-    def __init__(self, index=0):
+    def __init__(self, index=0, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Index module.
 
         Args:

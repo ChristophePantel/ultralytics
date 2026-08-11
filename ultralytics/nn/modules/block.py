@@ -61,7 +61,7 @@ class DFL(nn.Module):
     Proposed in Generalized Focal Loss https://arxiv.org/abs/2006.04388
     """
 
-    def __init__(self, c1: int = 16):
+    def __init__(self, c1: int = 16, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize a convolutional layer with a given number of input channels.
 
         Args:
@@ -83,7 +83,7 @@ class DFL(nn.Module):
 class Proto(nn.Module):
     """Ultralytics YOLO models mask Proto module for segmentation models."""
 
-    def __init__(self, c1: int, c_: int = 256, c2: int = 32):
+    def __init__(self, c1: int, c_: int = 256, c2: int = 32, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
 
         Args:
@@ -108,7 +108,7 @@ class HGStem(nn.Module):
     https://github.com/PaddlePaddle/PaddleDetection/blob/develop/ppdet/modeling/backbones/hgnet_v2.py
     """
 
-    def __init__(self, c1: int, cm: int, c2: int):
+    def __init__(self, c1: int, cm: int, c2: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the StemBlock of PPHGNetV2.
 
         Args:
@@ -154,6 +154,7 @@ class HGBlock(nn.Module):
         lightconv: bool = False,
         shortcut: bool = False,
         act: nn.Module | None = None,
+        **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize HGBlock with specified parameters.
 
@@ -186,7 +187,7 @@ class HGBlock(nn.Module):
 class SPP(nn.Module):
     """Spatial Pyramid Pooling (SPP) layer https://arxiv.org/abs/1406.4729."""
 
-    def __init__(self, c1: int, c2: int, k: tuple[int, ...] = (5, 9, 13)):
+    def __init__(self, c1: int, c2: int, k: tuple[int, ...] = (5, 9, 13), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the SPP layer with input/output channels and pooling kernel sizes.
 
         Args:
@@ -209,7 +210,7 @@ class SPP(nn.Module):
 class SPPF(nn.Module):
     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
-    def __init__(self, c1: int, c2: int, k: int = 5, n: int = 3, shortcut: bool = False):
+    def __init__(self, c1: int, c2: int, k: int = 5, n: int = 3, shortcut: bool = False, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the SPPF layer with given input/output channels and kernel size.
 
         Args:
@@ -241,7 +242,7 @@ class SPPF(nn.Module):
 class C1(nn.Module):
     """CSP Bottleneck with 1 convolution."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1):
+    def __init__(self, c1: int, c2: int, n: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the CSP Bottleneck with 1 convolution.
 
         Args:
@@ -262,7 +263,7 @@ class C1(nn.Module):
 class C2(nn.Module):
     """CSP Bottleneck with 2 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize a CSP Bottleneck with 2 convolutions.
 
         Args:
@@ -289,7 +290,7 @@ class C2(nn.Module):
 class C2f(nn.Module):
     """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize a CSP bottleneck with 2 convolutions.
 
         Args:
@@ -323,7 +324,7 @@ class C2f(nn.Module):
 class C3(nn.Module):
     """CSP Bottleneck with 3 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the CSP Bottleneck with 3 convolutions.
 
         Args:
@@ -349,7 +350,7 @@ class C3(nn.Module):
 class C3x(C3):
     """C3 module with cross-convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C3 module with cross-convolutions.
 
         Args:
@@ -368,7 +369,7 @@ class C3x(C3):
 class RepC3(nn.Module):
     """Rep C3."""
 
-    def __init__(self, c1: int, c2: int, n: int = 3, e: float = 1.0):
+    def __init__(self, c1: int, c2: int, n: int = 3, e: float = 1.0, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize RepC3 module with RepConv blocks.
 
         Args:
@@ -392,7 +393,7 @@ class RepC3(nn.Module):
 class C3TR(C3):
     """C3 module with TransformerBlock()."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C3 module with TransformerBlock.
 
         Args:
@@ -411,7 +412,7 @@ class C3TR(C3):
 class C3Ghost(C3):
     """C3 module with GhostBottleneck()."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C3 module with GhostBottleneck.
 
         Args:
@@ -430,7 +431,7 @@ class C3Ghost(C3):
 class GhostBottleneck(nn.Module):
     """Ghost Bottleneck https://github.com/huawei-noah/Efficient-AI-Backbones."""
 
-    def __init__(self, c1: int, c2: int, k: int = 3, s: int = 1):
+    def __init__(self, c1: int, c2: int, k: int = 3, s: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Ghost Bottleneck module.
 
         Args:
@@ -460,6 +461,7 @@ class Bottleneck(nn.Module):
 
     def __init__(
         self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
+        , **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize a standard bottleneck module.
 
@@ -485,7 +487,7 @@ class Bottleneck(nn.Module):
 class BottleneckCSP(nn.Module):
     """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CSP Bottleneck.
 
         Args:
@@ -516,7 +518,7 @@ class BottleneckCSP(nn.Module):
 class ResNetBlock(nn.Module):
     """ResNet block with standard convolution layers."""
 
-    def __init__(self, c1: int, c2: int, s: int = 1, e: int = 4):
+    def __init__(self, c1: int, c2: int, s: int = 1, e: int = 4, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ResNet block.
 
         Args:
@@ -540,7 +542,7 @@ class ResNetBlock(nn.Module):
 class ResNetLayer(nn.Module):
     """ResNet layer with multiple ResNet blocks."""
 
-    def __init__(self, c1: int, c2: int, s: int = 1, is_first: bool = False, n: int = 1, e: int = 4):
+    def __init__(self, c1: int, c2: int, s: int = 1, is_first: bool = False, n: int = 1, e: int = 4, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ResNet layer.
 
         Args:
@@ -571,7 +573,7 @@ class ResNetLayer(nn.Module):
 class MaxSigmoidAttnBlock(nn.Module):
     """Max Sigmoid attention block."""
 
-    def __init__(self, c1: int, c2: int, nh: int = 1, ec: int = 128, gc: int = 512, scale: bool = False):
+    def __init__(self, c1: int, c2: int, nh: int = 1, ec: int = 128, gc: int = 512, scale: bool = False, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize MaxSigmoidAttnBlock.
 
         Args:
@@ -634,6 +636,7 @@ class C2fAttn(nn.Module):
         shortcut: bool = False,
         g: int = 1,
         e: float = 0.5,
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize C2f module with attention mechanism.
 
@@ -691,6 +694,7 @@ class ImagePoolingAttn(nn.Module):
 
     def __init__(
         self, ec: int = 256, ch: tuple[int, ...] = (), ct: int = 512, nh: int = 8, k: int = 3, scale: bool = False
+        , **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize ImagePoolingAttn module.
 
@@ -754,7 +758,7 @@ class ImagePoolingAttn(nn.Module):
 class ContrastiveHead(nn.Module):
     """Implements contrastive learning head for region-text similarity in vision-language models."""
 
-    def __init__(self):
+    def __init__(self, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ContrastiveHead with region-text similarity parameters."""
         super().__init__()
         # NOTE: use -10.0 to keep the init cls loss consistency with other losses
@@ -784,7 +788,7 @@ class BNContrastiveHead(nn.Module):
         embed_dims (int): Embed dimensions of text and image features.
     """
 
-    def __init__(self, embed_dims: int):
+    def __init__(self, embed_dims: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize BNContrastiveHead.
 
         Args:
@@ -830,7 +834,7 @@ class RepBottleneck(Bottleneck):
     """Rep bottleneck."""
 
     def __init__(
-        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5, **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize RepBottleneck.
 
@@ -850,7 +854,7 @@ class RepBottleneck(Bottleneck):
 class RepCSP(C3):
     """Repeatable Cross Stage Partial Network (RepCSP) module for efficient feature extraction."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize RepCSP layer.
 
         Args:
@@ -869,7 +873,7 @@ class RepCSP(C3):
 class RepNCSPELAN4(nn.Module):
     """CSP-ELAN."""
 
-    def __init__(self, c1: int, c2: int, c3: int, c4: int, n: int = 1):
+    def __init__(self, c1: int, c2: int, c3: int, c4: int, n: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CSP-ELAN layer.
 
         Args:
@@ -902,7 +906,7 @@ class RepNCSPELAN4(nn.Module):
 class ELAN1(RepNCSPELAN4):
     """ELAN1 module with 4 convolutions."""
 
-    def __init__(self, c1: int, c2: int, c3: int, c4: int):
+    def __init__(self, c1: int, c2: int, c3: int, c4: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ELAN1 layer.
 
         Args:
@@ -922,7 +926,7 @@ class ELAN1(RepNCSPELAN4):
 class AConv(nn.Module):
     """AConv."""
 
-    def __init__(self, c1: int, c2: int):
+    def __init__(self, c1: int, c2: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize AConv module.
 
         Args:
@@ -941,7 +945,7 @@ class AConv(nn.Module):
 class ADown(nn.Module):
     """ADown."""
 
-    def __init__(self, c1: int, c2: int):
+    def __init__(self, c1: int, c2: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize ADown module.
 
         Args:
@@ -966,7 +970,7 @@ class ADown(nn.Module):
 class SPPELAN(nn.Module):
     """SPP-ELAN."""
 
-    def __init__(self, c1: int, c2: int, c3: int, k: int = 5):
+    def __init__(self, c1: int, c2: int, c3: int, k: int = 5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize SPP-ELAN block.
 
         Args:
@@ -993,7 +997,7 @@ class SPPELAN(nn.Module):
 class CBLinear(nn.Module):
     """CBLinear."""
 
-    def __init__(self, c1: int, c2s: list[int], k: int = 1, s: int = 1, p: int | None = None, g: int = 1):
+    def __init__(self, c1: int, c2s: list[int], k: int = 1, s: int = 1, p: int | None = None, g: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CBLinear module.
 
         Args:
@@ -1016,7 +1020,7 @@ class CBLinear(nn.Module):
 class CBFuse(nn.Module):
     """CBFuse."""
 
-    def __init__(self, idx: list[int]):
+    def __init__(self, idx: list[int], **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CBFuse module.
 
         Args:
@@ -1042,7 +1046,7 @@ class CBFuse(nn.Module):
 class C3f(nn.Module):
     """Faster Implementation of CSP Bottleneck with 3 convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize CSP bottleneck layer with three convolutions.
 
         Args:
@@ -1080,6 +1084,7 @@ class C3k2(C2f):
         attn: bool = False,
         g: int = 1,
         shortcut: bool = True,
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize C3k2 module.
 
@@ -1110,7 +1115,7 @@ class C3k2(C2f):
 class C3k(C3):
     """C3k is a CSP bottleneck module with customizable kernel sizes for feature extraction in neural networks."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, k: int = 3):
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, k: int = 3, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C3k module.
 
         Args:
@@ -1131,7 +1136,7 @@ class C3k(C3):
 class RepVGGDW(torch.nn.Module):
     """RepVGGDW is a class that represents a depth-wise convolutional block in RepVGG architecture."""
 
-    def __init__(self, ed: int) -> None:
+    def __init__(self, ed: int, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize RepVGGDW module.
 
         Args:
@@ -1204,7 +1209,7 @@ class CIB(nn.Module):
         lk (bool, optional): Whether to use RepVGGDW for the third convolutional layer. Defaults to False.
     """
 
-    def __init__(self, c1: int, c2: int, shortcut: bool = True, e: float = 0.5, lk: bool = False):
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, e: float = 0.5, lk: bool = False, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the CIB module.
 
         Args:
@@ -1253,6 +1258,7 @@ class C2fCIB(C2f):
 
     def __init__(
         self, c1: int, c2: int, n: int = 1, shortcut: bool = False, lk: bool = False, g: int = 1, e: float = 0.5
+        , **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize C2fCIB module.
 
@@ -1287,7 +1293,7 @@ class Attention(nn.Module):
         pe (Conv): Convolutional layer for positional encoding.
     """
 
-    def __init__(self, dim: int, num_heads: int = 8, attn_ratio: float = 0.5):
+    def __init__(self, dim: int, num_heads: int = 8, attn_ratio: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize multi-head attention module.
 
         Args:
@@ -1350,7 +1356,7 @@ class PSABlock(nn.Module):
         >>> output_tensor = psablock(input_tensor)
     """
 
-    def __init__(self, c: int, attn_ratio: float = 0.5, num_heads: int = 4, shortcut: bool = True) -> None:
+    def __init__(self, c: int, attn_ratio: float = 0.5, num_heads: int = 4, shortcut: bool = True, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize the PSABlock.
 
         Args:
@@ -1402,7 +1408,7 @@ class PSA(nn.Module):
         >>> output_tensor = psa.forward(input_tensor)
     """
 
-    def __init__(self, c1: int, c2: int, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize PSA module.
 
         Args:
@@ -1458,7 +1464,7 @@ class C2PSA(nn.Module):
         This module essentially is the same as PSA module, but refactored to allow stacking more PSABlock modules.
     """
 
-    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C2PSA module.
 
         Args:
@@ -1514,7 +1520,7 @@ class C2fPSA(C2f):
         >>> print(output.shape)
     """
 
-    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5):
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C2fPSA module.
 
         Args:
@@ -1551,7 +1557,7 @@ class SCDown(nn.Module):
         torch.Size([1, 128, 64, 64])
     """
 
-    def __init__(self, c1: int, c2: int, k: int, s: int):
+    def __init__(self, c1: int, c2: int, k: int, s: int, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize SCDown module.
 
         Args:
@@ -1595,6 +1601,7 @@ class TorchVision(nn.Module):
 
     def __init__(
         self, model: str, weights: str = "DEFAULT", unwrap: bool = True, truncate: int = 2, split: bool = False
+        , **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Load the model and weights from torchvision.
 
@@ -1664,7 +1671,7 @@ class AAttn(nn.Module):
         torch.Size([1, 256, 32, 32])
     """
 
-    def __init__(self, dim: int, num_heads: int, area: int = 1):
+    def __init__(self, dim: int, num_heads: int, area: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize an Area-attention module for YOLO models.
 
         Args:
@@ -1751,7 +1758,7 @@ class ABlock(nn.Module):
         torch.Size([1, 256, 32, 32])
     """
 
-    def __init__(self, dim: int, num_heads: int, mlp_ratio: float = 1.2, area: int = 1):
+    def __init__(self, dim: int, num_heads: int, mlp_ratio: float = 1.2, area: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize an Area-attention block module.
 
         Args:
@@ -1828,6 +1835,7 @@ class A2C2f(nn.Module):
         e: float = 0.5,
         g: int = 1,
         shortcut: bool = True,
+        **kwargs # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize Area-Attention C2f module.
 
@@ -1878,7 +1886,7 @@ class A2C2f(nn.Module):
 class SwiGLUFFN(nn.Module):
     """SwiGLU Feed-Forward Network for transformer-based architectures."""
 
-    def __init__(self, gc: int, ec: int, e: int = 4) -> None:
+    def __init__(self, gc: int, ec: int, e: int = 4, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize SwiGLU FFN with input dimension, output dimension, and expansion factor.
 
         Args:
@@ -1901,7 +1909,7 @@ class SwiGLUFFN(nn.Module):
 class Residual(nn.Module):
     """Residual connection wrapper for neural network modules."""
 
-    def __init__(self, m: nn.Module) -> None:
+    def __init__(self, m: nn.Module, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize residual module with the wrapped module.
 
         Args:
@@ -1922,7 +1930,7 @@ class Residual(nn.Module):
 class SAVPE(nn.Module):
     """Spatial-Aware Visual Prompt Embedding module for feature enhancement."""
 
-    def __init__(self, ch: list[int], c3: int, embed: int):
+    def __init__(self, ch: list[int], c3: int, embed: int, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize SAVPE module with channels, intermediate channels, and embedding dimension.
 
         Args:
@@ -1981,7 +1989,7 @@ class SAVPE(nn.Module):
 class Proto26(Proto):
     """Ultralytics YOLO26 models mask Proto module for segmentation models."""
 
-    def __init__(self, ch: tuple = (), c_: int = 256, c2: int = 32, nc: int = 80):
+    def __init__(self, ch: tuple = (), c_: int = 256, c2: int = 32, nc: int = 80, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize the Ultralytics YOLO models mask Proto module with specified number of protos and masks.
 
         Args:

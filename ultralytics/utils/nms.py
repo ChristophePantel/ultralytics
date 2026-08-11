@@ -156,7 +156,7 @@ def non_max_suppression(
         # Detections matrix nx6 (xyxy, conf, cls)
         # predicted_scores: confidence map : associate to each class a confidence for the box as this class (between 0 and infnty)
         # predicted_km_scores: class map : associate to each class a confidence that the object is of this class (between 0 and 1)
-        if self.use_km_scores:
+        if use_km_scores:
             predicted_boxes, predicted_scores, predicted_km_scores, predicted_masks = selected_image_prediction.split((4, nc, nc, extra), 1) # bounding box, scores, additional data
         else:
             predicted_boxes, predicted_scores, predicted_masks = selected_image_prediction.split((4, nc, extra), 1) # bounding box, scores, additional data
@@ -170,42 +170,45 @@ def non_max_suppression(
             selected_confidence = selected_image_prediction[selected_anchor_points, 4 + selected_classes, None]
             selected_class = selected_classes[:, None].float()
             selected_scores = predicted_scores[selected_anchor_points]
-            selected_km_scores = predicted_km_scores[selected_anchor_points]
             selected_mask = predicted_masks[selected_anchor_points]
-            # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
-            if use_variant_selection:
-                # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
-                # my_variants = class_variants
-                # test_bce = scores_bce(my_variants, my_variants)
-                # selected_test_bce = torch.argmin(test_bce,1)
-                # bce = scores_bce(class_variants, selected_scores)
-                # selected_variant_bce = torch.unsqueeze(torch.argmin(bce,1),1)
-                # selected_class_from_variant_bce = variant_to_class[selected_variant_bce]
-                # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
-                # selected_test_sfe = torch.argmax(test_sfe,1)
-                # Remove abstract variants (without abstract variant version).
-                # class_variants[2,2] = 0.0 # Animals
-                # class_variants[119,58] = 0.0 # Vehicle
-                variants_scores = scores_fuzzy_equiv(class_variants, selected_km_scores)
-                selected_variants_scores, selected_variants = torch.max(variants_scores,1)
-                selected_variants = selected_variants.unsqueeze(1)
-                selected_variants_scores = selected_variants_scores.unsqueeze(1)
-                # selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
-                selected_classes_from_variants = variant_to_class[selected_variants]
-                # if use_km_metrics:
-                #     selected_classes_from_variants = best
-                
-                # cpu = torch.device('cpu')
-                # selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
-                # variant_to_class_decoder = torch.tensor([variant_to_class[i] for i in range(len(variant_to_class))],device=selected_variant.device)
-                # selected_class_from_variant = selected_class_from_variant_sfe
-                # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
-                # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
-                # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
-                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_classes_from_variants, selected_scores, selected_variants, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+            if use_km_scores:
+                selected_km_scores = predicted_km_scores[selected_anchor_points]
+                # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
+                if use_variant_selection:
+                    # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
+                    # my_variants = class_variants
+                    # test_bce = scores_bce(my_variants, my_variants)
+                    # selected_test_bce = torch.argmin(test_bce,1)
+                    # bce = scores_bce(class_variants, selected_scores)
+                    # selected_variant_bce = torch.unsqueeze(torch.argmin(bce,1),1)
+                    # selected_class_from_variant_bce = variant_to_class[selected_variant_bce]
+                    # test_sfe = scores_fuzzy_equiv(my_variants, my_variants)
+                    # selected_test_sfe = torch.argmax(test_sfe,1)
+                    # Remove abstract variants (without abstract variant version).
+                    # class_variants[2,2] = 0.0 # Animals
+                    # class_variants[119,58] = 0.0 # Vehicle
+                    variants_scores = scores_fuzzy_equiv(class_variants, selected_km_scores)
+                    selected_variants_scores, selected_variants = torch.max(variants_scores,1)
+                    selected_variants = selected_variants.unsqueeze(1)
+                    selected_variants_scores = selected_variants_scores.unsqueeze(1)
+                    # selected_variant_sfe = torch.unsqueeze(torch.argmax(sfe,1),1)
+                    selected_classes_from_variants = variant_to_class[selected_variants]
+                    # if use_km_metrics:
+                    #     selected_classes_from_variants = best
+                    
+                    # cpu = torch.device('cpu')
+                    # selected_variant = torch.unsqueeze(torch.argmin(bce,1),1)
+                    # variant_to_class_decoder = torch.tensor([variant_to_class[i] for i in range(len(variant_to_class))],device=selected_variant.device)
+                    # selected_class_from_variant = selected_class_from_variant_sfe
+                    # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
+                    # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
+                    # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
+                    selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_classes_from_variants, selected_scores, selected_variants, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                else:
+                    # TODO (CP/IRIT): When variants are not in use, the class index is returned as variant index
+                    selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else:
-                # TODO (CP/IRIT): When variants are not in use, the class index is returned as variant index
-                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_km_scores, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
+                selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 selected_xk = selected_xk[selected_anchor_points]
         else:  # best class only

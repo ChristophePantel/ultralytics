@@ -87,7 +87,7 @@ class Detect(nn.Module):
     legacy = False  # backward compatibility for v3/v5/v8/v9 models
     xyxy = False  # xyxy or xywh output
 
-    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO detection layer with specified number of classes and channels.
 
         Args:
@@ -102,8 +102,10 @@ class Detect(nn.Module):
         # (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.reg_max = reg_max  # DFL channels
         # TODO (CP/IRIT): Add nc outputs for class scores
-        use_km_scores = True
-        self.use_km_scores = use_km_scores
+        # (CP/IRIT) start: Add knowledge models configuration parameters
+        self.use_scores = kwargs.get("use_scores",False)
+        self.use_km = self.use_scores and kwargs.get("use_km",False)
+        self.use_km_scores = self.use_km and kwargs.get("use_km_scores",False)
         if self.use_km_scores:
             self.no = 2 * nc + self.reg_max * 4  # number of outputs per anchor
         else:
@@ -117,12 +119,12 @@ class Detect(nn.Module):
         # cv3 predicts the confidence scores for the bounding boxes and each of their class nature
         # this confidence combines both results 
         self.cv3 = (
-            nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+            nn.ModuleList(nn.Sequential(Conv(x, c3, 3, **kwargs), Conv(c3, c3, 3, **kwargs), nn.Conv2d(c3, self.nc, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
             if self.legacy
             else nn.ModuleList(
                 nn.Sequential(
-                    nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
-                    nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                    nn.Sequential(DWConv(x, x, 3, **kwargs), Conv(x, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
+                    nn.Sequential(DWConv(c3, c3, 3, **kwargs), Conv(c3, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
                     nn.Conv2d(c3, self.nc, 1),
                 )
                 for x in ch
@@ -133,7 +135,7 @@ class Detect(nn.Module):
         if self.use_km_scores:
             self.cv3_km = copy.deepcopy(self.cv3)
         
-        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        self.dfl = DFL(self.reg_max, **kwargs) if self.reg_max > 1 else nn.Identity() # (CP/IRIT): Add open configuration parameters
 
         if end2end:
             self.one2one_cv2 = copy.deepcopy(self.cv2)
@@ -350,7 +352,7 @@ class Segment(Detect):
         >>> outputs = segment(x)
     """
 
-    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers.
 
         Args:
@@ -361,13 +363,13 @@ class Segment(Detect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, reg_max, end2end, ch)
+        super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.proto = Proto(ch[0], self.npr, self.nm)  # protos
 
         c4 = max(ch[0] // 4, self.nm)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3, **kwargs), Conv(c4, c4, 3, **kwargs), nn.Conv2d(c4, self.nm, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
@@ -454,7 +456,7 @@ class Segment26(Segment):
         >>> outputs = segment(x)
     """
 
-    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers.
 
         Args:
@@ -465,8 +467,8 @@ class Segment26(Segment):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, nm, npr, reg_max, end2end, ch)
-        self.proto = Proto26(ch, self.npr, self.nm, nc)  # protos
+        super().__init__(nc, nm, npr, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.proto = Proto26(ch, self.npr, self.nm, nc, **kwargs)  # protos # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor] | dict[str, torch.Tensor]:
         """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
@@ -513,7 +515,7 @@ class OBB(Detect):
         >>> outputs = obb(x)
     """
 
-    def __init__(self, nc: int = 80, ne: int = 1, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ne: int = 1, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize OBB with number of classes `nc` and layer channels `ch`.
 
         Args:
@@ -523,11 +525,11 @@ class OBB(Detect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, reg_max, end2end, ch)
+        super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.ne = ne  # number of extra parameters
 
         c4 = max(ch[0] // 4, self.ne)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3, **kwargs), Conv(c4, c4, 3, **kwargs), nn.Conv2d(c4, self.ne, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
@@ -643,7 +645,7 @@ class Pose(Detect):
         >>> outputs = pose(x)
     """
 
-    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize YOLO network with default parameters and Convolutional Layers.
 
         Args:
@@ -653,12 +655,12 @@ class Pose(Detect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, reg_max, end2end, ch)
+        super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
         self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
 
         c4 = max(ch[0] // 4, self.nk)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3, **kwargs), Conv(c4, c4, 3, **kwargs), nn.Conv2d(c4, self.nk, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv4 = copy.deepcopy(self.cv4)
 
@@ -751,7 +753,7 @@ class Pose26(Pose):
         >>> outputs = pose(x)
     """
 
-    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize YOLO network with default parameters and Convolutional Layers.
 
         Args:
@@ -761,11 +763,11 @@ class Pose26(Pose):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.flow_model = RealNVP()
 
         c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3)) for x in ch)
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3, **kwargs), Conv(c4, c4, 3, **kwargs)) for x in ch) # (CP/IRIT): Add open configuration parameters
 
         self.cv4_kpts = nn.ModuleList(nn.Conv2d(c4, self.nk, 1) for _ in ch)
         self.nk_sigma = kpt_shape[0] * 2  # sigma_x, sigma_y for each keypoint
@@ -866,7 +868,7 @@ class Depth(nn.Module):
 
     export = False  # export mode
 
-    def __init__(self, c_mid: int = 256, ch: tuple = ()):
+    def __init__(self, c_mid: int = 256, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Depth head.
 
         Args:
@@ -877,15 +879,15 @@ class Depth(nn.Module):
         self.nl = len(ch)  # number of detection layers (pyramid levels)
 
         # Project each pyramid level to c_mid channels
-        self.proj = nn.ModuleList(Conv(c, c_mid, k=1) for c in ch)
+        self.proj = nn.ModuleList(Conv(c, c_mid, k=1, **kwargs) for c in ch) # (CP/IRIT): Add open configuration parameters
 
         # Refinement blocks after each of the nl-1 fusion steps (the coarsest level is not refined)
-        self.refine = nn.ModuleList(nn.Sequential(Conv(c_mid, c_mid, k=3), Conv(c_mid, c_mid, k=3)) for _ in ch[:-1])
+        self.refine = nn.ModuleList(nn.Sequential(Conv(c_mid, c_mid, k=3, **kwargs), Conv(c_mid, c_mid, k=3, **kwargs)) for _ in ch[:-1]) # (CP/IRIT): Add open configuration parameters
 
         self.head = nn.Sequential(
-            Conv(c_mid, c_mid // 2, k=3),
+            Conv(c_mid, c_mid // 2, k=3, **kwargs), # (CP/IRIT): Add open configuration parameters
             nn.ConvTranspose2d(c_mid // 2, c_mid // 2, kernel_size=2, stride=2, bias=True),
-            Conv(c_mid // 2, c_mid // 4, k=3),
+            Conv(c_mid // 2, c_mid // 4, k=3, **kwargs), # (CP/IRIT): Add open configuration parameters
             nn.Conv2d(c_mid // 4, 1, kernel_size=1),
         )
         # Initialize to ~1.2 m so early exp() outputs stay well-conditioned.
@@ -953,7 +955,7 @@ class Classify(nn.Module):
 
     export = False  # export mode
 
-    def __init__(self, c1: int, c2: int, k: int = 1, s: int = 1, p: int | None = None, g: int = 1):
+    def __init__(self, c1: int, c2: int, k: int = 1, s: int = 1, p: int | None = None, g: int = 1, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize YOLO classification head to transform input tensor from (b,c1,20,20) to (b,c2) shape.
 
         Args:
@@ -966,7 +968,7 @@ class Classify(nn.Module):
         """
         super().__init__()
         c_ = 1280  # efficientnet_b0 size
-        self.conv = Conv(c1, c_, k, s, p, g)
+        self.conv = Conv(c1, c_, k, s, p, g, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.pool = nn.AdaptiveAvgPool2d(1)  # to x(b,c_,1,1)
         self.drop = nn.Dropout(p=0.0, inplace=True)
         self.linear = nn.Linear(c_, c2)  # to x(b,c2)
@@ -1012,6 +1014,7 @@ class WorldDetect(Detect):
         reg_max: int = 16,
         end2end: bool = False,
         ch: tuple = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
@@ -1023,10 +1026,10 @@ class WorldDetect(Detect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, reg_max=reg_max, end2end=end2end, ch=ch)
+        super().__init__(nc, reg_max=reg_max, end2end=end2end, ch=ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))
-        self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, embed, 1)) for x in ch)
-        self.cv4 = nn.ModuleList(BNContrastiveHead(embed) if with_bn else ContrastiveHead() for _ in ch)
+        self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3, **kwargs), Conv(c3, c3, 3, **kwargs), nn.Conv2d(c3, embed, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
+        self.cv4 = nn.ModuleList(BNContrastiveHead(embed, **kwargs) if with_bn else ContrastiveHead(**kwargs) for _ in ch) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: list[torch.Tensor], text: torch.Tensor) -> dict[str, torch.Tensor] | tuple:
         """Concatenate and return predicted bounding boxes and class probabilities."""
@@ -1077,7 +1080,7 @@ class LRPCHead(nn.Module):
         >>> head = LRPCHead(vocab, pf, loc, enabled=True)
     """
 
-    def __init__(self, vocab: nn.Module, pf: nn.Module, loc: nn.Module, enabled: bool = True):
+    def __init__(self, vocab: nn.Module, pf: nn.Module, loc: nn.Module, enabled: bool = True, **kwargs):
         """Initialize LRPCHead with vocabulary, proposal filter, and localization components.
 
         Args:
@@ -1155,7 +1158,7 @@ class YOLOEDetect(Detect):
     is_fused = False
 
     def __init__(
-        self, nc: int = 80, embed: int = 512, with_bn: bool = False, reg_max=16, end2end=False, ch: tuple = ()
+        self, nc: int = 80, embed: int = 512, with_bn: bool = False, reg_max=16, end2end=False, ch: tuple = (), **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
@@ -1167,23 +1170,23 @@ class YOLOEDetect(Detect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, reg_max, end2end, ch)
+        super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))
         assert c3 <= embed
         assert with_bn
         self.cv3 = (
-            nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, embed, 1)) for x in ch)
+            nn.ModuleList(nn.Sequential(Conv(x, c3, 3, **kwargs), Conv(c3, c3, 3, **kwargs), nn.Conv2d(c3, embed, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
             if self.legacy
             else nn.ModuleList(
                 nn.Sequential(
-                    nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
-                    nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                    nn.Sequential(DWConv(x, x, 3, **kwargs), Conv(x, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
+                    nn.Sequential(DWConv(c3, c3, 3, **kwargs), Conv(c3, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
                     nn.Conv2d(c3, embed, 1),
                 )
                 for x in ch
             )
         )
-        self.cv4 = nn.ModuleList(BNContrastiveHead(embed) if with_bn else ContrastiveHead() for _ in ch)
+        self.cv4 = nn.ModuleList(BNContrastiveHead(embed, **kwargs) if with_bn else ContrastiveHead(**kwargs) for _ in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv3 = copy.deepcopy(self.cv3)  # overwrite with new cv3
             self.one2one_cv4 = copy.deepcopy(self.cv4)
@@ -1375,6 +1378,7 @@ class YOLOESegment(YOLOEDetect):
         reg_max=16,
         end2end=False,
         ch: tuple = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLOESegment with class count, mask parameters, and embedding dimensions.
 
@@ -1388,13 +1392,13 @@ class YOLOESegment(YOLOEDetect):
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, embed, with_bn, reg_max, end2end, ch)
+        super().__init__(nc, embed, with_bn, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.nm = nm
         self.npr = npr
         self.proto = Proto(ch[0], self.npr, self.nm)
 
         c5 = max(ch[0] // 4, self.nm)
-        self.cv5 = nn.ModuleList(nn.Sequential(Conv(x, c5, 3), Conv(c5, c5, 3), nn.Conv2d(c5, self.nm, 1)) for x in ch)
+        self.cv5 = nn.ModuleList(nn.Sequential(Conv(x, c5, 3, **kwargs), Conv(c5, c5, 3, **kwargs), nn.Conv2d(c5, self.nm, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv5 = copy.deepcopy(self.cv5)
 
@@ -1539,15 +1543,16 @@ class YOLOESegment26(YOLOESegment):
         reg_max=16,
         end2end=False,
         ch: tuple = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLOESegment26 with class count, mask parameters, and embedding dimensions."""
-        YOLOEDetect.__init__(self, nc, embed, with_bn, reg_max, end2end, ch)
+        YOLOEDetect.__init__(self, nc, embed, with_bn, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.nm = nm
         self.npr = npr
         self.proto = Proto26(ch, self.npr, self.nm, nc)  # protos
 
         c5 = max(ch[0] // 4, self.nm)
-        self.cv5 = nn.ModuleList(nn.Sequential(Conv(x, c5, 3), Conv(c5, c5, 3), nn.Conv2d(c5, self.nm, 1)) for x in ch)
+        self.cv5 = nn.ModuleList(nn.Sequential(Conv(x, c5, 3, **kwargs), Conv(c5, c5, 3, **kwargs), nn.Conv2d(c5, self.nm, 1)) for x in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv5 = copy.deepcopy(self.cv5)
 
@@ -1633,6 +1638,7 @@ class RTDETRDecoder(nn.Module):
         label_noise_ratio: float = 0.5,
         box_noise_scale: float = 1.0,
         learnt_init_query: bool = False,
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize the RTDETRDecoder module with the given parameters.
 
@@ -1940,20 +1946,20 @@ class v10Detect(Detect):
 
     end2end = True
 
-    def __init__(self, nc: int = 80, ch: tuple = ()):
+    def __init__(self, nc: int = 80, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the v10Detect object with the specified number of classes and input channels.
 
         Args:
             nc (int): Number of classes.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
-        super().__init__(nc, end2end=True, ch=ch)
+        super().__init__(nc, end2end=True, ch=ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))  # channels
         # Light cls head
         self.cv3 = nn.ModuleList(
             nn.Sequential(
-                nn.Sequential(Conv(x, x, 3, g=x), Conv(x, c3, 1)),
-                nn.Sequential(Conv(c3, c3, 3, g=c3), Conv(c3, c3, 1)),
+                nn.Sequential(Conv(x, x, 3, g=x, **kwargs), Conv(x, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
+                nn.Sequential(Conv(c3, c3, 3, g=c3, **kwargs), Conv(c3, c3, 1, **kwargs)), # (CP/IRIT): Add open configuration parameters
                 nn.Conv2d(c3, self.nc, 1),
             )
             for x in ch
@@ -1985,7 +1991,7 @@ class SemanticSegment(nn.Module):
     format = None  # export format
     bake_argmax = False  # export: emit [B, H, W] class map (TensorRT>=10 and multi-class Hailo-10/15)
 
-    def __init__(self, nc=19, ch=()):
+    def __init__(self, nc=19, ch=(), **kwargs):
         """Initialize the semantic segmentation head.
 
         Args:
@@ -1999,9 +2005,9 @@ class SemanticSegment(nn.Module):
 
         c_mid = ch[0]  # use P3 channel width as intermediate dimension
         # Final classifier
-        self.classifier = nn.Sequential(Conv(c_mid, c_mid, 3), nn.Conv2d(c_mid, nc, 1))
+        self.classifier = nn.Sequential(Conv(c_mid, c_mid, 3, **kwargs), nn.Conv2d(c_mid, nc, 1)) # (CP/IRIT): Add open configuration parameters
         # Auxiliary head on P4 (index 1) for training
-        self.aux_head = nn.Sequential(Conv(ch[1], c_mid, 3), nn.Conv2d(c_mid, nc, 1)) if len(ch) > 1 else None
+        self.aux_head = nn.Sequential(Conv(ch[1], c_mid, 3, **kwargs), nn.Conv2d(c_mid, nc, 1)) if len(ch) > 1 else None # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x):
         """Forward pass: fuse multi-scale features and predict per-pixel classes.

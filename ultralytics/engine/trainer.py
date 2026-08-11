@@ -133,9 +133,9 @@ class BaseTrainer:
         # (CP/IRIT) start: inherit knowledge model configuration parameters
         self.use_scores = getattr(self.args, 'use_scores', False)
         self.use_km = self.use_scores and getattr(self.args, 'use_km', False)
+        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
         self.use_km_metrics = self.use_km and getattr(self.args, 'use_km_metrics', False)
         self.km_metrics_threshold = getattr(self.args, 'km_metrics_threshold', 0)
-        self.use_km_scores = self.use_km and getattr(self.args, 'use_km_scores', False)
         self.use_km_inference = self.use_km and getattr(self.args, 'use_km_inference', False)
         self.use_variant_selection = self.use_km_scores and getattr(self.args, 'use_variant_selection', False)
         self.use_km_losses = self.use_km and getattr(self.args, 'use_km_losses', False)
@@ -322,7 +322,7 @@ class BaseTrainer:
 
     def _setup_train(self):
         """Configure model, optimizer, dataloaders, and training utilities before the training loop."""
-        ckpt = self.setup_model()
+        ckpt = self.setup_model(use_scores=self.use_scores, use_km=self.use_km, use_km_scores=self.use_km_scores) # (CP/IRIT) Manage architecture adaptation for Knowledge Model
         self.model = self.model.to(self.device)
         # channels_last (NHWC) is CUDA-only: lossless and Tensor-Core friendly there, but numerically wrong
         # on MPS and no benefit on CPU
@@ -817,7 +817,7 @@ class BaseTrainer:
             data["nc"] = 1
         return data
 
-    def setup_model(self):
+    def setup_model(self, **kwargs): # (CP/IRIT): Manage architecture adaptation for Knowledge Model
         """Load, create, or download model for any task.
 
         Returns:
@@ -850,7 +850,7 @@ class BaseTrainer:
             model.criterion = None
             self.model = model
         else:
-            self.model = self.get_model(cfg=cfg, weights=weights, verbose=RANK in {-1, 0})  # calls Model(cfg, weights)
+            self.model = self.get_model(cfg=cfg, weights=weights, verbose=RANK in {-1, 0}, **kwargs)  # calls Model(cfg, weights) # (CP/IRIT): Manage architecture adaptation for Knowledge Model
         return ckpt
 
     def optimizer_step(self):

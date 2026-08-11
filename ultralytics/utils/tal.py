@@ -445,7 +445,7 @@ class TaskAlignedAssigner(nn.Module):
         # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
         batch_number = target_labels.shape[0]
         anchor_point_number = target_labels.shape[1] # anchor points number
-        target_scores = torch.zeros(
+        target_scores_base = torch.zeros(
             (batch_number, anchor_point_number, self.num_classes),
             dtype=torch.int8,
             device=target_labels.device,

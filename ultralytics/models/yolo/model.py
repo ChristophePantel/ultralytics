@@ -54,7 +54,7 @@ class YOLO(Model):
         >>> model = YOLO("yolo26n.yaml")
     """
 
-    def __init__(self, model: str | Path = "yolo26n.pt", task: str | None = None, verbose: bool = False):
+    def __init__(self, model: str | Path = "yolo26n.pt", task: str | None = None, verbose: bool = False, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize a YOLO model.
 
         This constructor initializes a YOLO model, automatically switching to specialized model types (YOLOWorld or
@@ -77,7 +77,7 @@ class YOLO(Model):
             self.__dict__ = new_instance.__dict__
         else:
             # Continue with default YOLO initialization
-            super().__init__(model=model, task=task, verbose=verbose)
+            super().__init__(model=model, task=task, verbose=verbose, **kwargs) # (CP/IRIT): Add open configuration parameters
             if hasattr(self.model, "model") and "RTDETR" in self.model.model[-1]._get_name():  # if RTDETR head
                 from ultralytics import RTDETR
 

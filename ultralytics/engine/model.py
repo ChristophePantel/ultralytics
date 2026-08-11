@@ -85,6 +85,7 @@ class Model(torch.nn.Module):
         model: str | Path | Model = "yolo26n.pt",
         task: str | None = None,
         verbose: bool = False,
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ) -> None:
         """Initialize a new instance of the YOLO model class.
 
@@ -120,6 +121,11 @@ class Model(torch.nn.Module):
         self.task = task  # task type
         self.model_name = None  # model name
         model = str(model).strip()
+        
+        # (CP/IRIT) start: Add knowledge models configuration parameters
+        self.use_scores = kwargs.get("use_scores",False)
+        self.use_km = self.use_scores and kwargs.get("use_km",False)
+        self.use_km_scores = self.use_km and kwargs.get("use_km_scores",False)
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
         if self.is_hub_model(model):
@@ -141,9 +147,9 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose)
+            self._new(model, task=task, verbose=verbose, **kwargs) # (CP/IRIT): Add open configuration parameters
         else:
-            self._load(model, task=task)
+            self._load(model, task=task, **kwargs) # (CP/IRIT): Add open configuration parameters
 
         # Delete super().training for accessing self.model.training
         del self.training
@@ -225,7 +231,7 @@ class Model(torch.nn.Module):
 
         return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
+    def _new(self, cfg: str, task=None, model=None, verbose=False, **kwargs) -> None: # (CP/IRIT): Add open configuration parameters
         """Initialize a new model and infer the task type from model definitions.
 
         Creates a new model instance based on the provided configuration file. Loads the model configuration, infers the
@@ -246,10 +252,17 @@ class Model(torch.nn.Module):
             >>> model = Model()
             >>> model._new("yolo26n.yaml", task="detect", verbose=True)
         """
+        # Read the content of the model file
         cfg_dict = yaml_model_load(cfg)
+        if "use_scores" in kwargs:
+            cfg_dict["use_scores"] = kwargs["use_scores"]
+        if "use_km" in kwargs:
+            cfg_dict["use_km"] = kwargs["use_km"]
+        if "use_km_scores" in kwargs:
+            cfg_dict["use_km_scores"] = kwargs["use_km_scores"]
         self.cfg = cfg
         self.task = task or guess_model_task(cfg_dict)
-        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
+        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1, **kwargs)  # build model # (CP/IRIT): Add open configuration parameters
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
 

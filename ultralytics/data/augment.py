@@ -316,6 +316,8 @@ class BaseMixTransform(BaseTransform):
             p (float): Probability of applying the mix transformation. Should be in the range [0.0, 1.0].
         """
         self.dataset = dataset
+        self.use_scores = dataset.use_scores
+        self.use_km = dataset.use_km
         self.pre_transform = pre_transform
         self.p = p
 
@@ -752,13 +754,15 @@ class Mosaic(BaseMixTransform):
             return {}
         cls = []
         variant = []  # (CP/IRIT): Add variant
-        scores = []  # (CP/IRIT): Add scores
+        if self.use_scores:
+            scores = []  # (CP/IRIT): Add scores
         instances = []
         imgsz = self.imgsz * 2  # mosaic imgsz
         for labels in mosaic_labels:
             cls.append(labels["cls"])
             variant.append(labels["variant"]) # (CP/IRIT): Add variant
-            scores.append(labels["scores"]) # (CP/IRIT): Add scores
+            if self.use_scores:
+                scores.append(labels["scores"]) # (CP/IRIT): Add scores
             instances.append(labels["instances"])
         # Final labels
         final_labels = {
@@ -774,7 +778,8 @@ class Mosaic(BaseMixTransform):
         good = final_labels["instances"].remove_zero_area_boxes()
         final_labels["cls"] = final_labels["cls"][good]
         final_labels["variant"] = final_labels["variant"][good] # (CP/IRIT): Add variant
-        final_labels["scores"] = final_labels["scores"][good] # (CP/IRIT): Add scores
+        if self.use_scores:
+            final_labels["scores"] = final_labels["scores"][good] # (CP/IRIT): Add scores
         if "texts" in mosaic_labels[0]:
             final_labels["texts"] = mosaic_labels[0]["texts"]
         return final_labels
@@ -858,7 +863,8 @@ class MixUp(BaseMixTransform):
         labels["instances"] = Instances.concatenate([labels["instances"], labels2["instances"]], axis=0)
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
         labels["variant"] = np.concatenate([labels["variant"], labels2["variant"]], 0)  # (CP/IRIT): Add variant
-        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"]], 0)  # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = np.concatenate([labels["scores"], labels2["scores"]], 0)  # (CP/IRIT): Add scores
         return labels
 
     def apply_semantic(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1030,7 +1036,8 @@ class CutMix(BaseMixTransform):
 
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"][indexes2]], axis=0)
         labels["variant"] = np.concatenate([labels["variant"], labels2["variant"][indexes2]], axis=0) # (CP/IRIT): Add variant
-        labels["scores"] = np.concatenate([labels["scores"], labels2["scores"][indexes2]], axis=0) # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = np.concatenate([labels["scores"], labels2["scores"][indexes2]], axis=0) # (CP/IRIT): Add scores
         labels["instances"] = Instances.concatenate([labels["instances"], instances2], axis=0)
         return labels
 
@@ -1221,7 +1228,8 @@ class RandomPerspective(BaseTransform):
         """
         cls = labels["cls"]
         variant =  labels["variant"]  # (CP/IRIT): Add variant
-        scores =  labels["scores"]  # (CP/IRIT): Add scores
+        if self.use_scores:
+            scores =  labels["scores"]  # (CP/IRIT): Add scores
         instances = labels.pop("instances")
         instances.convert_bbox(format="xyxy")
         instances.denormalize(*params["orig_shape"][::-1])
@@ -1252,7 +1260,8 @@ class RandomPerspective(BaseTransform):
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["variant"] = variant[i]  # (CP/IRIT): Add variant
-        labels["scores"] = scores[i]  # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = scores[i]  # (CP/IRIT): Add scores
         return labels
 
     def apply_bboxes(self, bboxes: np.ndarray, M: np.ndarray) -> np.ndarray:
@@ -2006,7 +2015,8 @@ class CopyPaste(BaseMixTransform):
         params["im_new"] = im_new
         params["labels2_cls"] = labels2.get("cls")
         params["labels2_variant"] = labels2.get("variant") # (CP/IRIT): Add variant
-        params["labels2_scores"] = labels2.get("scores") # (CP/IRIT): Add scores
+        if self.use_scores:
+            params["labels2_scores"] = labels2.get("scores") # (CP/IRIT): Add scores
         params["labels2_img"] = labels2.get("img")
         return params
 
@@ -2055,20 +2065,24 @@ class CopyPaste(BaseMixTransform):
         selected = params["selected"]
         cls = labels["cls"]
         variant =  labels["variant"] # (CP/IRIT): Add variant
-        scores =  labels["scores"] # (CP/IRIT): Add scores
+        if self.use_scores:
+            scores =  labels["scores"] # (CP/IRIT): Add scores
         labels2_cls = params.get("labels2_cls")
         labels2_variant = params.get("labels2_variant") # (CP/IRIT): Add variant
-        labels2_scores = params.get("labels2_scores") # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels2_scores = params.get("labels2_scores") # (CP/IRIT): Add scores
 
         for j in selected:
             cls = np.concatenate((cls, (labels2_cls if labels2_cls is not None else cls)[[j]]), axis=0)
             variant = np.concatenate((variant, (labels2_variant if labels2_variant is not None else variant)[[j]]), axis=0) # (CP/IRIT): Add variant
-            scores = np.concatenate((scores, (labels2_scores if labels2_scores is not None else scores)[[j]]), axis=0) # (CP/IRIT): Add scores
+            if self.use_scores:
+                scores = np.concatenate((scores, (labels2_scores if labels2_scores is not None else scores)[[j]]), axis=0) # (CP/IRIT): Add scores
             instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
 
         labels["cls"] = cls
         labels["variant"] = variant # (CP/IRIT): Add variant
-        labels["scores"] = scores # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = scores # (CP/IRIT): Add scores
         labels["instances"] = instances
         return labels
 
@@ -2253,7 +2267,8 @@ class Albumentations(BaseTransform):
             # TODO (CP/IRIT): should "scores" be managed in the same way ?
             cls = labels["cls"]
             variant = labels["variant"] # (CP/IRIT): Add variant
-            scores = labels["scores"] # (CP/IRIT): Add scores
+            if self.use_scores:
+                scores = labels["scores"] # (CP/IRIT): Add scores
             mask = labels.get("semantic_mask")
             if len(cls) or mask is not None:
                 labels["instances"].convert_bbox("xywh")
@@ -2267,7 +2282,8 @@ class Albumentations(BaseTransform):
                     labels["img"] = new["image"]
                     labels["cls"] = np.array(new["class_labels"]).reshape(-1, 1)
                     labels["variant"] = np.array(new["variant_labels"]).reshape(-1, 1) # (CP/IRIT): Add variant
-                    labels["scores"] = np.array(new["scores_labels"]).reshape(-1, nc) # (CP/IRIT): Add scores
+                    if self.use_scores:
+                        labels["scores"] = np.array(new["scores_labels"]).reshape(-1, nc) # (CP/IRIT): Add scores
                     bboxes = np.array(new["bboxes"], dtype=np.float32).reshape(-1, 4)
                     if mask is not None:
                         labels["semantic_mask"] = new["mask"]
@@ -2361,12 +2377,16 @@ class Format(BaseTransform):
         h, w = img.shape[:2] if img is not None else (0, 0)
         cls = labels.pop("cls", np.array([]))
         variant = labels.pop("variant", np.array([])) # (CP/IRIT): Add variant
-        scores = labels.pop("scores", np.array([])) # (CP/IRIT): Add scores
+        if self.use_scores:
+            scores = labels.pop("scores", np.array([])) # (CP/IRIT): Add scores
         instances = labels.pop("instances", None)
         if instances is not None:
             instances.convert_bbox(format=self.bbox_format)
             instances.denormalize(w, h)
-        return {"h": h, "w": w, "cls": cls, "variant": variant, "scores":scores, "instances": instances, "nl": len(instances) if instances else 0}
+        if self.use_scores:
+            return {"h": h, "w": w, "cls": cls, "variant": variant, "scores":scores, "instances": instances, "nl": len(instances) if instances else 0}
+        else:
+            return {"h": h, "w": w, "cls": cls, "variant": variant, "instances": instances, "nl": len(instances) if instances else 0}
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Format image from Numpy array to PyTorch tensor.
@@ -2398,7 +2418,8 @@ class Format(BaseTransform):
         """
         cls = params.get("cls", np.array([]))
         variant = params.get("variant", np.array([])) # (CP/IRIT): Add variant
-        scores = params.get("scores", np.array([])) # (CP/IRIT): Add scores
+        if self.use_scores:
+            scores = params.get("scores", np.array([])) # (CP/IRIT): Add scores
         instances = params.get("instances")
         assert instances is not None, "instances are required for Format.apply_instances"
         h = params.get("h", 0)
@@ -2435,7 +2456,8 @@ class Format(BaseTransform):
             labels["sem_masks"] = sem_masks.float()
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["variant"] = torch.from_numpy(variant) if nl else torch.zeros(nl, 1) # (CP/IRIT): Add variant
-        labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, nc) # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = torch.from_numpy(scores) if nl else torch.zeros(nl, nc) # (CP/IRIT): Add scores
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
             labels["keypoints"] = (
@@ -2609,8 +2631,12 @@ class LoadVisualPrompt(BaseTransform):
         # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels["cls"].squeeze(-1).to(torch.int)
         variant = labels["variant"].squeeze(-1).to(torch.int) # (CP/IRIT): Add variant
-        scores = labels["scores"].squeeze(-1).to(torch.int) # (CP/IRIT): Add scores
-        return {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls, "variant": variant, "scores": scores}
+        if self.use_scores:
+            scores = labels["scores"].squeeze(-1).to(torch.int) # (CP/IRIT): Add scores
+        if self.use_scores:
+            return {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls, "variant": variant, "scores": scores}
+        else:
+            return {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls, "variant": variant}
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         """Create visual prompts and add them to labels.
@@ -2795,7 +2821,8 @@ class RandomLoadText(BaseTransform):
         labels["instances"] = labels["instances"][params["valid_idx"]]
         labels["cls"] = params["new_cls"]
         labels["variant"] = params["new_variant"] # (CP/IRIT): Add variant
-        labels["scores"] = params["new_scores"] # (CP/IRIT): Add scores
+        if self.use_scores:
+            labels["scores"] = params["new_scores"] # (CP/IRIT): Add scores
         labels["texts"] = params["texts"]
         return labels
 
