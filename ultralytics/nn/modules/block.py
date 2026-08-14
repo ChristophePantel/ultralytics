@@ -94,8 +94,8 @@ class Proto(nn.Module):
         super().__init__()
         self.cv1 = Conv(c1, c_, k=3)
         self.upsample = nn.ConvTranspose2d(c_, c_, 2, 2, 0, bias=True)  # nn.Upsample(scale_factor=2, mode='nearest')
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
+        self.cv2 = Conv(c_, c_, k=3, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv(c_, c2, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
@@ -117,11 +117,11 @@ class HGStem(nn.Module):
             c2 (int): Output channels.
         """
         super().__init__()
-        self.stem1 = Conv(c1, cm, 3, 2, act=nn.ReLU())
-        self.stem2a = Conv(cm, cm // 2, 2, 1, 0, act=nn.ReLU())
-        self.stem2b = Conv(cm // 2, cm, 2, 1, 0, act=nn.ReLU())
-        self.stem3 = Conv(cm * 2, cm, 3, 2, act=nn.ReLU())
-        self.stem4 = Conv(cm, c2, 1, 1, act=nn.ReLU())
+        self.stem1 = Conv(c1, cm, 3, 2, act=nn.ReLU(), **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.stem2a = Conv(cm, cm // 2, 2, 1, 0, act=nn.ReLU(), **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.stem2b = Conv(cm // 2, cm, 2, 1, 0, act=nn.ReLU(), **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.stem3 = Conv(cm * 2, cm, 3, 2, act=nn.ReLU(), **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.stem4 = Conv(cm, c2, 1, 1, act=nn.ReLU(), **kwargs) # (CP/IRIT): Add open configuration parameters
         self.pool = nn.MaxPool2d(kernel_size=2, stride=1, padding=0, ceil_mode=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -171,9 +171,9 @@ class HGBlock(nn.Module):
         super().__init__()
         act = nn.ReLU() if act is None else act
         block = LightConv if lightconv else Conv
-        self.m = nn.ModuleList(block(c1 if i == 0 else cm, cm, k=k, act=act) for i in range(n))
-        self.sc = Conv(c1 + n * cm, c2 // 2, 1, 1, act=act)  # squeeze conv
-        self.ec = Conv(c2 // 2, c2, 1, 1, act=act)  # excitation conv
+        self.m = nn.ModuleList(block(c1 if i == 0 else cm, cm, k=k, act=act, **kwargs) for i in range(n)) # (CP/IRIT): Add open configuration parameters
+        self.sc = Conv(c1 + n * cm, c2 // 2, 1, 1, act=act, **kwargs)  # squeeze conv # (CP/IRIT): Add open configuration parameters
+        self.ec = Conv(c2 // 2, c2, 1, 1, act=act, **kwargs)  # excitation conv # (CP/IRIT): Add open configuration parameters
         self.add = shortcut and c1 == c2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -197,8 +197,8 @@ class SPP(nn.Module):
         """
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -225,8 +225,8 @@ class SPPF(nn.Module):
         """
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1, act=False)
-        self.cv2 = Conv(c_ * (n + 1), c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c_ * (n + 1), c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
         self.n = n
         self.add = shortcut and c1 == c2
@@ -251,8 +251,8 @@ class C1(nn.Module):
             n (int): Number of convolutions.
         """
         super().__init__()
-        self.cv1 = Conv(c1, c2, 1, 1)
-        self.m = nn.Sequential(*(Conv(c2, c2, 3) for _ in range(n)))
+        self.cv1 = Conv(c1, c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.Sequential(*(Conv(c2, c2, 3, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply convolution and residual connection to input tensor."""
@@ -276,10 +276,10 @@ class C2(nn.Module):
         """
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.cv2 = Conv(2 * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters)
+        self.cv2 = Conv(2 * self.c, c2, 1, **kwargs)  # optional act=FReLU(c2) # (CP/IRIT): Add open configuration parameters)
         # self.attention = ChannelAttention(2 * self.c)  # or SpatialAttention()
-        self.m = nn.Sequential(*(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the CSP bottleneck with 2 convolutions."""
@@ -303,9 +303,9 @@ class C2f(nn.Module):
         """
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1, **kwargs)  # optional act=FReLU(c2) # (CP/IRIT): Add open configuration parameters)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0, **kwargs) for _ in range(n)) # (CP/IRIT): Add open configuration parameters)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through C2f layer."""
@@ -337,10 +337,10 @@ class C3(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=((1, 1), (3, 3)), e=1.0) for _ in range(n)))
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv(2 * c_, c2, 1, **kwargs)  # optional act=FReLU(c2) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=((1, 1), (3, 3)), e=1.0, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the CSP bottleneck with 3 convolutions."""
@@ -350,7 +350,7 @@ class C3(nn.Module):
 class C3x(C3):
     """C3 module with cross-convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs) # (CP/IRIT): Add open configuration parameters
         """Initialize C3 module with cross-convolutions.
 
         Args:
@@ -361,9 +361,9 @@ class C3x(C3):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs): # (CP/IRIT): Add open configuration parameters
         self.c_ = int(c2 * e)
-        self.m = nn.Sequential(*(Bottleneck(self.c_, self.c_, shortcut, g, k=((1, 3), (3, 1)), e=1) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(self.c_, self.c_, shortcut, g, k=((1, 3), (3, 1)), e=1, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
 
 class RepC3(nn.Module):
@@ -380,10 +380,10 @@ class RepC3(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.m = nn.Sequential(*[RepConv(c_, c_) for _ in range(n)])
-        self.cv3 = Conv(c_, c2, 1, 1) if c_ != c2 else nn.Identity()
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.Sequential(*[RepConv(c_, c_, **kwargs) for _ in range(n)]) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv(c_, c2, 1, 1, **kwargs) if c_ != c2 else nn.Identity() # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of RepC3 module."""
@@ -404,9 +404,9 @@ class C3TR(C3):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         c_ = int(c2 * e)
-        self.m = TransformerBlock(c_, c_, 4, n)
+        self.m = TransformerBlock(c_, c_, 4, n, **kwargs) # (CP/IRIT): Add open configuration parameters
 
 
 class C3Ghost(C3):
@@ -423,9 +423,9 @@ class C3Ghost(C3):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         c_ = int(c2 * e)  # hidden channels
-        self.m = nn.Sequential(*(GhostBottleneck(c_, c_) for _ in range(n)))
+        self.m = nn.Sequential(*(GhostBottleneck(c_, c_, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
 
 class GhostBottleneck(nn.Module):
@@ -443,12 +443,12 @@ class GhostBottleneck(nn.Module):
         super().__init__()
         c_ = c2 // 2
         self.conv = nn.Sequential(
-            GhostConv(c1, c_, 1, 1),  # pw
-            DWConv(c_, c_, k, s, act=False) if s == 2 else nn.Identity(),  # dw
-            GhostConv(c_, c2, 1, 1, act=False),  # pw-linear
+            GhostConv(c1, c_, 1, 1, **kwargs),  # pw # (CP/IRIT): Add open configuration parameters
+            DWConv(c_, c_, k, s, act=False, **kwargs) if s == 2 else nn.Identity(),  # dw # (CP/IRIT): Add open configuration parameters
+            GhostConv(c_, c2, 1, 1, act=False, **kwargs),  # pw-linear # (CP/IRIT): Add open configuration parameters
         )
         self.shortcut = (
-            nn.Sequential(DWConv(c1, c1, k, s, act=False), Conv(c1, c2, 1, 1, act=False)) if s == 2 else nn.Identity()
+            nn.Sequential(DWConv(c1, c1, k, s, act=False, **kwargs), Conv(c1, c2, 1, 1, act=False, **kwargs)) if s == 2 else nn.Identity() # (CP/IRIT): Add open configuration parameters
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -475,8 +475,8 @@ class Bottleneck(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, k[0], 1)
-        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.cv1 = Conv(c1, c_, k[0], 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.add = shortcut and c1 == c2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -500,13 +500,13 @@ class BottleneckCSP(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
         self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
-        self.cv4 = Conv(2 * c_, c2, 1, 1)
+        self.cv4 = Conv(2 * c_, c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
         self.act = nn.SiLU()
-        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply CSP bottleneck with 4 convolutions."""
@@ -529,10 +529,10 @@ class ResNetBlock(nn.Module):
         """
         super().__init__()
         c3 = e * c2
-        self.cv1 = Conv(c1, c2, k=1, s=1, act=True)
-        self.cv2 = Conv(c2, c2, k=3, s=s, p=1, act=True)
-        self.cv3 = Conv(c2, c3, k=1, act=False)
-        self.shortcut = nn.Sequential(Conv(c1, c3, k=1, s=s, act=False)) if s != 1 or c1 != c3 else nn.Identity()
+        self.cv1 = Conv(c1, c2, k=1, s=1, act=True, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c2, c2, k=3, s=s, p=1, act=True, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv(c2, c3, k=1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.shortcut = nn.Sequential(Conv(c1, c3, k=1, s=s, act=False, **kwargs)) if s != 1 or c1 != c3 else nn.Identity() # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the ResNet block."""
@@ -558,11 +558,11 @@ class ResNetLayer(nn.Module):
 
         if self.is_first:
             self.layer = nn.Sequential(
-                Conv(c1, c2, k=7, s=2, p=3, act=True), nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                Conv(c1, c2, k=7, s=2, p=3, act=True, **kwargs), nn.MaxPool2d(kernel_size=3, stride=2, padding=1) # (CP/IRIT): Add open configuration parameters
             )
         else:
-            blocks = [ResNetBlock(c1, c2, s, e=e)]
-            blocks.extend([ResNetBlock(e * c2, c2, 1, e=e) for _ in range(n - 1)])
+            blocks = [ResNetBlock(c1, c2, s, e=e, **kwargs)] # (CP/IRIT): Add open configuration parameters
+            blocks.extend([ResNetBlock(e * c2, c2, 1, e=e, **kwargs) for _ in range(n - 1)]) # (CP/IRIT): Add open configuration parameters
             self.layer = nn.Sequential(*blocks)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -587,10 +587,10 @@ class MaxSigmoidAttnBlock(nn.Module):
         super().__init__()
         self.nh = nh
         self.hc = c2 // nh
-        self.ec = Conv(c1, ec, k=1, act=False) if c1 != ec else None
+        self.ec = Conv(c1, ec, k=1, act=False, **kwargs) if c1 != ec else None # (CP/IRIT): Add open configuration parameters
         self.gl = nn.Linear(gc, ec)
         self.bias = nn.Parameter(torch.zeros(nh))
-        self.proj_conv = Conv(c1, c2, k=3, s=1, act=False)
+        self.proj_conv = Conv(c1, c2, k=3, s=1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.scale = nn.Parameter(torch.ones(1, nh, 1, 1)) if scale else 1.0
 
     def forward(self, x: torch.Tensor, guide: torch.Tensor) -> torch.Tensor:
@@ -653,10 +653,10 @@ class C2fAttn(nn.Module):
         """
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.cv2 = Conv((3 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
-        self.attn = MaxSigmoidAttnBlock(self.c, self.c, gc=gc, ec=ec, nh=nh)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv((3 + n) * self.c, c2, 1, **kwargs)  # optional act=FReLU(c2) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0, **kwargs) for _ in range(n)) # (CP/IRIT): Add open configuration parameters
+        self.attn = MaxSigmoidAttnBlock(self.c, self.c, gc=gc, ec=ec, nh=nh, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor, guide: torch.Tensor) -> torch.Tensor:
         """Forward pass through C2f layer with attention.
@@ -846,9 +846,9 @@ class RepBottleneck(Bottleneck):
             k (tuple): Kernel sizes for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, shortcut, g, k, e)
+        super().__init__(c1, c2, shortcut, g, k, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = RepConv(c1, c_, k[0], 1)
+        self.cv1 = RepConv(c1, c_, k[0], 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
 
 class RepCSP(C3):
@@ -865,9 +865,9 @@ class RepCSP(C3):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         c_ = int(c2 * e)  # hidden channels
-        self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, e=1.0, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
 
 class RepNCSPELAN4(nn.Module):
@@ -885,10 +885,10 @@ class RepNCSPELAN4(nn.Module):
         """
         super().__init__()
         self.c = c3 // 2
-        self.cv1 = Conv(c1, c3, 1, 1)
-        self.cv2 = nn.Sequential(RepCSP(c3 // 2, c4, n), Conv(c4, c4, 3, 1))
-        self.cv3 = nn.Sequential(RepCSP(c4, c4, n), Conv(c4, c4, 3, 1))
-        self.cv4 = Conv(c3 + (2 * c4), c2, 1, 1)
+        self.cv1 = Conv(c1, c3, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = nn.Sequential(RepCSP(c3 // 2, c4, n, **kwargs), Conv(c4, c4, 3, 1, **kwargs)) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = nn.Sequential(RepCSP(c4, c4, n, **kwargs), Conv(c4, c4, 3, 1, **kwargs)) # (CP/IRIT): Add open configuration parameters
+        self.cv4 = Conv(c3 + (2 * c4), c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through RepNCSPELAN4 layer."""
@@ -915,12 +915,12 @@ class ELAN1(RepNCSPELAN4):
             c3 (int): Intermediate channels.
             c4 (int): Intermediate channels for convolutions.
         """
-        super().__init__(c1, c2, c3, c4)
+        super().__init__(c1, c2, c3, c4, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.c = c3 // 2
-        self.cv1 = Conv(c1, c3, 1, 1)
-        self.cv2 = Conv(c3 // 2, c4, 3, 1)
-        self.cv3 = Conv(c4, c4, 3, 1)
-        self.cv4 = Conv(c3 + (2 * c4), c2, 1, 1)
+        self.cv1 = Conv(c1, c3, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c3 // 2, c4, 3, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv(c4, c4, 3, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv4 = Conv(c3 + (2 * c4), c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
 
 class AConv(nn.Module):
@@ -934,7 +934,7 @@ class AConv(nn.Module):
             c2 (int): Output channels.
         """
         super().__init__()
-        self.cv1 = Conv(c1, c2, 3, 2, 1)
+        self.cv1 = Conv(c1, c2, 3, 2, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through AConv layer."""
@@ -954,8 +954,8 @@ class ADown(nn.Module):
         """
         super().__init__()
         self.c = c2 // 2
-        self.cv1 = Conv(c1 // 2, self.c, 3, 2, 1)
-        self.cv2 = Conv(c1 // 2, self.c, 1, 1, 0)
+        self.cv1 = Conv(c1 // 2, self.c, 3, 2, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c1 // 2, self.c, 1, 1, 0, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through ADown layer."""
@@ -981,11 +981,11 @@ class SPPELAN(nn.Module):
         """
         super().__init__()
         self.c = c3
-        self.cv1 = Conv(c1, c3, 1, 1)
+        self.cv1 = Conv(c1, c3, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.cv2 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
         self.cv3 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
         self.cv4 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.cv5 = Conv(4 * c3, c2, 1, 1)
+        self.cv5 = Conv(4 * c3, c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through SPPELAN layer."""
@@ -1059,10 +1059,10 @@ class C3f(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.cv3 = Conv((2 + n) * c_, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.ModuleList(Bottleneck(c_, c_, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv3 = Conv((2 + n) * c_, c2, 1, **kwargs)  # optional act=FReLU(c2) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.ModuleList(Bottleneck(c_, c_, shortcut, g, k=((3, 3), (3, 3)), e=1.0, **kwargs) for _ in range(n)) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through C3f layer."""
@@ -1098,16 +1098,16 @@ class C3k2(C2f):
             g (int): Groups for convolutions.
             shortcut (bool): Whether to use shortcut connections.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.m = nn.ModuleList(
             nn.Sequential(
-                Bottleneck(self.c, self.c, shortcut, g),
-                PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1)),
+                Bottleneck(self.c, self.c, shortcut, g, **kwargs), # (CP/IRIT): Add open configuration parameters
+                PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1), **kwargs), # (CP/IRIT): Add open configuration parameters
             )
             if attn
-            else C3k(self.c, self.c, 2, shortcut, g)
+            else C3k(self.c, self.c, 2, shortcut, g, **kwargs) # (CP/IRIT): Add open configuration parameters
             if c3k
-            else Bottleneck(self.c, self.c, shortcut, g)
+            else Bottleneck(self.c, self.c, shortcut, g, **kwargs) # (CP/IRIT): Add open configuration parameters
             for _ in range(n)
         )
 
@@ -1127,10 +1127,10 @@ class C3k(C3):
             e (float): Expansion ratio.
             k (int): Kernel size.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         c_ = int(c2 * e)  # hidden channels
         # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
-        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
 
 class RepVGGDW(torch.nn.Module):
@@ -1143,8 +1143,8 @@ class RepVGGDW(torch.nn.Module):
             ed (int): Input and output channels.
         """
         super().__init__()
-        self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False)
-        self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False)
+        self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.dim = ed
         self.act = nn.SiLU()
 
@@ -1222,11 +1222,11 @@ class CIB(nn.Module):
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = nn.Sequential(
-            Conv(c1, c1, 3, g=c1),
-            Conv(c1, 2 * c_, 1),
-            RepVGGDW(2 * c_) if lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
-            Conv(2 * c_, c2, 1),
-            Conv(c2, c2, 3, g=c2),
+            Conv(c1, c1, 3, g=c1, **kwargs), # (CP/IRIT): Add open configuration parameters
+            Conv(c1, 2 * c_, 1, **kwargs), # (CP/IRIT): Add open configuration parameters
+            RepVGGDW(2 * c_, **kwargs) if lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_, **kwargs), # (CP/IRIT): Add open configuration parameters
+            Conv(2 * c_, c2, 1, **kwargs), # (CP/IRIT): Add open configuration parameters
+            Conv(c2, c2, 3, g=c2, **kwargs), # (CP/IRIT): Add open configuration parameters
         )
 
         self.add = shortcut and c1 == c2
@@ -1271,8 +1271,8 @@ class C2fCIB(C2f):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e)
-        self.m = nn.ModuleList(CIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n))
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.m = nn.ModuleList(CIB(self.c, self.c, shortcut, e=1.0, lk=lk, **kwargs) for _ in range(n)) # (CP/IRIT): Add open configuration parameters
 
 
 class Attention(nn.Module):
@@ -1308,9 +1308,9 @@ class Attention(nn.Module):
         self.scale = self.key_dim**-0.5
         nh_kd = self.key_dim * num_heads
         h = dim + nh_kd * 2
-        self.qkv = Conv(dim, h, 1, act=False)
-        self.proj = Conv(dim, dim, 1, act=False)
-        self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
+        self.qkv = Conv(dim, h, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.proj = Conv(dim, dim, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.pe = Conv(dim, dim, 3, 1, g=dim, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the Attention module.
@@ -1367,8 +1367,8 @@ class PSABlock(nn.Module):
         """
         super().__init__()
 
-        self.attn = Attention(c, attn_ratio=attn_ratio, num_heads=num_heads)
-        self.ffn = nn.Sequential(Conv(c, c * 2, 1), Conv(c * 2, c, 1, act=False))
+        self.attn = Attention(c, attn_ratio=attn_ratio, num_heads=num_heads, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.ffn = nn.Sequential(Conv(c, c * 2, 1, **kwargs), Conv(c * 2, c, 1, act=False, **kwargs)) # (CP/IRIT): Add open configuration parameters
         self.add = shortcut
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1419,11 +1419,11 @@ class PSA(nn.Module):
         super().__init__()
         assert c1 == c2
         self.c = int(c1 * e)
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.cv2 = Conv(2 * self.c, c1, 1)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(2 * self.c, c1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
-        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1))
-        self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False))
+        self.attn = Attention(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1), **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.ffn = nn.Sequential(Conv(self.c, self.c * 2, 1, **kwargs), Conv(self.c * 2, self.c, 1, act=False, **kwargs)) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Execute forward pass in PSA module.
@@ -1476,10 +1476,10 @@ class C2PSA(nn.Module):
         super().__init__()
         assert c1 == c2
         self.c = int(c1 * e)
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.cv2 = Conv(2 * self.c, c1, 1)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(2 * self.c, c1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
-        self.m = nn.Sequential(*(PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1)) for _ in range(n)))
+        self.m = nn.Sequential(*(PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1), **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Process the input tensor through a series of PSA blocks.
@@ -1530,8 +1530,8 @@ class C2fPSA(C2f):
             e (float): Expansion ratio.
         """
         assert c1 == c2
-        super().__init__(c1, c2, n=n, e=e)
-        self.m = nn.ModuleList(PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1)) for _ in range(n))
+        super().__init__(c1, c2, n=n, e=e, **kwargs)
+        self.m = nn.ModuleList(PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1), **kwargs) for _ in range(n)) # (CP/IRIT): Add open configuration parameters
 
 
 class SCDown(nn.Module):
@@ -1567,8 +1567,8 @@ class SCDown(nn.Module):
             s (int): Stride.
         """
         super().__init__()
-        self.cv1 = Conv(c1, c2, 1, 1)
-        self.cv2 = Conv(c2, c2, k=k, s=s, g=c2, act=False)
+        self.cv1 = Conv(c1, c2, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv(c2, c2, k=k, s=s, g=c2, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply convolution and downsampling to the input tensor.
@@ -1686,9 +1686,9 @@ class AAttn(nn.Module):
         self.head_dim = head_dim = dim // num_heads
         self.all_head_dim = all_head_dim = head_dim * self.num_heads
 
-        self.qkv = Conv(dim, all_head_dim * 3, 1, act=False)
-        self.proj = Conv(all_head_dim, dim, 1, act=False)
-        self.pe = Conv(all_head_dim, all_head_dim, 7, 1, 3, g=all_head_dim, act=False)
+        self.qkv = Conv(dim, all_head_dim * 3, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.proj = Conv(all_head_dim, dim, 1, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.pe = Conv(all_head_dim, all_head_dim, 7, 1, 3, g=all_head_dim, act=False, **kwargs) # (CP/IRIT): Add open configuration parameters
 
     def __setstate__(self, state):
         """Add missing all_head_dim attribute to old checkpoints."""
@@ -1769,9 +1769,9 @@ class ABlock(nn.Module):
         """
         super().__init__()
 
-        self.attn = AAttn(dim, num_heads=num_heads, area=area)
+        self.attn = AAttn(dim, num_heads=num_heads, area=area, **kwargs) # (CP/IRIT): Add open configuration parameters
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(Conv(dim, mlp_hidden_dim, 1), Conv(mlp_hidden_dim, dim, 1, act=False))
+        self.mlp = nn.Sequential(Conv(dim, mlp_hidden_dim, 1, **kwargs), Conv(mlp_hidden_dim, dim, 1, act=False, **kwargs)) # (CP/IRIT): Add open configuration parameters
 
         self.apply(self._init_weights)
 
@@ -1855,14 +1855,14 @@ class A2C2f(nn.Module):
         c_ = int(c2 * e)  # hidden channels
         assert c_ % 32 == 0, "Dimension of ABlock must be a multiple of 32."
 
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv((1 + n) * c_, c2, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.cv2 = Conv((1 + n) * c_, c2, 1, **kwargs) # (CP/IRIT): Add open configuration parameters
 
         self.gamma = nn.Parameter(0.01 * torch.ones(c2), requires_grad=True) if a2 and residual else None
         self.m = nn.ModuleList(
-            nn.Sequential(*(ABlock(c_, c_ // 32, mlp_ratio, area) for _ in range(2)))
+            nn.Sequential(*(ABlock(c_, c_ // 32, mlp_ratio, area, **kwargs) for _ in range(2))) # (CP/IRIT): Add open configuration parameters
             if a2
-            else C3k(c_, c_, 2, shortcut, g)
+            else C3k(c_, c_, 2, shortcut, g, **kwargs) # (CP/IRIT): Add open configuration parameters
             for _ in range(n)
         )
 
@@ -1941,13 +1941,13 @@ class SAVPE(nn.Module):
         super().__init__()
         self.cv1 = nn.ModuleList(
             nn.Sequential(
-                Conv(x, c3, 3), Conv(c3, c3, 3), nn.Upsample(scale_factor=i * 2) if i in {1, 2} else nn.Identity()
+                Conv(x, c3, 3, **kwargs), Conv(c3, c3, 3, **kwargs), nn.Upsample(scale_factor=i * 2) if i in {1, 2} else nn.Identity() # (CP/IRIT): Add open configuration parameters
             )
             for i, x in enumerate(ch)
         )
 
         self.cv2 = nn.ModuleList(
-            nn.Sequential(Conv(x, c3, 1), nn.Upsample(scale_factor=i * 2) if i in {1, 2} else nn.Identity())
+            nn.Sequential(Conv(x, c3, 1, **kwargs), nn.Upsample(scale_factor=i * 2) if i in {1, 2} else nn.Identity()) # (CP/IRIT): Add open configuration parameters
             for i, x in enumerate(ch)
         )
 
@@ -1955,7 +1955,7 @@ class SAVPE(nn.Module):
         self.cv3 = nn.Conv2d(3 * c3, embed, 1)
         self.cv4 = nn.Conv2d(3 * c3, self.c, 3, padding=1)
         self.cv5 = nn.Conv2d(1, self.c, 3, padding=1)
-        self.cv6 = nn.Sequential(Conv(2 * self.c, self.c, 3), nn.Conv2d(self.c, self.c, 3, padding=1))
+        self.cv6 = nn.Sequential(Conv(2 * self.c, self.c, 3, **kwargs), nn.Conv2d(self.c, self.c, 3, padding=1)) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: list[torch.Tensor], vp: torch.Tensor) -> torch.Tensor:
         """Process input features and visual prompts to generate enhanced embeddings."""
@@ -1999,9 +1999,9 @@ class Proto26(Proto):
             nc (int): Number of classes for semantic segmentation.
         """
         super().__init__(c_, c_, c2)
-        self.feat_refine = nn.ModuleList(Conv(x, ch[0], k=1) for x in ch[1:])
-        self.feat_fuse = Conv(ch[0], c_, k=3)
-        self.semseg = nn.Sequential(Conv(ch[0], c_, k=3), Conv(c_, c_, k=3), nn.Conv2d(c_, nc, 1))
+        self.feat_refine = nn.ModuleList(Conv(x, ch[0], k=1, **kwargs) for x in ch[1:]) # (CP/IRIT): Add open configuration parameters
+        self.feat_fuse = Conv(ch[0], c_, k=3, **kwargs) # (CP/IRIT): Add open configuration parameters
+        self.semseg = nn.Sequential(Conv(ch[0], c_, k=3, **kwargs), Conv(c_, c_, k=3, **kwargs), nn.Conv2d(c_, nc, 1)) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: torch.Tensor, return_semantic: bool = True) -> torch.Tensor:
         """Perform a forward pass by fusing multi-scale feature maps and generating proto masks."""

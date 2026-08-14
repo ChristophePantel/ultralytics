@@ -269,7 +269,7 @@ def verify_image_mask(args: tuple) -> tuple:
 # File structure depends on the task (classification, detection, obb, segmentation, pose)
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, use_km_scores = args
+    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, use_scores, use_km, use_km_scores = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -725,6 +725,7 @@ def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
                 LOGGER.info(f"{prefix} found {nf} images in {class_count} classes ✅ ")
 
     return {"train": train_set, "val": val_set, "test": test_set, "nc": nc, "names": names, "channels": 3}
+
 
 def compress_one_image(f: str, f_new: str | None = None, max_dim: int = 1920, quality: int = 50):
     """Compress a single image file to reduced size while preserving its aspect ratio and quality using either the

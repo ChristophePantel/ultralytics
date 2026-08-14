@@ -202,7 +202,7 @@ class YOLODataset(BaseDataset):
                 "'kpt_shape' in data.yaml missing or incorrect. Should be a list with [number of "
                 "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
             )
-        return verify_image_label, zip(
+        zipped = zip(
             self.im_files,
             self.label_files,
             repeat(self.prefix),
@@ -211,9 +211,11 @@ class YOLODataset(BaseDataset):
             repeat(nkpt),
             repeat(ndim),
             repeat(self.single_cls),
-            repeat(self.use_km_scores), # (CP/IRIT) Add knowledge model scores parameter
+            repeat(self.use_scores) # (CP/IRIT) Use class scores instead of single class
+            repeat(self.use_km), # (CP/IRIT) Use knowledge model
+            repeat(self.use_km_scores), # (CP/IRIT) Use class scores in addition to confidence score
         )
-                    
+        return verify_image_label, zipped
 
     def result_to_label(self, result: list) -> tuple[dict | None, int, int, int, int, str]:
         """Convert one verification result into a label dict and scan counter increments.

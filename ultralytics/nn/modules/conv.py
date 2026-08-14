@@ -113,7 +113,7 @@ class Conv2(Conv):
             act (bool | nn.Module): Activation function.
         """
         super().__init__(c1, c2, k, s, p, g=g, d=d, act=act)
-        self.cv2 = nn.Conv2d(c1, c2, 1, s, autopad(1, p, d), groups=g, dilation=d, bias=False)
+        self.cv2 = nn.Conv2d(c1, c2, 1, s, autopad(1, p, d), groups=g, dilation=d, bias=False)  # add 1x1 conv
 
     def forward(self, x):
         """Apply convolution, batch normalization and activation to input tensor.

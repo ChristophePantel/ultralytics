@@ -16,7 +16,8 @@ from ultralytics.data import build_dataloader, build_yolo_dataset, converter
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK, nms, ops
 from ultralytics.utils.checks import check_requirements
-from ultralytics.utils.metrics import ConfusionMatrix, KnowledgeModelConfusionMatrix, MultipleConfusionMatrix, DetMetrics, KnowledgeModelDetMetrics, MultipleDetMetrics, box_iou
+from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
+from ultralytics.utils.metrics import KnowledgeModelConfusionMatrix, MultipleConfusionMatrix, KnowledgeModelDetMetrics, MultipleDetMetrics
 from ultralytics.utils.plotting import plot_images
 
 from ultralytics.utils import km
@@ -188,10 +189,32 @@ class DetectionValidator(BaseValidator):
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
         # Split results field by field
-        if self.use_km_scores:
+        results = []
+        for x in outputs:
+            bboxes = x[:, :4]
+            conf = x[:, 4] 
+            cls = x[:, 5]
+            if self.use_scores:
+                scores = x[:, 6:6+self.nc]
+                if self.use_km:
+                    variant = x[:, 6+self.nc]
+                    if self.use_km_scores:
+                        km_scores = x[:,7+self.nc:7+2*self.nc]
+                        extra = x[:, 7+2*self.nc:]
+                        result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "variant": variant, "km_scores": km_scores, "extra": extra}
+                    else:
+                        extra = x[:, 7+self.nc:]
+                        result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "variant": variant, "extra": extra}
+                else:
+                    extra = x[:, 6+self.nc:]
+                    result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "extra": extra}
+            else:
+                extra = x[:, 6:]
+                result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "extra": extra}
+            results.append(result)
+       
             return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
-        else:
-            return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
+        return results
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:

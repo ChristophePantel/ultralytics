@@ -106,8 +106,7 @@ class DetectionTrainer(BaseTrainer):
         )
 
     def preprocess_batch(self, batch: dict) -> dict:
-        """
-        Preprocess a batch of images by scaling and converting to float.
+        """Preprocess a batch of images by scaling and converting to float.
         # TODO (CP/IRIT): Should we move the other tensors to the selected device (CPU/GPU) here as the images ?
 
         Args:
@@ -217,6 +216,7 @@ class DetectionTrainer(BaseTrainer):
     def get_validator(self):
         """Return a DetectionValidator for YOLO model validation."""
         # (CP/IRIT): Add knowledge model loss names
+        # Check if this is the appropriate place ?
         if self.use_km_scores:
             if self.use_km_losses:
                 self.loss_names = "box_loss", "conf_loss", "cls_loss", "km_loss", "dfl_loss"

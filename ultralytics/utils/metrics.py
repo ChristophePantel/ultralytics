@@ -121,7 +121,7 @@ def bbox_iou(
         box1 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
         box2 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
         xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in (x1, y1,
-            x2, y2) format.get_class_compatibility_matrix
+            x2, y2) format.
         GIoU (bool, optional): If True, calculate Generalized IoU.
         DIoU (bool, optional): If True, calculate Distance IoU.
         CIoU (bool, optional): If True, calculate Complete IoU.
@@ -130,9 +130,6 @@ def bbox_iou(
     Returns:
         (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
     """
-    if (box1.shape != box2.shape):
-        pass
-    assert (box1.shape == box2.shape), ("box1 and box2 must have the same shape.")
     # Get the coordinates of bounding boxes
     if xywh:  # transform from xywh to xyxy
         (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
@@ -372,6 +369,8 @@ class ConfusionMatrix(DataExportMixin):
         self.matches = {} if save_matches else None
 
     def is_compatible( self, a : int, b : int) -> bool: 
+        """Use simple equality or hierarchy aware compatibility
+        """
         return (a == b)
 
     def _append_matches(self, mtype: str, batch: dict[str, Any], idx: int) -> None:
@@ -523,6 +522,8 @@ class ConfusionMatrix(DataExportMixin):
             if x[0].shape[0] > 1:
                 # sort according to iou value in reverse order ? meaning of [::-1]
                 matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                matches = matches[matches[:, 2].argsort()[::-1]]
                 # remove gt_bboxes that occurs several time keeping the highest iou
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
         
@@ -552,9 +553,8 @@ class ConfusionMatrix(DataExportMixin):
                 # dc: detected class
                 dc = detection_classes[di]
                 self.matrix[dc, gc] += 1  # TP if class is correct else both an FP and an FN
-                # DONE(CP/IRIT): Use a distance between dc and gc to decide if it is a correct prediction or not
+                # (CP/IRIT): Use a distance between dc and gc to decide if it is a correct prediction or not
                 if self.is_compatible( dc, gc):
-                # if dc == gc:
                     self._append_matches("TP", detections, di)
                 else:
                     # else add to the false positive for the predicted and false negative for the ground truth
@@ -956,7 +956,6 @@ def ap_per_class(
     names: dict[int, str] | None = None,
     eps: float = 1e-16,
     prefix: str = "",
-    # fn: np.ndarray = None,
     use_km_metrics : bool = False,
     class_compatibility_test = lambda a,b: (a == b)
 ) -> tuple:
@@ -1035,14 +1034,14 @@ def ap_per_class(
         #     i = class_compatibility_test( pred_cls.astype(int), c)
             
         # else:
-        # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
-        n_l = nt[ci]  # number of labels in GT
         # Indexes of the predictions whose label is c but the bounding box may be erroneous (vector)
         i = (pred_cls == c)  
+        # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
+        n_l = nt[ci]  # number of labels in GT
         # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
-        tp_i = tp[i,:].astype(int)
+        # tp_i = tp[i,:].astype(int)
         # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
-        c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
+        # c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
 
         # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
         n_p = i.sum()  # number of predictions

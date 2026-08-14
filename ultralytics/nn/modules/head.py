@@ -111,13 +111,13 @@ class Detect(nn.Module):
         super().__init__()
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
-        # (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.reg_max = reg_max  # DFL channels
-        # TODO (CP/IRIT): Add nc outputs for class scores
         # (CP/IRIT) start: Add knowledge models configuration parameters
         self.use_scores = kwargs.get("use_scores",False)
         self.use_km = self.use_scores and kwargs.get("use_km",False)
         self.use_km_scores = self.use_km and kwargs.get("use_km_scores",False)
+        # (CP/IRIT) end: Add knowledge models configuration parameters
+        # (CP/IRIT): Add the pure class scores needed for the Knowledge Model loss and inference functions
         if self.use_km_scores:
             self.no = 2 * nc + self.reg_max * 4  # number of outputs per anchor
         else:
@@ -142,7 +142,7 @@ class Detect(nn.Module):
                 for x in ch
             )
         )
-        # DONE (CP/IRIT): Add the variant score prediction in Head
+        # (CP/IRIT): Add the variant score prediction in Head
         # this confidence excludes bounding boxes confidences
         if self.use_km_scores:
             self.cv3_km = copy.deepcopy(self.cv3)
@@ -153,25 +153,27 @@ class Detect(nn.Module):
             self.one2one_cv2 = copy.deepcopy(self.cv2)
             self.one2one_cv3 = copy.deepcopy(self.cv3)
             
-            # DONE (CP/IRIT): Add the variant score prediction in Head 
+            # (CP/IRIT): Add the variant score prediction in Head 
             if self.use_km_scores:
                 self.one2one_cv3_km = copy.deepcopy(self.cv3_km)
 
     @property
     def one2many(self):
         """Returns the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
+        results =  {"box_head":self.cv2, "cls_head":self.cv3}
+        # (CP/IRIT): Add the class score prediction in Head 
         if self.use_km_scores:
-            return {"box_head":self.cv2, "cls_head":self.cv3, "km_head":self.cv3_km}
-        else:
-            return {"box_head":self.cv2, "cls_head":self.cv3}
+            results["km_head"] = self.cv3_km
+        return results
 
     @property
     def one2one(self):
         """Returns the one-to-one head components."""
+        results = {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3}
+        # (CP/IRIT): Add the class score prediction in Head 
         if self.use_km_scores:
-            return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3, "km_head": self.one2one_cv3_km}
-        else:
-            return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3}
+            results[ "km_head"] = self.one2one_cv3_km
+        return results 
 
     @property
     def end2end(self):
@@ -184,7 +186,7 @@ class Detect(nn.Module):
         self._end2end = value
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module = None, cls_head: torch.nn.Module = None, km_head: torch.nn.Module = None
+        self, x: list[torch.Tensor], box_head: torch.nn.Module = None, cls_head: torch.nn.Module = None, km_head: torch.nn.Module = None # (CP/IRIT): Add the class score prediction in Head
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         if box_head is None or cls_head is None:  # for fused inference
@@ -192,11 +194,11 @@ class Detect(nn.Module):
         bs = x[0].shape[0]  # batch size
         boxes = torch.cat([box_head[i](x[i]).view(bs, 4 * self.reg_max, -1) for i in range(self.nl)], dim=-1)
         scores = torch.cat([cls_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1)
+        results =  {"boxes": boxes, "scores": scores, "feats": x}
+        # (CP/IRIT): Add the class score prediction in Head
         if self.use_km_scores:
-            km_scores = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
-            return {"boxes": boxes, "scores": scores, "km_scores": km_scores, "feats": x}
-        else:
-            return {"boxes": boxes, "scores": scores, "feats": x}
+            results["km_scores"] = torch.cat([km_head[i](x[i]).view(bs, self.nc, -1) for i in range(self.nl)], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
+        return results
 
     def forward(
         self, x: list[torch.Tensor]
@@ -295,13 +297,13 @@ class Detect(nn.Module):
                 dimension format [x1, y1, x2, y2, max_class_prob, class_index].
         """
         if self.use_km_scores:
-            boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1) # DONE (CP/IRIT): Add predicted knowledge model scores
+            boxes, scores, km_scores = preds.split([4, self.nc, self.nc], dim=-1) # (CP/IRIT): Add predicted knowledge model scores
         else:
             boxes, scores = preds.split([4, self.nc], dim=-1)
         scores, conf, idx = self.get_topk_index(scores, self.max_det)
         boxes = boxes.gather(dim=1, index=idx.repeat(-1, -1, 4))
         if self.use_km_scores:
-            km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # DONE (CP/IRIT): Add predicted knowledge model scores
+            km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # (CP/IRIT): Add predicted knowledge model scores
             return torch.cat([boxes, scores, conf, km_scores], dim=-1)
         else:
             return torch.cat([boxes, scores, conf], dim=-1)

@@ -53,7 +53,8 @@ from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data import load_inference_source
 from ultralytics.data.augment import LetterBox
 from ultralytics.nn.autobackend import AutoBackend
-from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, colorstr, ops, km
+from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, colorstr, ops
+from ultralytics.utils import km
 from ultralytics.utils.checks import check_imgsz, check_imshow
 from ultralytics.utils.plotting import class_activation_map
 from ultralytics.utils.torch_utils import attempt_compile, select_device, smart_inference_mode

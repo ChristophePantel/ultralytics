@@ -336,7 +336,7 @@ class KeypointLoss(nn.Module):
         e = d / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2)  # from cocoeval
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
-# TODO (CP/IRIT): LogicSeg derived loss to enforce consistency between the knowledge model and the prediction.
+# (CP/IRIT): LogicSeg derived loss to enforce consistency between the knowledge model and the prediction.
 
 class KnowledgeBasedLoss(nn.Module):
     """Criterion class for computing losses based on relations between classes in a knowledge model."""
@@ -514,16 +514,17 @@ class KnowledgeBasedLoss(nn.Module):
                 C_loss = 0.0
                 CE_loss = 0.0
             else:
-                # Call disjunction_loss for refinement and composition
+                # Call disjunction_loss for composition
                 C_loss = self.disjunction_loss(pred_scores, self.composition_forward)
-                # Call exclusion_loss for refinement and composition
+                # Call exclusion_loss for composition
                 CE_loss = self.exclusion_loss(pred_scores, self.composition_forward)
             if len(self.composition_backward) == 0:
                 D_loss = 0.0
                 DE_loss = 0.0
             else:
-                # Call conjunction_loss for refinement
+                # Call disjunction_loss for decomposition
                 D_loss = self.disjunction_loss(pred_scores, self.composition_backward)
+                # Call exclusion_loss for decomposition
                 DE_loss = self.exclusion_loss(pred_scores, self.composition_backward)
         else:
             C_loss = 0.0
@@ -591,6 +592,7 @@ class v8DetectionLoss:
             stride=self.stride.tolist(),
             topk2=tal_topk2,
             use_scores = self.use_scores,
+            use_km = self.use_km,
             use_km_scores = self.use_km_scores, 
             use_variant_selection = self.use_variant_selection,
             )
@@ -631,9 +633,7 @@ class v8DetectionLoss:
             b, a, c = pred_dist.shape  # batch, anchors, channels
             assert c % 4 == 0 # must be a multiple of 4 for the following split
             # Split the channels between two dimensions, compute a softmax on the 4 size 3rd dimension, 
-            pred_dist = pred_dist.view(b, a, 4, c // 4)
-            pred_dist = pred_dist.softmax(3)
-            pred_dist = pred_dist.matmul(self.proj.type(pred_dist.dtype))
+            pred_dist = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             # pred_dist = pred_dist.view(b, a, c // 4, 4).transpose(2,3).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
@@ -650,9 +650,9 @@ class v8DetectionLoss:
             scaled loss items (torch.Tensor[Float]):
             loss items (torch.Tensor[Float]):
         """
-        if self.use_km_scores: # DONE (CP/IRIT): Add knowledge model class scores
+        if self.use_km_scores: # (CP/IRIT): Add knowledge model class scores
             score_index = 2
-            if self.use_km_losses: # DONE (CP/IRIT): Add knowledge model losses on class scores
+            if self.use_km_losses: # (CP/IRIT): Add knowledge model losses on class scores
                 loss_number = 5
                 km_index = 3
             else:
@@ -664,20 +664,18 @@ class v8DetectionLoss:
         dfl_index = loss_number - 1
         
         # TODO (CP/IRIT): Adding knowledge model loss
-        loss = torch.zeros(loss_number, device=self.device)  # 3 or 4 loss items: box, cls, km (if knowledge model in use), dfl
+        loss = torch.zeros(loss_number, device=self.device)  # 3, 4 or 5 loss items: box, conf, cls, km (if knowledge model in use), dfl
 
         # reorganize dimensions for future operations
         # rename pred_distri to pred_for_bboxes
         pred_for_bboxes, pred_scores = (
             preds["boxes"].permute(0, 2, 1).contiguous(),
-            preds["scores"].permute(0, 2, 1).contiguous()
+            preds["scores"].permute(0, 2, 1).contiguous(),
         )
         if self.use_km_scores:
-            pred_km_scores = preds["km_scores"].permute(0, 2, 1).contiguous() # DONE (CP/IRIT): Add knowledge model class scores
+            pred_km_scores = preds["km_scores"].permute(0, 2, 1).contiguous() # (CP/IRIT): Add knowledge model class scores
         # anchor points from the first stride, then the second, etc
         anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
-
-        # TODO (CP/IRIT): Check that the class ground truth is indeed not used, and that classes are not directly predicted...
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
@@ -700,27 +698,21 @@ class v8DetectionLoss:
             gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
         # Identify future positive anchor points
         # Sum the components of each bounding boxes
-        gt_bboxes_sum = gt_bboxes.sum(2, keepdim=True)
         # Indicates which image in a batch contains bounding boxes
         # TODO (CP/IRIT): make it boolean
-        mask_gt = gt_bboxes_sum.gt_(0.0)
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
 
         # Bounding boxes
         # Compute predicted bounding boxes according to anchor points
         # rename pred_distri to pred_for_bboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_for_bboxes)  # xyxy, (b, h*w, 4)
-        
-        smoothed_pred_scores = pred_scores.detach().sigmoid()
-        
-        # Scale predicted bounding boxes along the pyramid (stride values)
-        scaled_pred_boxes = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
-        scaled_anchor_points = anchor_points * stride_tensor
 
+        # Scale predicted bounding boxes along the pyramid (stride values)
         # Computer the ground truth for the bounding boxes and class scores
         _, target_bboxes, target_scores, target_km_scores, fg_mask, target_gt_idx = self.assigner(
-            smoothed_pred_scores,
-            scaled_pred_boxes,
-            scaled_anchor_points,
+            pred_scores.detach().sigmoid(),
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
             gt_labels,
             gt_scores,
             gt_bboxes,
@@ -734,23 +726,21 @@ class v8DetectionLoss:
         if self.class_weights is not None:
             bce_loss *= self.class_weights
         loss[cls_index] = bce_loss.sum() / target_scores_sum  # BCE
-        
-        # DONE (CP/IRIT): Train to predict class score only (without bounding box score).
+
+        # (CP/IRIT): Train to predict class score only (without bounding box score).
         if self.use_km_scores:
             target_km_scores_sum = max(target_km_scores.sum(), 1)
-            km_bce_values = self.bce(pred_km_scores, target_km_scores.to(dtype))
-            loss[score_index] = km_bce_values.sum() / target_km_scores_sum  # BCE
+            km_bce_loss = self.bce(pred_km_scores, target_km_scores.to(dtype))
+            loss[score_index] = km_bce_loss.sum() / target_km_scores_sum  # BCE
         
-        # DONE (CP/IRIT): Adding knowledge model loss to the usual class loss
+        # (CP/IRIT): Adding knowledge model loss to the usual class loss
         if self.use_km_losses:
             # KM loss takes as inputs probability that an object is an instance of a class to enforce the consistency w.r.t. the knowledge model.
             # Should be 0 when there is no object and 1 when there is an object of a given class.
             # But scores express confidence that there is an object (a bounding box) of a given class. 
             # If an object is expected to be present, its main class score should be scaled to 1 and the other scores should be consistent.
             # If no object are expected, no constraints should be enforced
-            norm_pred_km_scores = pred_km_scores.sigmoid()
-            km_loss = self.km_loss(norm_pred_km_scores, target_km_scores)
-            # print('Knowledge Model Loss = ',km_loss)
+            km_loss = self.km_loss(pred_km_scores.sigmoid(), target_km_scores)
             loss[km_index] = km_loss
 
         # Bbox loss
@@ -801,7 +791,7 @@ class v8DetectionLoss:
         batch: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
-        # DONE (CP/IRIT): Test the loss functions using variant data. Results should be 0.
+        # (CP/IRIT): Test the loss functions using variant data. Results should be 0.
         # if (self.km_loss.class_variants != None):
         #     test_data = self.km_loss.class_variants.unsqueeze(0)
         #     test = self.km_loss( test_data, test_data)

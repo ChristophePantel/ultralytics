@@ -41,7 +41,6 @@ import torch.distributed as dist
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset, convert_ndjson_to_yolo_if_needed
 from ultralytics.nn.autobackend import AutoBackend
-from ultralytics.utils import LOGGER, LOCAL_RANK, RANK, TQDM, callbacks, colorstr, emojis
 from ultralytics.utils import LOCAL_RANK, LOGGER, RANK, TQDM, callbacks, colorstr, emojis
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.utils.ops import Profile, linear_sum_assignment
@@ -393,6 +392,7 @@ class BaseValidator:
                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
                     correct[matches[:, 1].astype(int), i] = True
+                    # TODO (CP/IRIT): Check that code with respect to previous versions.
                     if self.use_km_metrics:
                         pred_classes[matches[:,1]] = true_classes[matches[:,0]]
         result = torch.from_numpy(correct)

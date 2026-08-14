@@ -44,6 +44,7 @@ class TaskAlignedAssigner(nn.Module):
         eps: float = 1e-9,
         topk2=None,
         use_scores : bool = False, 
+        use_km : bool = False,
         use_km_scores : bool = False, 
         use_variant_selection : bool = False, 
     ):
@@ -59,7 +60,8 @@ class TaskAlignedAssigner(nn.Module):
             eps (float, optional): A small value to prevent division by zero.
             topk2 (int, optional): Secondary topk value for additional filtering.
             use_scores (bool, optional): Use class scores instead of class labels.
-            use_km_scores (bool, optional): Rely on the provided knowledge model.
+            use_km (bool, optional): Rely on the provided knowledge model.
+            use_km_scores (bool, optional): Use the class scores.
             use_variant_selection (bool, optional): Select object nature based on variant instead of class.
         """
         super().__init__()
@@ -68,14 +70,15 @@ class TaskAlignedAssigner(nn.Module):
         self.num_classes = num_classes
         self.use_scores = use_scores
         
-        # DONE (CP/IRIT) : add use_km scores and use_variant selection parameters
+        # (CP/IRIT) : add use_km scores and use_variant selection parameters
+        self.use_km = use_km
         self.use_km_scores = use_km_scores
         self.use_variant_selection = use_variant_selection
         
         self.alpha = alpha
         self.beta = beta
         self.stride = stride if stride is not None else [8, 16, 32]
-        # TODO (CP/IRIT): purpose ? value is twice the smallest stride or the smallest stride
+        # (CP/IRIT): purpose ? value is twice the smallest stride or the smallest stride
         self.stride_val = self.stride[1] if len(self.stride) > 1 else self.stride[0]
         self.eps = eps
 
@@ -134,7 +137,7 @@ class TaskAlignedAssigner(nn.Module):
         result = self._forward(*(t.cpu() for t in (pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt)))
         return tuple(t.to(device) for t in result)
 
-    # DONE (CP/IRIT): Add class scores ground truth (variant scores)
+    # (CP/IRIT): Add class scores ground truth (variant scores)
     def _forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_scores, gt_bboxes, mask_gt):
         """Compute the task-aligned assignment.
 
@@ -144,7 +147,7 @@ class TaskAlignedAssigner(nn.Module):
             anc_points (torch.Tensor): Anchor points with shape (num_total_anchors, 2).
             # TODO (CP/IRIT): Are the ground truth labels used ?
             gt_labels (torch.Tensor): Ground truth labels with shape (bs, n_max_boxes, 1).
-            # DONE (CP/IRIT): Adding the ground truth label scores to enable multi label prediction.
+            # (CP/IRIT): Adding the ground truth label scores to enable multi label prediction.
             gt_scores (torch.Tensor): Ground truth class scores (either 0 or 1) with shape (bs, n_max_boxes, num_classes).
             gt_bboxes (torch.Tensor): Ground truth boxes with shape (bs, n_max_boxes, 4).
             # Indicates if there is a box in the i-th slot.
@@ -162,20 +165,21 @@ class TaskAlignedAssigner(nn.Module):
         # TODO (CP/IRIT): Are the ground truth labels used ?
         
         # get positive masks for each bounding boxes 
-        # pos_mask: Indicates if an anchor point is contained in a ground truth bounding box in an image # bs, n_max_boxes, num_total_anchors
+        # mask_pos: Indicates if an anchor point is contained in a ground truth bounding box in an image # bs, n_max_boxes, num_total_anchors
         # TODO (CP/IRIT) pos_mask is a boolean
         # align_metrics: Alignment metric combining classification and localization (bs, max_num_obj, h*w)
         # TODO (CP/IRIT) helps mesure the confidence for a bounding box at a certain anchor point
         # overlaps: IoU metric for each ground truth bounding box in each image with respect to bounding boxes predicted for each anchor point
-        pos_mask, align_metric, overlaps = self.get_pos_mask(
+        mask_pos, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
         )
 
         # target_gt_idx: Indices of assigned ground truth # bs, num_total_anchors
         # fg_mask: # bs, num_total_anchors
-        # single_pos_mask: Indicates which bounding box is on the anchor point # bs, n_max_boxes, num_total_anchors
-        target_gt_idx, fg_mask, single_pos_mask = self.select_highest_overlaps(
-            pos_mask, overlaps, self.n_max_boxes, align_metric
+        # mask_pos: Indicates which bounding box is on the anchor point # bs, n_max_boxes, num_total_anchors
+        
+        target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(
+            mask_pos, overlaps, self.n_max_boxes, align_metric
         )
 
         # Assigned target
@@ -193,12 +197,12 @@ class TaskAlignedAssigner(nn.Module):
 
         # Normalize : TODO (CP/IRIT): There is probably an issue there...
         # Only keep the align metrics for the selected points (single_pos_mask is 0 for the unselected ones)
-        align_metric *= single_pos_mask
+        align_metric *= mask_pos
         # Select the maximum value
         pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj
         # Only keep the positive mask for the selected points (single_pos_mask is 0 for the unselected ones)
         # TODO (CP/IRIT): which is it combined with single_pos_mask a second time ?
-        pos_overlaps = (overlaps * single_pos_mask).amax(dim=-1, keepdim=True)  # b, max_num_obj
+        pos_overlaps = (overlaps * mask_pos).amax(dim=-1, keepdim=True)  # b, max_num_obj
         # Add eps if the value is to small to avoid overshoot / NaN
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         
@@ -230,28 +234,13 @@ class TaskAlignedAssigner(nn.Module):
         # TODO (CP/IRIT): Are adaptation needed for multi label prediction ?
         # Positive anchor points (included in bounding boxes) for all strides  
         mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes, mask_gt)
-        
-        # sz_mask_in_gts = torch.numel(mask_in_gts)
-        # nz_mask_in_gts = torch.count_nonzero(mask_in_gts)
-        # save2debug( 'mask_in_gts.txt', mask_in_gts, True)
-        
         # Get anchor_align metric, (b, max_num_obj, h*w)
         # TODO (CP/IRIT): Is it meaningful to rely on predicted bounding boxes to select the positive mask for ground truth data ?
         align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
-        
-        # save2debug( 'align_metric.txt', align_metric, True)
-        # save2debug( 'overlaps.txt', overlaps, True)
-        
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
-        # sz_mask_topk = torch.numel(mask_topk)
-        # nz_mask_topk = torch.count_nonzero(mask_topk)
-        # save2debug( 'mask_topk.txt', mask_topk, True)
-        
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         mask_pos = mask_topk * mask_in_gts * mask_gt
-        # sz_mask_pos = torch.numel(mask_pos)
-        # nz_mask_pos = torch.count_nonzero(mask_pos)
 
         return mask_pos, align_metric, overlaps
 
@@ -274,68 +263,43 @@ class TaskAlignedAssigner(nn.Module):
             overlaps (torch.Tensor): IoU overlaps between predicted and ground truth boxes.
         """
         # TODO (CP/IRIT): Are adaptation needed for multi label prediction ?
-        anchor_point_number = pd_bboxes.shape[-2] # number of anchor points h*w
+        # na: anchor_point_number
+        na = pd_bboxes.shape[-2] # number of anchor points h*w
         
         # TODO (CP/IRIT): Why not convert it earlier ?
         # Indicates if an anchor point is in a given ground truth object from a given image
         mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
         
         # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
-        sz_mask_gt = torch.numel(mask_gt)
+        # sz_mask_gt = torch.numel(mask_gt)
         
         # nz_mask_gt = torch.count_nonzero(mask_gt)
-        overlaps = torch.zeros([self.bs, self.n_max_boxes, anchor_point_number], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+        overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
         
         # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
-        sz_overlaps = torch.numel(overlaps)
-        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, anchor_point_number], dtype=pd_scores.dtype, device=pd_scores.device)
+        # sz_overlaps = torch.numel(overlaps)
+        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
 
         batch_ind = torch.arange(self.bs, device=pd_scores.device)[:, None]  # bs, 1
-
         # Get the scores of each grid for each gt cls
-        # Predicted confidence score for each anchor point for each ground truth object in each image 
-        selected_pd_scores = pd_scores[batch_ind, :, gt_labels.squeeze(-1).long()] # bs, max_num_obj, h*w
-
-        # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
-        sz_bbox_scores = torch.numel(bbox_scores)
-        sz_pd_scores_ind = torch.numel(selected_pd_scores)
-        nz_pd_scores_ind = torch.count_nonzero(selected_pd_scores)
-        assert (sz_pd_scores_ind == sz_mask_gt), (f"Predicted scores ({sz_pd_scores_ind}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        # END DEBUG
         
+        # Predicted confidence score for each anchor point for each ground truth object in each image 
         # Select the scores for the anchor points in a given ground truth object from a given image
-        pd_scores_masked = selected_pd_scores[mask_gt]
-
-        # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
-        sz_pd_scores_masked = torch.numel(pd_scores_masked)
-        nz_pd_scores_masked = torch.count_nonzero(pd_scores_masked)
-        assert ((sz_bbox_scores >= sz_pd_scores_masked) and (sz_bbox_scores == sz_mask_gt)), (f"Bbox scores ({sz_bbox_scores}), Predicted scores ({sz_pdscores_masked}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        # END DEBUG
-
         # The score of the bounding box is the score of the class associated to the bounding box
         # TODO (CP/IRIT): Compute a score based on the vector of class scores (derived from BCE)
         # Predicted scores for the anchor points in a given ground truth object from a given image, others are 0
-        if bbox_scores.shape != mask_gt.shape:
-            pass # DEBUG (CP/IRIT): Allow to put a breakpoint when an error occurs.
-        bbox_scores[mask_gt] = pd_scores_masked # b, max_num_obj, h*w
-        # nz_bbox_scores = torch.count_nonzero(bbox_scores)
+
+        bbox_scores[mask_gt] = pd_scores[batch_ind, :, gt_labels.squeeze(-1).long()][mask_gt]  # bs, max_num_obj, h*w
+
         
         # Expand ground truth and predicted bounding boxes to compute IoU
         # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
         pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
-        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, anchor_point_number, -1)[mask_gt]
+        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
         
         # Compare the ground truth and predicted bounding boxes produce a quality metric between 0 and 1 using IoU
-        iou_results = self.iou_calculation(gt_boxes, pd_boxes)
-        
-        # DEBUG (CP/IRIT): sz_ and nz_ are used to check for errors.
-        sz_iou_results = torch.numel(iou_results)
-        nz_iou_results = torch.count_nonzero(iou_results)
-        assert ((sz_overlaps >= sz_iou_results) and (sz_overlaps == sz_mask_gt)), (f"Overlaps ({sz_overlaps}), IOU ({sz_iou_results}) and mask_gt ({sz_mask_gt}) tensors must have compatible size")
-        # END DEBUG
-        
-        overlaps[mask_gt] = iou_results
-        # nz_overlaps = torch.count_nonzero(overlaps)
+
+        overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
 
         # Combine predicted class score and IoU between the predicted class bounding box and the ground truth bounding box
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
@@ -406,81 +370,67 @@ class TaskAlignedAssigner(nn.Module):
             target_bboxes (torch.Tensor): Target bounding boxes for positive anchor points with shape (b, h*w, 4).
             target_scores (torch.Tensor): Target scores for positive anchor points with shape (b, h*w, num_classes).
         """
-        # save2debug( 'gt_labels.txt', gt_labels, True)
-        # save2debug( 'gt_scores.txt', gt_scores, True)
-        # save2debug( 'gt_bboxes.txt', gt_bboxes, True)
-        # save2debug( 'target_gt_idx_init.txt', target_gt_idx, True)
-        # save2debug( 'fg_mask.txt', fg_mask, True)
         # Assigned target labels, (b, 1)
         # Image index for each image
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
-        target_gt_idx_offset = batch_ind * self.n_max_boxes # offset for ground truth object if batches are flattened
-        target_gt_idx_translated = target_gt_idx + target_gt_idx_offset # (b, h*w) # offset added to each ground truth object to compute object index in flattened batches
+        # offset for ground truth object if batches are flattened
+        # offset added to each ground truth object to compute object index in flattened batches
+        target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
+
         # Convert to integers (TODO (CP/IRIT): Should it be done much earlier ?)
         # Select the labels associated to the indices
         # TODO (CP/IRIT): Are the ground truth labels used ?
-        gt_labels_flattened = gt_labels.long().flatten()
-        target_labels = gt_labels_flattened[target_gt_idx_translated]  # (b, h*w)
+
+        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
         # Select the boxes associated to the indices
-        gt_bbox_number = gt_bboxes.shape[-1]
-        gt_bboxes_view = gt_bboxes.view(-1, gt_bbox_number) # flatten the tensor to 2 dimension, first one is flattened image / ground truth object, last one is bounding box component index
-        target_bboxes = gt_bboxes_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
+        # gt_bboxes.shape[-1]: gt_bbox_number
+        # gt_bboxes_view: flatten the tensor to 2 dimension, first one is flattened image / ground truth object, last one is bounding box component index
+        # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
+        target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
 
-        # Assigned target scores, minimum is 0, maximum is positive
-        # TODO (CP/IRIT): is the clamp_ needed ?
-        target_labels.clamp_(0) # Set the minimum to 0
-        # save2debug( 'target_gt_idx.txt', target_gt_idx, True)
+        # Assigned target scores (set the minimum to 0, maximum is positive)
+        target_labels.clamp_(0)
         
-        # Duplicate fg_mask class number times along the 3rd dimension
-        # image_number, anchor_point_number, class_number
-        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
+        # (CP/IRIT): When using variant, an object can be part of several classes, the class score map is no more a one_hot
+        
+        if self.use_km:
+            # Duplicate fg_mask class number times along the 3rd dimension
+            # image_number, anchor_point_number, class_number
+            fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
 
-        # TODO (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
+        # (CP/IRIT): Initialize scores from ground truth data instead of one_hot for the single class.
         # 10x faster than F.one_hot()
 
         # Create an int64 zero tensor of dimension batch size * anchor point number * class number
         # TODO (CP/IRIT): Are the ground truth labels used ?
         # Required to provide the tensor dimensions: batch size, inferred data (grids of predictions for each anchor points)
-        batch_number = target_labels.shape[0]
-        anchor_point_number = target_labels.shape[1] # anchor points number
-        target_scores_base = torch.zeros(
-            (batch_number, anchor_point_number, self.num_classes),
+        # batch_number: target_labels.shape[0]
+        # anchor_point_number:  target_labels.shape[1] # anchor points number
+        target_scores = torch.zeros(
+            (target_labels.shape[0], target_labels.shape[1], self.num_classes),
             dtype=torch.int8,
             device=target_labels.device,
             )  # (b, h*w, classes_number ) Class score prediction for each class, for each image, for each anchor point (between 0 and 1)
         # Adds a dimension at the end of target labels
-        target_labels_unsqueezed = target_labels.unsqueeze(-1) # (b, h*w, 1)
+        # target_labels_unsqueezed: (b, h*w, 1)
         # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
-        target_scores_base.scatter_(2, target_labels_unsqueezed, 1)
-        # neq_target_scores_base = torch.where((target_scores_base_km != target_scores_base))
-        # neq_image_indexes_base, neq_anchor_point_indexes_base, neq_class_indexes_base = neq_target_scores_base
-        # eq_target_scores_base = torch.where((target_scores_base_km == target_scores_base))
-        # eq_image_indexes_base, eq_anchor_point_indexes_base, eq_class_indexes_base = eq_target_scores_base
-        # neq_target_scores = torch.where((target_scores_km != target_scores))
-        # neq_image_indexes, neq_anchor_point_indexes, neq_class_indexes = neq_target_scores
-        # eq_target_scores = torch.where((target_scores_km == target_scores))
-        # eq_image_indexes, eq_anchor_point_indexes, eq_class_indexes = eq_target_scores
-        # torch.save(target_labels,"target_labels.save",_use_new_zipfile_serialization=False)
-        # save2debug( 'fg_scores_mask.txt', fg_scores_mask, True)
-        # save2debug( 'target_labels.txt', target_labels)
-        # save2debug( 'target_bboxes.txt', target_bboxes)
-        # save2debug( 'target_scores_base.txt', target_scores_base, True)
-        # save2debug( 'target_scores.txt', target_scores, True)
-        # save2debug('target_scores_base.txt', target_scores_base, True)
-        # save2debug( 'target_scores_km.txt', target_scores_km, True)
+        target_scores.scatter_(2, target_labels.unsqueeze(-1), 1)
 
-        # Set to zero when fg_scores_mask is zero
-        target_scores = torch.where(fg_scores_mask > 0, target_scores_base, 0)
+        if use_km:
+            # Set to zero when fg_scores_mask is zero
+            target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
+        else:
+            target_scores = target_scores * (fg_mask[:, :, None] > 0)
         
         if self.use_km_scores:
             # TODO (CP/IRIT): Do the same for scores (identical to target_scores_base)
-            gt_score_size = gt_scores.shape[-1]
-            gt_scores_view = gt_scores.view(-1, gt_score_size)
-            target_km_scores_base  = gt_scores_view[target_gt_idx_translated] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
+            # gt_score_size: gt_scores.shape[-1]
+            # gt_scores_view:
+            target_km_scores  = gt_scores.view(-1, gt_scores.shape[-1])[target_gt_idx] # TODO (CP/IRIT): May contain bad data from object 0 when no object are present...
             # Set to zero when fg_scores_mask is zero
-            target_km_scores = torch.where(fg_scores_mask > 0, target_km_scores_base, 0)
+            target_km_scores = torch.where(fg_scores_mask > 0, target_km_scores, 0)
         
         if self.use_km_scores:
             result = target_labels, target_bboxes, target_scores, target_km_scores
@@ -527,14 +477,14 @@ class TaskAlignedAssigner(nn.Module):
         bs, n_boxes, _ = gt_bboxes.shape
         # lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
         lt, rb = gt_bboxes.unsqueeze(2).chunk(2, 3)  # (b, n_boxes, 1, 2) left-top, right-bottom
-        anchors_lt = xy_centers[None] - lt # positive when center over left top 
-        positive_anchors_lt = anchors_lt > eps
-        anchors_rb = rb - xy_centers[None] # positive when center under right bottom
-        positive_anchors_rb = anchors_rb > eps
+        # anchors_lt = xy_centers - lt # positive when center over left top 
+        # positive_anchors_lt = anchors_lt > eps
+        # anchors_rb = rb - xy_centers # positive when center under right bottom
+        # positive_anchors_rb = anchors_rb > eps
         # anchors_bbox_deltas_base = torch.cat((anchors_lt, rb_anchors), dim=2).view(bs, n_boxes, n_anchors, -1)
         # anchors_bbox_deltas_min = anchors_bbox_deltas_base.amin(3) 
         # positive_anchor_points = anchors_bbox_deltas_min.gt_(eps) # both are be positive iff the center is in the box
-        positive_anchor_points = (positive_anchors_lt & positive_anchors_rb).all(3)
+        positive_anchor_points = ((xy_centers - lt > eps) & (rb - xy_centers > eps)).all(3)
 
         # positive_anchor_points_count = positive_anchor_points.sum(1)
         # image_indexes, anchor_point_indexes = torch.where(positive_anchor_points_count > 1)
@@ -650,7 +600,7 @@ class RotatedTaskAlignedAssigner(TaskAlignedAssigner):
 
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-    """Generate anchor points and stride tensors using the size feature tensors."""
+    """Generate anchors from features."""
     anchor_points, stride_tensor = [], []
     assert feats is not None
     dtype = feats[0].dtype
