@@ -46,6 +46,8 @@ def non_max_suppression(
     Args:
         prediction (torch.Tensor): Predictions with shape (batch_size, num_classes + 4 + num_masks, num_boxes)
             containing boxes, classes, and optional masks.
+            end2end: 4 (bounding box) + 1 (confidence score) + 1 (class label) + masks
+            classic : 4 (bounding box) + nc (confidence scores) + masks (CP/IRIT adds nc class scores)
             if tuple/list : first is aggregated prediction for all anchor points, second is TPN prediction for 3 level of details
         conf_thres (float): Confidence threshold for filtering detections. Valid values are between 0.0 and 1.0.
         iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0.
@@ -66,23 +68,26 @@ def non_max_suppression(
         (list[torch.Tensor] | tuple[list[torch.Tensor], list[torch.Tensor]]): List of detections per image with shape
             (num_boxes, 6 + num_masks) containing (x1, y1, x2, y2, confidence, class, mask1, mask2, ...). If
             return_idxs=True, returns a tuple of (output, keepi) where keepi contains indices of kept detections.
+            TODO: (CP/IRIT), add (or replace class by) the predicted variant that encodes the set of classes
     """
     # Checks
     assert 0 <= conf_thres <= 1, f"Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0"
     assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
     if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
         prediction = prediction[0]  # select only inference output (aggregated predictions for all anchor points)
+    if classes is not None:
+        classes = torch.tensor(classes, device=prediction.device)
+
     if class_variants is not None:
         class_variants = class_variants.to(device=prediction.device,dtype=prediction.dtype)
     if variant_to_class is not None:
         variant_to_class = variant_to_class.to(device=prediction.device)
-    if classes is not None:
-        classes = torch.tensor(classes, device=prediction.device)
    
-    # anchor_point_number = prediction.shape[-1]
+    # (CP/IRIT) prediction.shape[-1]: anchor point number
     if prediction.shape[-1] == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6) / only 6 anchor points
         output, keepi = [], []
         for pred in prediction:
+            # (CP/IRIT): Confidence over threshold
             mask = pred[:, 4] > conf_thres
             if classes is not None:
                 mask &= (pred[:, 5:6] == classes).any(1)
@@ -118,10 +123,10 @@ def non_max_suppression(
 
     # Maximum of scores over confidence threshold
     # maximum only makes sense for a single class prediction
-    # xc: anchor_point_candidates
+    # xc: anchor point candidates: maximum confidence is over threshold
     xc =  pred_scores.amax(1) > conf_thres  # candidates
     # Associate its index to each anchor point in each image from the batch
-    # xinds: anchor_point_indexes
+    # xinds: anchor point indexes
     xinds = torch.arange(prediction.shape[-1], device=prediction.device).expand(bs, -1)[..., None]  # to track idxs
 
     # Settings
@@ -141,7 +146,7 @@ def non_max_suppression(
     if use_km_scores:
         output_size = 7 + 2 * nc + extra
     else:
-        output_size = 
+        output_size = 6 + extra
     output = [torch.zeros((0, output_size), device=prediction.device)] * bs
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
     use_torchvision = prediction.device.type not in {"npu", "xpu"} and "torchvision" in sys.modules
@@ -185,17 +190,17 @@ def non_max_suppression(
         if multi_label:
             # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants instead of simple predicted score
             # indices in predicted_scores where the values are over conf_thres, i: anchor point index, j: class index  
-            # i: selected anchor points
-            # j: selected confidence score
+            # i: selected anchor points (when cls > conf_thres)
+            # j: selected confidence score (when cls > conf_thres)
             i, j = torch.where(cls > conf_thres)
             # TODO (CP/IRIT): select the class based on BCE between class variants from the knowledge model and class predicted scores
-            selected_boxes = predicted_boxes[selected_anchor_points]
-            selected_confidence = selected_image_prediction[selected_anchor_points, 4 + selected_classes, None]
+            selected_boxes = predicted_boxes[i]
+            selected_confidence = selected_image_prediction[i, 4 + j, None]
             selected_class = selected_classes[:, None].float()
-            selected_scores = predicted_scores[selected_anchor_points]
-            selected_mask = predicted_masks[selected_anchor_points]
+            selected_scores = predicted_scores[i]
+            selected_mask = predicted_masks[i]
             if use_km_scores:
-                selected_km_scores = predicted_km_scores[selected_anchor_points]
+                selected_km_scores = predicted_km_scores[i]
                 # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
                 if use_variant_selection:
                     # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
@@ -226,11 +231,14 @@ def non_max_suppression(
                     # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
                     # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
                     # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
+                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc + 1/var + nc + extra
                     x = torch.cat((box[i], x[i, 4 + j, None], selected_classes_from_variants, selected_scores, selected_variants, selected_km_scores, mask[i]), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
-                else:
+                else: # use_variant_selection
                     # TODO (CP/IRIT): When variants are not in use, the class index is returned as variant index
+                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc + 1/var + nc + extra
                     x = torch.cat((box[i], x[i, 4 + j, None], j[:, None], selected_scores, selected_class, selected_km_scores, mask[i]), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
-            else:
+            else: # use_km_scores
+                # (CP/IRIT): size 4/box + 1/conf + 1/cls + mask
                 x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), mask[i]), 1)
                 # selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
@@ -263,6 +271,7 @@ def non_max_suppression(
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
         scores = x[:, 4]  # scores de confiance pour chaque point
         if rotated:
+            // (CP/IRIT): x[:, :2] + c translated center, x[:, 2:4] WH, x[:, -1:] R
             boxes = torch.cat((x[:, :2] + c, x[:, 2:4], x[:, -1:]), dim=-1)  # xywhr
             i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
         else:
