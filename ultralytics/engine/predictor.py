@@ -150,7 +150,7 @@ class BasePredictor:
 
         # Usable if setup is done
         self.model = None
-        self.data = self.args.data
+        self.data = self.args.data  # data_dict
         self.imgsz = None
         self.device = None
         self.dataset = None

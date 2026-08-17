@@ -507,7 +507,7 @@ class ConfusionMatrix(DataExportMixin):
         # bboxes being the predicted boxes
         # iou is a tensor of shape (N, M) representing obb similarities with N being the number of GT and M being the number of predicted
         iou = batch_probiou(gt_bboxes, bboxes) if is_obb else box_iou(gt_bboxes, bboxes)
- 
+
         # Find all (gt, pred) pairs with IoU above threshold
         # x[0] are lines and x[1] are columns indices
         x = torch.where(iou > iou_thres)
@@ -544,7 +544,7 @@ class ConfusionMatrix(DataExportMixin):
         # -----------------------------
         # Process each ground-truth object
         # -----------------------------
-        
+
         # (i is the index and gc is the GT class number)
         # gc: ground truth class
         for i, gc in enumerate(gt_classes):

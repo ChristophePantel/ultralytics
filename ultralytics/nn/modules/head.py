@@ -301,9 +301,9 @@ class Detect(nn.Module):
         else:
             boxes, scores = preds.split([4, self.nc], dim=-1)
         scores, conf, idx = self.get_topk_index(scores, self.max_det)
-        boxes = boxes.gather(dim=1, index=idx.repeat(-1, -1, 4))
+        boxes = boxes.gather(dim=1, index=idx.expand(-1, -1, 4))
         if self.use_km_scores:
-            km_scores = km_scores.gather(dim=1,index=idx.repeat(1,1,self.nc)) # (CP/IRIT): Add predicted knowledge model scores
+            km_scores = km_scores.gather(dim=1,index=idx.expand(-1,-1,self.nc)) # (CP/IRIT): Add predicted knowledge model scores
             return torch.cat([boxes, scores, conf, km_scores], dim=-1)
         else:
             return torch.cat([boxes, scores, conf], dim=-1)

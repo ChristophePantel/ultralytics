@@ -2414,7 +2414,7 @@ class Format(BaseTransform):
         if instances is not None:
             instances.convert_bbox(format=self.bbox_format)
             instances.denormalize(w, h)
-        results = {"h": h, "w": w, "cls": cls, "variant": variant, "scores":scores, "instances": instances, "nl": len(instances) if instances else 0}
+        results = {"h": h, "w": w, "cls": cls, "instances": instances, "nl": len(instances) if instances else 0}
         if self.use_km: # (CP/IRIT): Add variant
             results["variant"] = variant
         if self.use_scores: # (CP/IRIT): Add scores
@@ -2661,7 +2661,6 @@ class LoadVisualPrompt(BaseTransform):
         elif "masks" in labels:
             masks = labels["masks"]
 
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = labels["cls"].squeeze(-1).to(torch.int)
         results = {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls}
         if self.use_km: # (CP/IRIT): Add variant
@@ -2680,7 +2679,6 @@ class LoadVisualPrompt(BaseTransform):
         Returns:
             (dict): Updated labels with visual prompts added.
         """
-        # TODO (CP/IRIT): Should variant and scores be managed in the same way ?
         visuals = self.get_visuals(params["cls"], params["imgsz"], bboxes=params["bboxes"], masks=params["masks"])
         labels["visuals"] = visuals
         return labels
@@ -2798,7 +2796,6 @@ class RandomLoadText(BaseTransform):
         assert "texts" in labels, "No texts found in labels."
         class_texts = labels["texts"]
         num_classes = len(class_texts)
-        # TODO (CP/IRIT): should "scores" be managed in the same way ?
         cls = np.asarray(labels.pop("cls"), dtype=int)
         if self.use_km:
             variant = np.asarray(labels.pop("variant"), dtype=int)

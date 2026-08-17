@@ -231,8 +231,10 @@ class DetectionValidator(BaseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        scores = batch["scores"][idx]
-        variant = batch["variant"][idx]
+        if self.use_km:
+            variant = batch["variant"][idx]
+        if self.use_scores:
+            scores = batch["scores"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]

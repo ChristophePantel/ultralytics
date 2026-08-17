@@ -211,7 +211,7 @@ class YOLODataset(BaseDataset):
             repeat(nkpt),
             repeat(ndim),
             repeat(self.single_cls),
-            repeat(self.use_scores) # (CP/IRIT) Use class scores instead of single class
+            repeat(self.use_scores), # (CP/IRIT) Use class scores instead of single class
             repeat(self.use_km), # (CP/IRIT) Use knowledge model
             repeat(self.use_km_scores), # (CP/IRIT) Use class scores in addition to confidence score
         )
