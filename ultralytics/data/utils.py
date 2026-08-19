@@ -269,6 +269,7 @@ def verify_image_mask(args: tuple) -> tuple:
 # File structure depends on the task (classification, detection, obb, segmentation, pose)
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
+    # (CP/IRIT): Add YOLO-KM control parameter for KM ground truth data loading
     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls, use_scores, use_km, use_km_scores = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
@@ -288,21 +289,22 @@ def verify_image_label(args: tuple) -> list:
                     assert not any(len(x) == 5 for x in lb), "labels mix segment and detection rows"
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    # TODO (CP/IRIT): create a bounding box around segments
+                    # (CP/IRIT): create a bounding box around segments
                     boxes = segments2boxes(segments)
                     lb = np.concatenate((classes.reshape(-1, 1), boxes), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32) # lb contains 5 elements
             # Check if knowledge model is available and load additional classes
-            km_file = lb_file.rsplit('.',1)[0]+'.km'
-            if os.path.isfile(km_file):
-                with open(km_file, encoding="utf-8") as km_f:
-                # Extract the various data items from each line
-                    km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
-                    variant = np.array([x[0:1] for x in km_lb], dtype=np.float32)
-                    km_lb = [x[1:] for x in km_lb]
-            else:
-                variant = -1
-                km_lb = np.zeros((len(lb),0))
+            if use_km:
+                km_file = lb_file.rsplit('.',1)[0]+'.km'
+                if os.path.isfile(km_file):
+                    with open(km_file, encoding="utf-8") as km_f:
+                        # (CP/IRIT) Extract the various data items from each line
+                        km_lb = [x.split() for x in km_f.read().strip().splitlines() if len(x)]
+                        variant = np.array([x[0:1] for x in km_lb], dtype=np.float32)
+                        km_lb = [x[1:] for x in km_lb]
+                else:
+                    variant = -1
+                    km_lb = np.zeros((len(lb),0))
             if nl := len(lb):
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
@@ -324,14 +326,15 @@ def verify_image_label(args: tuple) -> list:
                     f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
                     f"Possible class labels are 0-{num_cls - 1}"
                 )
-                _, cleaned_indices = np.unique(lb, axis=0, return_index=True)
-                if len(cleaned_indices) < nl:  # duplicate row check
-                    lb = lb[cleaned_indices]  # remove duplicates
-                    km_lb = [km_lb[i] for i in cleaned_indices] # remove duplicates
+                # i: indices without duplicates
+                _, i = np.unique(lb, axis=0, return_index=True)
+                if len(i) < nl:  # duplicate row check
+                    lb = lb[i]  # remove duplicates
+                    km_lb = [km_lb[x] for x in i] # remove duplicates
                     if segments:
-                        segments = [segments[i] for i in cleaned_indices]
-                    msg = f"{prefix}{im_file}: {nl - len(cleaned_indices)} duplicate labels removed"
-                    nl = len(lb)
+                        segments = [segments[x] for x in i]
+                    msg = f"{prefix}{im_file}: {nl - len(i)} duplicate labels removed"
+                    # nl = len(lb)
             else:
                 ne = 1  # label empty
                 lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)
@@ -358,7 +361,10 @@ def verify_image_label(args: tuple) -> list:
         bboxes = lb[:,-4:]
         # returns a Tuple
         # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
-        return im_file, classes, variant, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
+        if use_km:
+            return im_file, classes, variant, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
+        else:
+            return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"

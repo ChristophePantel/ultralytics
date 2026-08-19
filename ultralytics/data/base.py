@@ -145,7 +145,7 @@ class BaseDataset(Dataset):
             self.cache_images()
 
         # Transforms
-        self.transforms = self.build_transforms(hyp=hyp)
+        self.transforms = self.build_transforms(hyp=hyp, dataset=self)
 
     def get_img_files(self, img_path: str | list[str]) -> list[str]:
         """Read image files from the specified path.

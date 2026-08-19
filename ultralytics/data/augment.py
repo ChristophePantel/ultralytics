@@ -40,6 +40,11 @@ class BaseTransform:
         apply_semantic: Apply transformation to semantic mask in labels['semantic_mask'].
         __call__: Orchestrate the transformation pipeline.
     """
+    
+    def __init__(self, dataset = None):
+        if (dataset != None):
+            self.use_km = dataset.use_km
+            self.use_scores = dataset.use_scores
 
     def __call__(self, labels):
         """Apply transformation to labels dict.
@@ -142,12 +147,15 @@ class Compose:
         >>> compose.insert(0, RandomFlip())
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms, dataset=None):
         """Initialize the Compose object with a list of transforms.
 
         Args:
             transforms (list[Callable]): A list of callable transform objects to be applied sequentially.
         """
+        if dataset != None:
+            self.use_km = dataset.use_km
+            self.use_scores = dataset.use_scores
         self.transforms = transforms if isinstance(transforms, list) else [transforms]
 
     def __call__(self, data):
@@ -315,9 +323,8 @@ class BaseMixTransform(BaseTransform):
             pre_transform (Callable | None): Optional transform to apply before mixing.
             p (float): Probability of applying the mix transformation. Should be in the range [0.0, 1.0].
         """
+        super().__init__(dataset)
         self.dataset = dataset
-        self.use_scores = dataset.use_scores
-        self.use_km = dataset.use_km
         self.pre_transform = pre_transform
         self.p = p
         self.preserve_obb = getattr(dataset, "use_obb", False)
@@ -776,9 +783,9 @@ class Mosaic(BaseMixTransform):
             "cls": np.concatenate(cls, 0),
             "instances": Instances.concatenate(instances, axis=0),
         }
-        if use_km: # (CP/IRIT): Add variant
+        if self.use_km: # (CP/IRIT): Add variant
             final_labels["variant"] = np.concatenate(variant, 0)
-        if use_scores: # (CP/IRIT): Add scores
+        if self.use_scores: # (CP/IRIT): Add scores
             final_labels["scores"] = np.concatenate(scores,0)
         final_labels["instances"].clip(imgsz, imgsz, preserve_obb=self.preserve_obb)
         good = final_labels["instances"].remove_zero_area_boxes()
@@ -1119,6 +1126,7 @@ class RandomPerspective(BaseTransform):
         perspective: float = 0.0,
         size: tuple[int, int] | None = None,
         preserve_obb: bool = False,
+        dataset = None,
     ):
         """Initialize RandomPerspective object with transformation parameters.
 
@@ -1135,6 +1143,7 @@ class RandomPerspective(BaseTransform):
             size (tuple[int, int] | None): Output size (width, height). If None, uses the input image size.
             preserve_obb (bool): Preserve oriented-box direction when transformed segments cross image boundaries.
         """
+        super().__init__(dataset)
         self.degrees = degrees
         self.translate = translate
         self.scale = scale
@@ -1471,7 +1480,7 @@ class RandomHSV(BaseTransform):
         >>> augmented_image = labels["img"]
     """
 
-    def __init__(self, hgain: float = 0.5, sgain: float = 0.5, vgain: float = 0.5) -> None:
+    def __init__(self, hgain: float = 0.5, sgain: float = 0.5, vgain: float = 0.5, dataset=None) -> None:
         """Initialize the RandomHSV object for random HSV (Hue, Saturation, Value) augmentation.
 
         This class applies random adjustments to the HSV channels of an image within specified limits.
@@ -1481,6 +1490,7 @@ class RandomHSV(BaseTransform):
             sgain (float): Maximum variation for saturation. Should be in the range [0, 1].
             vgain (float): Maximum variation for value. Should be in the range [0, 1].
         """
+        super().__init__(dataset)
         self.hgain = hgain
         self.sgain = sgain
         self.vgain = vgain
@@ -1546,7 +1556,7 @@ class RandomFlip(BaseTransform):
         >>> flipped_instances = result["instances"]
     """
 
-    def __init__(self, p: float = 0.5, direction: str = "horizontal", flip_idx: list[int] | None = None) -> None:
+    def __init__(self, p: float = 0.5, direction: str = "horizontal", flip_idx: list[int] | None = None, dataset=None) -> None:
         """Initialize the RandomFlip class with probability and direction.
 
         This class applies a random horizontal or vertical flip to an image with a given probability. It also updates
@@ -1563,6 +1573,7 @@ class RandomFlip(BaseTransform):
         assert direction in {"horizontal", "vertical"}, f"Support direction `horizontal` or `vertical`, got {direction}"
         assert 0 <= p <= 1.0, f"The probability should be in range [0, 1], but got {p}."
 
+        super().__init__(dataset)
         self.p = p
         self.direction = direction
         self.flip_idx = flip_idx
@@ -1703,6 +1714,7 @@ class LetterBox(BaseTransform):
         stride: int = 32,
         padding_value: int = 114,
         interpolation: int = cv2.INTER_LINEAR,
+        dataset = None,
     ):
         """Initialize LetterBox object for resizing and padding images.
 
@@ -1719,6 +1731,7 @@ class LetterBox(BaseTransform):
             padding_value (int): Value for padding the image. Default is 114.
             interpolation (int): Interpolation method for resizing. Default is cv2.INTER_LINEAR.
         """
+        super().__init__(dataset)
         self.new_shape = new_shape
         self.auto = auto
         self.scale_fill = scale_fill
@@ -2119,7 +2132,7 @@ class Albumentations(BaseTransform):
         - Some transforms are applied with very low probability (0.01) by default.
     """
 
-    def __init__(self, p: float = 1.0, transforms: list | None = None, flip_idx: list[int] | None = None) -> None:
+    def __init__(self, p: float = 1.0, transforms: list | None = None, flip_idx: list[int] | None = None, dataset = None) -> None:
         """Initialize the Albumentations transform object for YOLO bbox formatted parameters.
 
         This class applies various image augmentations using the Albumentations library, including Blur, Median Blur,
@@ -2131,6 +2144,7 @@ class Albumentations(BaseTransform):
             transforms (list | None): List of custom Albumentations transforms. If None, uses default transforms.
             flip_idx (list[int] | None): Keypoint index mapping for reflection transforms.
         """
+        super().__init__(dataset)
         self.p = p
         self.flip_idx = flip_idx
         self.transform = None
@@ -2364,6 +2378,7 @@ class Format(BaseTransform):
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
+        dataset = None,
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2381,6 +2396,7 @@ class Format(BaseTransform):
             batch_idx (bool): If True, keeps batch indexes.
             bgr (float): Probability of returning BGR images instead of RGB.
         """
+        super().__init__(dataset)
         self.bbox_format = bbox_format
         self.normalize = normalize
         self.return_mask = return_mask  # set False when training detection only
@@ -2420,6 +2436,7 @@ class Format(BaseTransform):
         if self.use_scores: # (CP/IRIT): Add scores
             results["scores"] = scores
         return results
+	# return {"h": h, "w": w, "cls": cls, "instances": instances, "nl": len(instances) if instances else 0}
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Format image from Numpy array to PyTorch tensor.
@@ -2668,6 +2685,7 @@ class LoadVisualPrompt(BaseTransform):
         if self.use_scores: # (CP/IRIT): Add scores
             results["scores"] = labels["scores"].squeeze(-1).to(torch.int)
         return results
+	# return {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls}
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         """Create visual prompts and add them to labels.
@@ -2909,16 +2927,17 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace):
         perspective=hyp.perspective,
         size=(imgsz, imgsz),
         preserve_obb=getattr(dataset, "use_obb", False),
+        dataset=dataset
     )
 
-    pre_transform = Compose([mosaic, affine])
+    pre_transform = Compose([mosaic, affine], dataset=dataset)
     if hyp.copy_paste_mode == "flip":
         pre_transform.insert(1, CopyPaste(dataset, p=hyp.copy_paste, mode=hyp.copy_paste_mode))
     else:
         pre_transform.append(
             CopyPaste(
                 dataset,
-                pre_transform=Compose([Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic), affine]),
+                pre_transform=Compose([Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic), affine], dataset=dataset),
                 p=hyp.copy_paste,
                 mode=hyp.copy_paste_mode,
             )
@@ -2937,11 +2956,12 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace):
             pre_transform,
             MixUp(dataset, pre_transform=pre_transform, p=hyp.mixup),
             CutMix(dataset, pre_transform=pre_transform, p=hyp.cutmix),
-            Albumentations(p=1.0, transforms=getattr(hyp, "augmentations", None), flip_idx=flip_idx),
-            RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v),
-            RandomFlip(direction="vertical", p=hyp.flipud, flip_idx=flip_idx),
-            RandomFlip(direction="horizontal", p=hyp.fliplr, flip_idx=flip_idx),
-        ]
+            Albumentations(p=1.0, transforms=getattr(hyp, "augmentations", None), flip_idx=flip_idx, dataset=dataset),
+            RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v, dataset=dataset),
+            RandomFlip(direction="vertical", p=hyp.flipud, flip_idx=flip_idx, dataset=dataset),
+            RandomFlip(direction="horizontal", p=hyp.fliplr, flip_idx=flip_idx, dataset=dataset),
+        ],
+        dataset=dataset
     )  # transforms
 
 

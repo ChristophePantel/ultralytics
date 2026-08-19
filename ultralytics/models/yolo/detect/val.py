@@ -182,6 +182,8 @@ class DetectionValidator(BaseValidator):
             max_det=self.args.max_det,
             end2end=self.end2end,
             rotated=self.args.task == "obb",
+            use_scores = self.use_scores,
+            use_km = self.use_km,
             use_km_scores = getattr(self, 'use_km_scores', False),
             use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): transmit the class variants from the model
@@ -189,6 +191,8 @@ class DetectionValidator(BaseValidator):
             variant_to_class=getattr(self, 'variant_to_class',None),
         )
         # Split results field by field
+        if outputs[0].shape[0] != 0:
+            pass
         results = []
         for x in outputs:
             bboxes = x[:, :4]

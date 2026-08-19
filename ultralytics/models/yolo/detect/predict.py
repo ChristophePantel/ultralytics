@@ -60,6 +60,8 @@ class DetectionPredictor(BasePredictor):
             self.args.agnostic_nms,
             max_det=self.args.max_det,
             # TODO (CP/IRIT): transmit the class variants from the model
+            use_scores = self.use_scores,
+            use_km =self.use_km,
             use_km_scores = self.use_km_scores,
             use_variant_selection = self.use_variant_selection,
             # TODO (CP/IRIT): Why is nc set to 0 for detection ?

@@ -328,7 +328,7 @@ class YOLODataset(BaseDataset):
         self.verify_labels(labels, cache_path)
         return labels
 
-    def build_transforms(self, hyp: dict | None = None) -> Compose:
+    def build_transforms(self, hyp: dict | None = None, dataset = None) -> Compose:
         """Build and append transforms to the list.
 
         Args:
@@ -343,7 +343,7 @@ class YOLODataset(BaseDataset):
             hyp.cutmix = hyp.cutmix if self.augment and not self.rect else 0.0
             transforms = v8_transforms(self, self.imgsz, hyp)
         else:
-            transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False)])
+            transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False, dataset=dataset)], dataset=dataset)
         transforms.append(
             self.format_class(
                 bbox_format="xywh",
@@ -355,6 +355,7 @@ class YOLODataset(BaseDataset):
                 mask_ratio=hyp.mask_ratio,
                 mask_overlap=hyp.overlap_mask,
                 bgr=hyp.bgr if self.augment else 0.0,  # only affect training.
+                dataset=dataset
             )
         )
         return transforms
@@ -452,7 +453,7 @@ class YOLODataset(BaseDataset):
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)
-            if k in {"masks", "keypoints", "bboxes", "cls", "variant", "scores", "segments", "obb", "sem_masks"}: # (CP/IRIT) Add knowledge model scores
+            if k in {"masks", "keypoints", "bboxes", "cls", "variant", "scores", "segments", "obb"}: # (CP/IRIT) Add knowledge model scores
                 value = torch.cat(value, 0)
             new_batch[k] = value
         if "batch_idx" in new_batch:

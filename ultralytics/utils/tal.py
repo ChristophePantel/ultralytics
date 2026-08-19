@@ -418,7 +418,7 @@ class TaskAlignedAssigner(nn.Module):
         # Set the value of the tensor to 1 for indexes from target_labels_unsqueezed in the last dimension 
         target_scores.scatter_(2, target_labels.unsqueeze(-1), 1)
 
-        if use_km:
+        if self.use_km:
             # Set to zero when fg_scores_mask is zero
             target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
         else:

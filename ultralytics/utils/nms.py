@@ -30,6 +30,8 @@ def non_max_suppression(
     rotated: bool = False,
     end2end: bool = False,
     return_idxs: bool = False,
+    use_scores : bool = False,
+    use_km : bool = False,
     use_km_scores : bool = False,
     use_km_metrics : bool = False,
     km_metrics_threshold : int = 0,
@@ -118,7 +120,7 @@ def non_max_suppression(
     if use_km_scores:
         pred_scores = prediction[:, 4:mk] # extract the score for each raw class
         pred_km_scores = prediction[:, mk:mi]
-    else
+    else:
         pred_scores = prediction[:, 4:mi] # extract the score for each raw class
 
     # Maximum of scores over confidence threshold
@@ -143,10 +145,14 @@ def non_max_suppression(
     # 6 = bounding box & class & confidence
     # 7 = bounding box & class & confidence & variant
     # TODO (CP/IRIT): Too small for later extraction when there are no results.
-    if use_km_scores:
-        output_size = 7 + 2 * nc + extra
-    else:
-        output_size = 6 + extra
+    output_size = 6 + extra # Bounding box & selected class label & selected confidence score
+    if use_scores:
+        output_size += nc # All confidence scores
+        if use_km:
+            output_size += 1 # Variant label
+        if use_km_scores:
+            output_size += nc # All variant scores
+        
     output = [torch.zeros((0, output_size), device=prediction.device)] * bs
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
     use_torchvision = prediction.device.type not in {"npu", "xpu"} and "torchvision" in sys.modules
@@ -176,10 +182,10 @@ def non_max_suppression(
             continue
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        # box: bounding boxes
-        # cls: confidence scores (bounding box confidence and class score)
-        # km: class scores
-        # mask: points from the polyhedra mask
+        # box: bounding boxes (predicted_boxes)
+        # cls: confidence scores (bounding box confidence and class score) (predicted_scores)
+        # km: class scores (predicted_km_scores)
+        # mask: points from the polyhedra mask (predicted_masks)
         # predicted_scores: confidence map : associate to each class a confidence for the box as this class (between 0 and infnty)
         # predicted_km_scores: class map : associate to each class a confidence that the object is of this class (between 0 and 1)
         if use_km_scores:
@@ -191,16 +197,16 @@ def non_max_suppression(
             # TODO (CP/IRIT): compute BCE between predicted_scores and class_variants instead of simple predicted score
             # indices in predicted_scores where the values are over conf_thres, i: anchor point index, j: class index  
             # i: selected anchor points (when cls > conf_thres)
-            # j: selected confidence score (when cls > conf_thres)
+            # j: selected confidence score (when cls > conf_thres): selected_classes
             i, j = torch.where(cls > conf_thres)
             # TODO (CP/IRIT): select the class based on BCE between class variants from the knowledge model and class predicted scores
-            selected_boxes = predicted_boxes[i]
-            selected_confidence = selected_image_prediction[i, 4 + j, None]
-            selected_class = selected_classes[:, None].float()
-            selected_scores = predicted_scores[i]
-            selected_mask = predicted_masks[i]
+            selected_boxes = box[i]
+            selected_confidence = x[i, 4 + j, None]
+            selected_class = j[:, None].float()
+            selected_scores = cls[i]
+            selected_mask = mask[i]
             if use_km_scores:
-                selected_km_scores = predicted_km_scores[i]
+                selected_km_scores = km[i]
                 # TODO (CP/IRIT): use selected class (yolo) OR variant (km)
                 if use_variant_selection:
                     # TODO (CP/IRIT): Compare variants with selected predicted scores to identify
@@ -271,7 +277,7 @@ def non_max_suppression(
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # class index multiplied by max_wh in order to separate boxes by class
         scores = x[:, 4]  # scores de confiance pour chaque point
         if rotated:
-            // (CP/IRIT): x[:, :2] + c translated center, x[:, 2:4] WH, x[:, -1:] R
+            # (CP/IRIT): x[:, :2] + c translated center, x[:, 2:4] WH, x[:, -1:] R
             boxes = torch.cat((x[:, :2] + c, x[:, 2:4], x[:, -1:]), dim=-1)  # xywhr
             i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
         else:

@@ -350,7 +350,7 @@ class C3(nn.Module):
 class C3x(C3):
     """C3 module with cross-convolutions."""
 
-    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs) # (CP/IRIT): Add open configuration parameters
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize C3 module with cross-convolutions.
 
         Args:
@@ -361,7 +361,7 @@ class C3x(C3):
             g (int): Groups for convolutions.
             e (float): Expansion ratio.
         """
-        super().__init__(c1, c2, n, shortcut, g, e, **kwargs): # (CP/IRIT): Add open configuration parameters
+        super().__init__(c1, c2, n, shortcut, g, e, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.c_ = int(c2 * e)
         self.m = nn.Sequential(*(Bottleneck(self.c_, self.c_, shortcut, g, k=((1, 3), (3, 1)), e=1, **kwargs) for _ in range(n))) # (CP/IRIT): Add open configuration parameters
 
