@@ -206,13 +206,13 @@ class DetectionValidator(BaseValidator):
                         km_scores = x[:,7+self.nc:7+2*self.nc]
                         extra = x[:, 7+2*self.nc:]
                         result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "variant": variant, "km_scores": km_scores, "extra": extra}
-                    else:
+                    else: # use_km_scores
                         extra = x[:, 7+self.nc:]
                         result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "variant": variant, "extra": extra}
-                else:
+                else: # use_km
                     extra = x[:, 6+self.nc:]
                     result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "scores": scores, "extra": extra}
-            else:
+            else: # use_scores
                 extra = x[:, 6:]
                 result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "extra": extra}
             results.append(result)

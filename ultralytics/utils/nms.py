@@ -249,12 +249,13 @@ def non_max_suppression(
                 # selected_image_prediction = torch.cat((selected_boxes, selected_confidence, selected_class, selected_scores, selected_class, selected_mask), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             if return_idxs:
                 xk = xk[i]
-        else:  # best class only
+        else:  # best class only / multi label
             conf, j = cls.max(1, keepdim=True)
             filt = conf.view(-1) > conf_thres
             x = torch.cat((box, conf, j.float(), mask), 1)[filt]
             if return_idxs:
                 xk = xk[filt]
+        
 
         # Filter by class
         if classes is not None:
@@ -298,6 +299,8 @@ def non_max_suppression(
         if not __debug__ and (time.time() - t) > time_limit:
             LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded")
             break  # time limit exceeded
+        
+    # end for
 
     return (output, keepi) if return_idxs else output
 
