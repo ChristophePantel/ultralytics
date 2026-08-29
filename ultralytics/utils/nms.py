@@ -155,11 +155,11 @@ def non_max_suppression(
         
     output = [torch.zeros((0, output_size), device=prediction.device)] * bs
     keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
-    use_torchvision = prediction.device.type not in {"npu", "xpu"} and "torchvision" in sys.modules
+    use_torchvision = prediction.device.type != "xpu" and "torchvision" in sys.modules
     # xi: image_index,
     # x: image_prediction, 
     # xk as image_anchor_point_indexes
-    for xi, (x, xk) in enumerate(zip(prediction, xinds)):
+    for xi, (x, xk) in enumerate(zip(prediction, xinds)):  # image index, (preds, preds indices)
         # Apply constraints
         # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
         # selected_image_prediction[((selected_image_prediction[:, 2:4] < min_wh) | (selected_image_prediction[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
@@ -283,7 +283,7 @@ def non_max_suppression(
             i = TorchNMS.fast_nms(boxes, scores, iou_thres, iou_func=batch_probiou)
         else:
             boxes = x[:, :4] + c  # boxes (offset by class)
-            # Use torchvision if already imported and supported; its NMS has no NPU/XPU kernels.
+            # Use torchvision if already imported; it has no XPU NMS kernel, but torch_npu CPU-falls back on NPU.
             if use_torchvision:
                 import torchvision  # scope as slow import
 

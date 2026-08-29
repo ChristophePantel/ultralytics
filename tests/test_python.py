@@ -126,6 +126,7 @@ def test_cfg_rejects_fuzzed_values():
     ):
         with pytest.raises((TypeError, ValueError), match=key):
             get_cfg(overrides={key: value})
+    assert get_cfg(overrides={"fraction": [1000, 1.0, 0]}).fraction == [1000, 1.0, 0]
     assert get_cfg(overrides={"auto_augment": None}).auto_augment is None
 
 
@@ -713,14 +714,14 @@ def test_convert_signed_ndjson(monkeypatch):
 
     captured = []
 
-    async def convert(path):
-        captured.append(path)
+    async def convert(path, fraction):
+        captured.append((path, fraction))
         return "dataset.ndjson.yaml"
 
     monkeypatch.setattr(converter, "convert_ndjson_to_yolo", convert)
     url = "https://storage.googleapis.com/bucket/dataset-v1.ndjson?X-Goog-Signature=abc"
     assert utils.convert_ndjson_to_yolo_if_needed(url) == "dataset.ndjson.yaml"
-    assert captured == [url]
+    assert captured == [(url, 1.0)]
 
 
 @pytest.mark.parametrize("task", ["detect", "classify"])
@@ -1802,6 +1803,22 @@ def test_nn_depth_head_no_dead_parameters():
     assert not unused, f"parameters with no gradient: {unused}"
 
 
+def test_classification_fraction_samples_across_classes(tmp_path):
+    """Sample classification fractions across the class-major ImageFolder ordering."""
+    from ultralytics.data.dataset import ClassificationDataset
+
+    for class_index in range(3):
+        class_dir = tmp_path / str(class_index)
+        class_dir.mkdir()
+        for image_index in range(4):
+            cv2.imwrite(str(class_dir / f"{image_index}.jpg"), np.full((16, 16, 3), class_index, dtype=np.uint8))
+    args = copy(DEFAULT_CFG)
+    args.fraction = 0.5
+    samples = ClassificationDataset(tmp_path, args, augment=True).samples
+
+    assert np.bincount([sample[1] for sample in samples]).tolist() == [2, 2, 2]
+
+
 @pytest.fixture
 def image():
     """Load and return an image from a predefined source (OpenCV BGR)."""
@@ -1953,6 +1970,8 @@ def test_yoloe(tmp_path):
     # text-prompts
     model = YOLO(WEIGHTS_DIR / "yoloe-11s-seg.pt")
     model.set_classes(["person", "bus"])
+    model.set_classes(["bus", "person"])
+    assert list(model.names.values()) == ["bus", "person"]
     model(SOURCE, conf=0.01)
 
     from ultralytics import YOLOE
