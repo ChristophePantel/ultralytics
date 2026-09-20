@@ -86,7 +86,12 @@ class DetectionValidator(BaseValidator):
         batch["img"] = (batch["img"].half() if self.args.quantize == 16 else batch["img"].float()) / 255
         
         # TODO(CP/IRIT): manage "scores" in the same way
-        for k in {"batch_idx", "cls", "variant", "scores", "bboxes"}:
+        keys = {"batch_idx", "cls", "bboxes"}
+        if self.use_scores:
+            keys.add("scores")
+            if self.use_km:
+                keys.add("variant")
+        for k in keys:
             batch[k] = batch[k].to(self.device, non_blocking=True)
 
         return batch
@@ -217,8 +222,7 @@ class DetectionValidator(BaseValidator):
                 extra = x[:, 6:]
                 result = {"bboxes": bboxes, "conf":  conf, "cls":  cls, "extra": extra}
             results.append(result)
-       
-            return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
+            # return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "scores": x[:, 6:6+self.nc], "variant":x[:, 6+self.nc], "km_scores":x[:,7+self.nc:7+2*self.nc], "extra": x[:, 7+2*self.nc:]} for x in outputs]
         return results
 
     # TODO (CP/IRIT): Adapt to class prediction scores

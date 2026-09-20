@@ -344,9 +344,9 @@ def verify_image_label(args: tuple) -> list:
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
                     # (CP/IRIT): create a bounding box around segments
-                    boxes = segments2boxes(segments)
-                    lb = np.concatenate((classes.reshape(-1, 1), boxes), 1)  # (cls, xywh)
-                lb = np.array(lb, dtype=np.float32) # lb contains 5 elements
+                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                # lb contains 5 elements
+                lb = np.array(lb, dtype=np.float32)
             # Check if knowledge model is available and load additional classes
             if use_km:
                 km_file = lb_file.rsplit('.',1)[0]+'.km'
@@ -363,8 +363,8 @@ def verify_image_label(args: tuple) -> list:
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
-                    classes = np.array([x[0:1] for x in lb], dtype=np.float32)
-                    boxes = np.array([x[1:5] for x in lb], dtype=np.float32)
+                    # classes = np.array([x[0:1] for x in lb], dtype=np.float32)
+                    # boxes = np.array([x[1:5] for x in lb], dtype=np.float32)
                 else:
                     assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
                     # Case of a bounding box, these are not keypoints
@@ -402,28 +402,38 @@ def verify_image_label(args: tuple) -> list:
                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
         # DONE (CP/IRIT): Initialize class scores from the core class
         lb = lb[:, :5]
-        class_scores = np.zeros((nl,num_cls),dtype=np.float32)
-        for i in range(nl):
+        if use_scores:
+            scores = np.zeros((nl,num_cls),dtype=np.float32)
+            for i in range(nl):
                 for cls in lb[i,0:-4]:
-                    class_scores[i,int(cls)]=1.0
+                    scores[i,int(cls)]=1.0
         # TODO(CP/IRIT): ignore knowledge model, uncomment to use knowledge model
                 if use_km_scores:
                     for cls in km_lb[i]:
-                        class_scores[i,int(cls)]=1.0
+                        scores[i,int(cls)]=1.0
         # TODO (CP/IRIT): Add Knowledge Model classes
-        classes = lb[:,0:-4]
-        bboxes = lb[:,-4:]
+        # classes = lb[:,0:-4]
+        # bboxes = lb[:,-4:]
         # returns a Tuple
-        # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
-        if use_km:
-            return im_file, classes, variant, class_scores, bboxes, shape, segments, keypoints, nm, nf, ne, nc, msg
-        else:
-            return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
+        results = im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
+        if use_scores:
+            results = *results, scores
+            if use_km:
+                results = *results, variant
+                # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg, scores, variant
+        return results
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
         # returns a List 
-        return [None, None, None, None, None, None, None, None, nm, nf, ne, nc, msg]
+        # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg, scores, variant
+        if use_scores:
+            if use_km:
+                return [None, None, None, None, None, nm, nf, ne, nc, msg, None, None]
+            else:
+                return [None, None, None, None, None, nm, nf, ne, nc, msg, None]
+        else:
+            return [None, None, None, None, None, nm, nf, ne, nc, msg]
 
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[int, str]):

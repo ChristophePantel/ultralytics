@@ -309,12 +309,11 @@ class Detect(nn.Module):
         scores, conf, idx = self.get_topk_index(scores, self.max_det)
         # boxes = boxes.gather(dim=1, index=idx.expand(-1, -1, 4))
         boxes = self._gather(boxes, idx)
-        extra = *(self._gather(e, idx) for e in extra)
         if self.use_km_scores:
             km_scores = self._gather(km_scores, idx) # (CP/IRIT): Add predicted knowledge model scores
-            return torch.cat([boxes, scores, conf, km_scores, extra], dim=-1) # (CP/IRIT): Add predicted knowledge model scores
+            return torch.cat([boxes, scores, conf, km_scores, *(self._gather(e, idx) for e in extra)], dim=-1) # (CP/IRIT): Add predicted knowledge model scores
         else:
-            return torch.cat([boxes, scores, conf, extra], dim=-1)
+            return torch.cat([boxes, scores, conf, *(self._gather(e, idx) for e in extra)], dim=-1)
 
     def get_topk_index(self, scores: torch.Tensor, max_det: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Get top-k indices from scores.

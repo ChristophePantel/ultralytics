@@ -227,8 +227,7 @@ class YOLODataset(BaseDataset):
         Returns:
             (tuple): (label dict or None, missing, found, empty, corrupt, message).
         """
-        # im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
-        im_file, core_class, variant, class_scores, bboxes, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg = result
+        im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg, *others = result
         label = (
             {
                 "im_file": im_file,
@@ -236,15 +235,15 @@ class YOLODataset(BaseDataset):
                 # TODO (CP/IRIT): lb should not be an array mixing class and bounding boxes
                 # or the bounding boxes should be the last 4 and the classes the previous ones
                 # Classes are the first values before the bounding boxes
-                # "cls": lb[:, 0:-4],  # n, 1
+                "cls": lb[:, 0:-4],  # n, 1
                 # "cls": lb[:, 0:1],  # n, 1
-                "cls": core_class,
-                "variant": variant,
-                "scores" : class_scores,
+                # "cls": core_class,
+                # "variant": variant,
+                # "scores" : class_scores,
                 # Bounding boxes are the last four values
-                # "bboxes": lb[:, -4:],  # n, 4
+                "bboxes": lb[:, -4:],  # n, 4
                 # "bboxes": lb[:, 1:],  # n, 4
-                "bboxes": bboxes,
+                # "bboxes": bboxes,
                 "segments": segments,
                 "keypoints": keypoint,
                 "normalized": True,
@@ -253,6 +252,10 @@ class YOLODataset(BaseDataset):
             if im_file
             else None
         )
+        if self.use_scores:
+            label["scores"] = others[0]
+            if self.use_km:
+                label["variant"] = others[1]
         return label, nm_f, nf_f, ne_f, nc_f, msg
 
     def verify_labels(self, labels: list[dict], cache_path: Path) -> None:

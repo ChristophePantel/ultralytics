@@ -685,7 +685,10 @@ class v8DetectionLoss:
         # Targets
         
         # Merge ground truth tensors (indexes, classes, scores, bounding boxes) in a single tensor
-        batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["scores"], batch["bboxes"])
+        if self.use_scores:
+            batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["scores"], batch["bboxes"])
+        else:
+            batch_merge = (batch["batch_idx"].view(-1, 1), batch["cls"], batch["bboxes"])
         targets = torch.cat(batch_merge, 1)
         # Generate the ground truth data in a single tensor
         # TODO (CP/IRIT): Why is the preprocess done on a single tensor as it is limited to bounding boxes ?
