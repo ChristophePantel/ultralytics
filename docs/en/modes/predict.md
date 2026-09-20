@@ -12,6 +12,8 @@ keywords: Ultralytics, YOLO26, model prediction, inference, predict mode, real-t
 
 In the world of [machine learning](https://www.ultralytics.com/glossary/machine-learning-ml) and [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv), the process of making sense of visual data is often called inference or prediction. Ultralytics YOLO26 offers a powerful feature known as **predict mode**, tailored for high-performance, real-time inference across a wide range of data sources.
 
+See the [unreleased YOLO27 preview](../models/yolo27.md#usage-examples) for planned inference examples.
+
 <p align="center">
   <br>
   <iframe loading="lazy" width="720" height="405" src="https://www.youtube.com/embed/YKbBXWBJloY"
@@ -530,15 +532,15 @@ All Ultralytics `predict()` calls will return a list of `Results` objects:
 ### Results by Task
 
 Which fields below populate depends on your model's task — [compare detection, segmentation, semantic segmentation, depth estimation, classification, pose, and OBB](../tasks/index.md) if you haven't picked one yet. Each prediction returns one `Results` object per image or frame. The common fields above are always available, while the
-task-specific prediction data is stored in the fields below. Coordinate, confidence, and probability tensors are
-`torch.float32` unless half precision is used, then `torch.float16`. After `result.numpy()`, tensors become NumPy arrays with matching NumPy dtypes.
+task-specific prediction data is stored in the fields below. YOLO coordinate and confidence tensors are
+`torch.float32`; probability tensors are `torch.float32` unless half precision is used, then `torch.float16`. After `result.numpy()`, tensors become NumPy arrays with matching NumPy dtypes.
 Instance masks are `torch.uint8` binary tensors, while semantic masks use the smallest practical integer dtype for class
 IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 
 === "Detect"
 
     | Attribute           | Type            | Shape     | Description                                           |
-    |---------------------|-----------------|-----------|-------------------------------------------------------|
+    | ------------------- | --------------- | --------- | ----------------------------------------------------- |
     | `result.boxes`      | `Boxes`         | `(N)`     | Detection boxes.                                      |
     | `result.boxes.data` | `torch.float32` | `(N,6/7)` | Raw `[x1,y1,x2,y2,conf,cls]`, plus optional track ID. |
     | `result.boxes.xyxy` | `torch.float32` | `(N,4)`   | `xyxy` pixel boxes.                                   |
@@ -548,7 +550,7 @@ IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 === "Segment"
 
     | Attribute           | Type          | Shape         | Description                         |
-    |---------------------|---------------|---------------|-------------------------------------|
+    | ------------------- | ------------- | ------------- | ----------------------------------- |
     | `result.boxes`      | `Boxes`       | `(N)`         | Instance boxes/classes/confidences. |
     | `result.masks`      | `Masks`       | `(N)`         | Instance masks.                     |
     | `result.masks.data` | `torch.uint8` | `(N,H,W)`     | Binary masks, values `0` or `1`.    |
@@ -558,7 +560,7 @@ IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 === "Semantic"
 
     | Attribute                   | Type                                            | Shape   | Description                                         |
-    |-----------------------------|-------------------------------------------------|---------|-----------------------------------------------------|
+    | --------------------------- | ----------------------------------------------- | ------- | --------------------------------------------------- |
     | `result.semantic_mask`      | `SemanticMask`                                  | `(H,W)` | Dense class map.                                    |
     | `result.semantic_mask.data` | `torch.uint8`<br>`torch.int16`<br>`torch.int32` | `(H,W)` | Per-pixel class IDs, dtype selected by class count. |
     | `result.masks`              | -                                               | -       | No instance masks.                                  |
@@ -567,7 +569,7 @@ IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 === "Classify"
 
     | Attribute               | Type            | Shape   | Description            |
-    |-------------------------|-----------------|---------|------------------------|
+    | ----------------------- | --------------- | ------- | ---------------------- |
     | `result.probs`          | `Probs`         | `(C,)`  | Class probabilities.   |
     | `result.probs.data`     | `torch.float32` | `(C,)`  | Probability per class. |
     | `result.probs.top1`     | `int`           | `()`    | Top class ID.          |
@@ -577,7 +579,7 @@ IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 === "Pose"
 
     | Attribute               | Type            | Shape       | Description                                |
-    |-------------------------|-----------------|-------------|--------------------------------------------|
+    | ----------------------- | --------------- | ----------- | ------------------------------------------ |
     | `result.boxes`          | `Boxes`         | `(N)`       | Instance boxes.                            |
     | `result.keypoints`      | `Keypoints`     | `(N)`       | Keypoints.                                 |
     | `result.keypoints.data` | `torch.float32` | `(N,K,2/3)` | `x,y` plus optional visibility/confidence. |
@@ -587,7 +589,7 @@ IDs: `torch.uint8`, `torch.int16`, or `torch.int32`, depending on class count.
 === "OBB"
 
     | Attribute             | Type            | Shape     | Description                              |
-    |-----------------------|-----------------|-----------|------------------------------------------|
+    | --------------------- | --------------- | --------- | ---------------------------------------- |
     | `result.obb`          | `OBB`           | `(N)`     | Oriented boxes.                          |
     | `result.obb.data`     | `torch.float32` | `(N,7/8)` | Raw rotated boxes with confidence/class. |
     | `result.obb.xywhr`    | `torch.float32` | `(N,5)`   | `xywhr` rotated boxes.                   |

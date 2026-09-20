@@ -276,12 +276,12 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
 
     === "Raspberry Pi 5"
 
-        | Model   | Format      | Status | Size (MB) | metrics/mAP50-95(B) | Inference time (ms/im) |
-        | ------- | ----------- | ------ | --------- | ------------------- | ---------------------- |
-        | YOLO26n | PyTorch     | ✅     | 5.3       | 0.4790              | 314.80                  |
-        | YOLO26n | ExecuTorch  | ✅     | 9.4        | 0.4800              | 142                    |
-        | YOLO26s | PyTorch     | ✅     | 19.5       | 0.5730             | 930.90                 |
-        | YOLO26s | ExecuTorch  | ✅     | 36.5        | 0.5780              | 376.1                 |
+        | Model   | Format     | Status | Size (MB) | metrics/mAP50-95(B) | Inference time (ms/im) |
+        | ------- | ---------- | ------ | --------- | ------------------- | ---------------------- |
+        | YOLO26n | PyTorch    | ✅     | 5.3       | 0.4790              | 314.80                 |
+        | YOLO26n | ExecuTorch | ✅     | 9.4       | 0.4800              | 142                    |
+        | YOLO26s | PyTorch    | ✅     | 19.5      | 0.5730              | 930.90                 |
+        | YOLO26s | ExecuTorch | ✅     | 36.5      | 0.5780              | 376.1                  |
 
     === "More devices coming soon!"
 
@@ -289,7 +289,7 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
 
     !!! note
 
-        Inference time does not include pre/ post-processing.
+        Inference time does not include pre/post-processing.
 
 ## Troubleshooting
 
@@ -297,7 +297,7 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
 
 **Issue**: `Python version error`
 
-**Solution**: ExecuTorch requires Python 3.10 or higher. Upgrade your Python installation:
+**Solution**: ExecuTorch requires Python 3.10 to 3.13. Create an environment with a supported version:
 
 ```bash
 # Using conda
@@ -358,7 +358,7 @@ yolo export model=yolo26n.pt format=executorch
 
 ExecuTorch export requires:
 
-- Python 3.10 or higher
+- Python 3.10 to 3.13
 - `executorch` package (install via `pip install executorch`)
 - PyTorch (installed automatically with ultralytics)
 

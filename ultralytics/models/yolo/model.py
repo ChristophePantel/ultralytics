@@ -34,12 +34,12 @@ class YOLO(Model):
 
     This class provides a unified interface for YOLO models, automatically switching to specialized model types
     (YOLOWorld or YOLOE) based on the model filename. It supports various computer vision tasks including object
-    detection, instance segmentation, semantic segmentation, classification, pose estimation, and oriented bounding box
-    detection.
+    detection, instance segmentation, semantic segmentation, depth estimation, classification, pose estimation, and
+    oriented bounding box detection.
 
     Attributes:
         model: The loaded YOLO model instance.
-        task: The task type (detect, segment, semantic, classify, pose, obb).
+        task: The task type (detect, segment, semantic, depth, classify, pose, obb).
         overrides: Configuration overrides for the model.
 
     Methods:
@@ -65,8 +65,8 @@ class YOLO(Model):
 
         Args:
             model (str | Path): Model name or path to model file, i.e. 'yolo26n.pt', 'yolo26n.yaml'.
-            task (str, optional): YOLO task specification, i.e. 'detect', 'segment', 'classify', 'pose', 'obb'. Defaults
-                to auto-detection based on model.
+            task (str, optional): YOLO task specification, i.e. 'detect', 'segment', 'semantic', 'depth', 'classify',
+                'pose', 'obb'. Defaults to auto-detection based on model.
             verbose (bool): Display model info on load.
         """
         path = Path(model if isinstance(model, (str, Path)) else "")
@@ -88,6 +88,10 @@ class YOLO(Model):
                 from ultralytics import RTDETR
 
                 new_instance = RTDETR(self)
+                self.__class__ = type(new_instance)
+                self.__dict__ = new_instance.__dict__
+            elif isinstance(self.model, WorldModel):  # e.g. `ul://…/yolov8l-worldv2`, no suffix for the filename test
+                new_instance = YOLOWorld(self)
                 self.__class__ = type(new_instance)
                 self.__dict__ = new_instance.__dict__
 
@@ -206,9 +210,7 @@ class YOLOWorld(Model):
             classes.remove(background)
         self.model.names = classes
 
-        # Reset method class names
-        if self.predictor:
-            self.predictor.model.names = classes
+        self.predictor = None
 
 
 class YOLOE(Model):
@@ -304,15 +306,19 @@ class YOLOE(Model):
         assert isinstance(self.model, YOLOEModel)
         return self.model.get_visual_pe(img, visual)
 
-    def set_vocab(self, vocab: torch.nn.ModuleList, names: list[str]) -> None:
+    def set_vocab(
+        self, vocab: torch.nn.ModuleList, names: list[str], one2one_vocab: torch.nn.ModuleList | None = None
+    ) -> None:
         """Re-parameterize the model into a prompt-free one over the given class names.
 
         The vocabulary is the fused classification layer `get_vocab` returns for the same names, not the names
         themselves. The model must be an instance of YOLOEModel.
 
         Args:
-            vocab (torch.nn.ModuleList): Fused classification layers returned by `get_vocab` for `names`.
+            vocab (torch.nn.ModuleList): One-to-many fused classification layers returned by `get_vocab` for `names`.
             names (list[str]): List of class names that the model can detect or classify.
+            one2one_vocab (torch.nn.ModuleList | None): One-to-one fused classification layers. When provided, both
+                heads are built and `nms` keeps selecting between them; otherwise only the current head is built.
 
         Raises:
             AssertionError: If the model is not an instance of YOLOEModel.
@@ -325,7 +331,7 @@ class YOLOE(Model):
         assert isinstance(self.model, YOLOEModel)
         names = check_class_names(names)
         self.predictor = None  # the delegate destructively re-parameterizes the head
-        self.model.set_vocab(vocab, names=names)
+        self.model.set_vocab(vocab, names=names, one2one_vocab=one2one_vocab)
 
     def get_vocab(self, names):
         """Get the vocabulary for the given class names, which become the model's classes as the head is fused."""
@@ -348,14 +354,11 @@ class YOLOE(Model):
             if embeddings is None:
                 embeddings = self.get_text_pe(classes)  # generate text embeddings if not provided
             self.model.set_classes(classes, embeddings)
-
-        # Reset method class names
-        if self.predictor:
-            self.predictor.model.names = self.model.names
+            self.predictor = None
 
     def _prompt_embedding_model(self) -> str:
         """Return the checkpoint identifier used to bind prompt embeddings to this model."""
-        source = self.overrides.get("pretrained") or getattr(self.model, "pt_path", None) or self.ckpt_path
+        source = getattr(self.model, "pt_path", None) or self.ckpt_path
         source = source if isinstance(source, (str, Path)) else self.model.yaml["yaml_file"]
         model = Path(source).stem
         return model[:-4] if model.endswith("-seg") else model

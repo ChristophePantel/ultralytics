@@ -132,6 +132,7 @@ class BboxLoss(nn.Module):
         stride: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for bounding boxes."""
+        fg_mask = fg_mask.nonzero(as_tuple=True)  # index once; long-index gathers and their backward do not sync
         weight = target_scores[fg_mask].sum(-1, keepdim=True)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
@@ -722,7 +723,7 @@ class v8DetectionLoss:
             mask_gt,
         )
 
-        target_scores_sum = max(target_scores.sum(), 1)
+        target_scores_sum = target_scores.sum().clamp_(min=1)  # on the device: no host sync
 
         # Cls loss with optional class weighting
         bce_loss = self.bce(pred_scores, target_scores.to(dtype))  # (bs, num_anchors, nc)
@@ -746,20 +747,19 @@ class v8DetectionLoss:
             km_loss = self.km_loss(pred_km_scores.sigmoid(), target_km_scores)
             loss[km_index] = km_loss
 
-        # Bbox loss
+        # Bbox loss: zero on an empty foreground, and pred_distri stays in the graph either way
         # TODO (CP/IRIT): Is the loss computed for gt_labels ?
-        if fg_mask.sum():
-            loss[box_index], loss[dfl_index] = self.bbox_loss(
-                pred_for_bboxes, # rename pred_distri to pred_for_bboxes
-                pred_bboxes,
-                anchor_points,
-                target_bboxes / stride_tensor,
-                target_scores,
-                target_scores_sum,
-                fg_mask,
-                imgsz,
-                stride_tensor,
-            )
+        loss[box_index], loss[dfl_index] = self.bbox_loss(
+            pred_for_bboxes, # rename pred_distri to pred_for_bboxes
+            pred_bboxes,
+            anchor_points,
+            target_bboxes / stride_tensor,
+            target_scores,
+            target_scores_sum,
+            fg_mask,
+            imgsz,
+            stride_tensor,
+        )
 
         loss[box_index] *= self.hyp.box  # box gain
         loss[cls_index] *= self.hyp.cls  # cls gain
@@ -1029,6 +1029,9 @@ class v8PoseLoss(v8DetectionLoss):
                 target_bboxes,
                 pred_kpts,
             )
+        # WARNING: line below prevents Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
+        else:
+            loss[1] += pred_kpts[..., :0].sum()
 
         loss[1] *= self.hyp.pose  # pose gain
         loss[2] *= self.hyp.kobj  # kobj gain
@@ -1205,6 +1208,11 @@ class PoseLoss26(v8PoseLoss):
             loss[2] = keypoints_loss[1]
             if self.rle_loss is not None:
                 loss[5] = keypoints_loss[2]
+        # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
+        else:
+            loss[1] += pred_kpts[..., :0].sum()
+            if self.rle_loss is not None:
+                loss[5] += self._rle_zero(pred_kpts)
 
         loss[1] *= self.hyp.pose  # pose gain
         loss[2] *= self.hyp.kobj  # kobj gain
@@ -1222,6 +1230,10 @@ class PoseLoss26(v8PoseLoss):
         y[..., 1] += anchor_points[:, [1]]
         return y
 
+    def _rle_zero(self, pred_kpt: torch.Tensor) -> torch.Tensor:
+        """Return a zero RLE loss keeping `pred_kpt` and the flow model in the graph, for Multi-GPU DDP."""
+        return pred_kpt[..., :0].sum() + sum(p[..., :0].sum() for p in self.flow_model.parameters())
+
     def calculate_rle_loss(self, pred_kpt: torch.Tensor, gt_kpt: torch.Tensor, kpt_mask: torch.Tensor) -> torch.Tensor:
         """Calculate the RLE (Residual Log-likelihood Estimation) loss for keypoints.
 
@@ -1234,7 +1246,7 @@ class PoseLoss26(v8PoseLoss):
             (torch.Tensor): The RLE loss.
         """
         if not kpt_mask.any():
-            return pred_kpt[..., :0].sum()
+            return self._rle_zero(pred_kpt)
 
         pred_kpt_visible = pred_kpt[kpt_mask]
         gt_kpt_visible = gt_kpt[kpt_mask]
@@ -1248,12 +1260,12 @@ class PoseLoss26(v8PoseLoss):
         pred_sigma = pred_sigma.sigmoid()
         error = (pred_coords - gt_coords) / (pred_sigma + 1e-9)
         if not error.numel():
-            return pred_kpt[..., :0].sum()
+            return self._rle_zero(pred_kpt)
 
         # Filter out NaN and Inf values that would propagate into the loss
         valid_mask = ~(torch.isnan(error) | torch.isinf(error)).any(dim=-1)
         if not valid_mask.any():
-            return pred_kpt[..., :0].sum()
+            return self._rle_zero(pred_kpt)
 
         error = error[valid_mask]
         error = error.clamp(-100, 100)  # Prevent numerical instability
@@ -1443,7 +1455,7 @@ class v8OBBLoss(v8DetectionLoss):
                 pred_bboxes, target_bboxes, fg_mask, weight, target_scores_sum
             )  # angle loss
         else:
-            loss[0] += (pred_angle * 0).sum()
+            loss[0] += (pred_angle * 0).sum() + pred_distri[..., :0].sum()
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
@@ -1787,7 +1799,9 @@ class SemanticSegmentationLoss(nn.Module):
         intersection = torch.zeros(self.nc, device=preds.device, dtype=torch.float32)
         intersection.scatter_add_(0, target, flat_pred.gather(1, target[:, None]).squeeze(1))
         pred_sum = flat_pred.sum(dim=0)
-        target_sum = torch.bincount(target, minlength=self.nc).to(device=preds.device, dtype=torch.float32)
+        target_sum = torch.zeros_like(intersection).scatter_add_(
+            0, target, torch.ones_like(target, dtype=torch.float32)
+        )
         cardinality = pred_sum + target_sum
         return (1.0 - (2.0 * intersection + 1.0) / (cardinality + 1.0)).mean()
 

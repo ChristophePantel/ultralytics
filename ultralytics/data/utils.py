@@ -50,6 +50,15 @@ IMG_FORMATS = {
 }
 VID_FORMATS = {"asf", "avi", "gif", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ts", "wmv", "webm"}  # videos
 FORMATS_HELP_MSG = f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
+DATASET_KEY_TYPES = {  # dataset YAML keys and their permitted types
+    "path": (str,),
+    "train": (str, list),
+    "val": (str, list),
+    "test": (str, list),
+    "names": (list, dict),
+    "kpt_shape": (list,),
+    "flip_idx": (list,),
+}
 
 DEPTH_PNG_SCALE = 1000  # uint16 millimeters by default; zero is invalid
 
@@ -285,7 +294,7 @@ def verify_image_depth(args: tuple) -> tuple:
 
 def verify_image_mask(args: tuple) -> tuple:
     """Verify that an image and its semantic mask exist, are readable, and have matching shapes."""
-    im_file, mask_file, prefix, check_bit_depth = args
+    im_file, mask_file, prefix = args
     # Number (found, missing, corrupt), message
     nf, nm, nc, msg = 0, 0, 0, ""
     try:
@@ -301,10 +310,8 @@ def verify_image_mask(args: tuple) -> tuple:
             mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
             assert mask is not None, f"mask file {mask_file} is unreadable"
             assert mask.shape[:2] == shape, f"mask size {mask.shape[:2]} does not match image size {shape}"
-            is_1bit = False
-            if check_bit_depth:
-                with Image.open(mask_file) as im:
-                    is_1bit = im.mode == "1"
+            with Image.open(mask_file) as im:
+                is_1bit = im.mode == "1"  # recorded for every mask so a yaml 'nc' edit never needs a rescan
             nf = 1
         else:
             nm = 1
@@ -570,11 +577,16 @@ def find_dataset_yaml(path: Path) -> Path:
 
 
 def get_split_fraction(fraction: float | list[float | int], split: str) -> float | int:
-    """Return the dataset ratio or count for a train, validation, or test split."""
+    """Return a split ratio/count, normalizing boundary values to 0.0 (none) or 1.0 (all)."""
     if isinstance(fraction, list) and split in (splits := ("train", "val", "test")):
         index = splits.index(split)
-        return fraction[index] if index < len(fraction) else 1.0
-    return fraction if split == "train" else 1.0
+        fraction = fraction[index] if index < len(fraction) else 1.0
+    elif split != "train":
+        fraction = 1.0
+    fraction = float(fraction) if fraction in {0, 1} else fraction
+    if split in {"train", "val"} and fraction == 0:
+        raise ValueError(f"{split} fraction must select at least one image")
+    return fraction
 
 
 def convert_ndjson_to_yolo_if_needed(data: str | Path, fraction=1.0) -> str | Path:
@@ -624,6 +636,11 @@ def check_det_dataset(dataset: str, autodownload: bool = True, split: str = "") 
     data = YAML.load(file, append_filename=True)  # dictionary
 
     # Checks
+    for key, valid_types in DATASET_KEY_TYPES.items():
+        if data.get(key) is not None and not isinstance(data[key], valid_types):
+            expected = " or ".join(t.__name__ for t in valid_types)
+            raise TypeError(f"{dataset} '{key}' must be {expected}, not {type(data[key]).__name__}")
+
     for k in "train", "val":
         if k not in data:
             if k != "val" or "validation" not in data:
@@ -698,6 +715,8 @@ def check_det_dataset(dataset: str, autodownload: bool = True, split: str = "") 
             dt = f"({round(time.time() - t, 1)}s)"
             s = f"success ✅ {dt}, saved to {colorstr('bold', DATASETS_DIR)}" if r in {0, None} else f"failure {dt} ❌"
             LOGGER.info(f"Dataset download {s}\n")
+    if data.get("masks_dir") is None and (path / "masks").is_dir():  # after download so scripts can create it
+        data["masks_dir"] = "masks"  # PNG semantic masks in the default folder select SemanticDataset
     check_font("Arial.ttf" if is_ascii(data["names"]) else "Arial.Unicode.ttf")  # download fonts
 
     return data  # dictionary
