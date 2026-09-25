@@ -286,25 +286,29 @@ class DetectionValidator(BaseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        if self.use_km:
-            variant = batch["variant"][idx]
         if self.use_scores:
             scores = batch["scores"][idx]
+            if self.use_km:
+                variant = batch["variant"][idx]
+
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
         if cls.shape[0]:
             bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
-        return {
+        result = {
             "cls": cls,
             "bboxes": bbox,
-            "scores": scores,
-            "variant":variant,
             "ori_shape": ori_shape,
             "imgsz": imgsz,
             "ratio_pad": ratio_pad,
             "im_file": batch["im_file"][si],
         }
+        if self.use_scores:
+            result["scores"] = scores
+            if self.use_km:
+                result["variant"] = variant
+        return result
 
     # TODO (CP/IRIT): Adapt to class prediction scores
     def _prepare_pred(self, pred: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -333,9 +337,11 @@ class DetectionValidator(BaseValidator):
             self.seen += 1
             pbatch = self._prepare_batch(si, batch)
             cls = pbatch["cls"].cpu().numpy()
-            scores = pbatch["scores"].cpu().numpy()
-            variant = pbatch["variant"].cpu().numpy()
-            class_number = scores.shape[1]
+            if self.use_scores:
+                scores = pbatch["scores"].cpu().numpy()
+                class_number = scores.shape[1]
+                if self.use_km:
+                    variant = pbatch["variant"].cpu().numpy()
 
             im_idx = self.eval_ids[self.seen - 1] if self.is_custom_json else None
             if self.build_gdict:

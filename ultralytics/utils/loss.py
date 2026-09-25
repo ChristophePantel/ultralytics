@@ -700,6 +700,7 @@ class v8DetectionLoss:
             gt_labels, gt_scores, gt_bboxes = targets.split((1, self.nc, 4), 2)  # cls, scores, xyxy
         else:
             gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+            gt_scores = None
         # Identify future positive anchor points
         # Sum the components of each bounding boxes
         # Indicates which image in a batch contains bounding boxes
