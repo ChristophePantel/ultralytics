@@ -643,14 +643,16 @@ class Model(torch.nn.Module):
         """
         custom = {"rect": True}  # method defaults
         # (CP/IRIT): Inherit the args from the model being validated.
-        args = {**self.model.args, **self.overrides, **custom, **kwargs, "mode": "val"}  # highest priority args on the right
+        if kwargs.get("data") is None:
+            kwargs["data"] = self._val_data()
+        args = {**self.model.args, **custom, **kwargs, "mode": "val", **self.overrides}  # highest priority args on the right
 
         validator = (validator or self._smart_load("validator"))(args=args, _callbacks=self.callbacks)
         validator(model=self.model)
         self.metrics = validator.metrics
         return validator.metrics
 
-    def calibrate(self, data=None, **kwargs: Any):
+    def calibrate(self, data: str | Path, **kwargs: Any):
         """Fit scale-only depth calibration on a small labeled set (depth task only).
 
         Runs a validation pass, then fits the global log-affine ``d' = exp(a·log d + b)`` against
@@ -661,7 +663,7 @@ class Model(torch.nn.Module):
         Call ``model.save(...)`` afterwards to persist the calibration.
 
         Args:
-            data (str, optional): Dataset YAML providing a labeled split to calibrate against.
+            data (str | Path): Dataset YAML providing a labeled split to calibrate against.
             **kwargs (Any): Extra validation arguments (e.g. ``imgsz``, ``batch``, ``device``, ``split``).
 
         Returns:
@@ -679,9 +681,7 @@ class Model(torch.nn.Module):
 
         if _depth_head(self.model) is None:
             raise ValueError("Model has no Depth head with calibration buffers (cal_a/cal_b).")
-        args = {**self.overrides, **kwargs, "mode": "val", "task": "depth"}
-        if data is not None:
-            args["data"] = data
+        args = {**self.overrides, **kwargs, "data": data, "mode": "val", "task": "depth"}
         validator = self._smart_load("validator")(args=args, _callbacks=self.callbacks)
         validator(model=self.model)
         self.predictor = None  # calibration updates the retained model below
@@ -1156,6 +1156,25 @@ class Model(torch.nn.Module):
         """
         include = {"imgsz", "data", "task", "single_cls"}  # only remember these arguments when loading a PyTorch model
         return {k: v for k, v in args.items() if k in include}
+
+    def _val_data(self) -> str | None:
+        """Return the checkpoint's dataset when it still resolves, otherwise the task default."""
+        data = self.overrides.get("data")
+        if not isinstance(data, (str, Path)):  # absent, or a YOLOE multi-source training dict
+            data = None
+        # a bare name (coco8.yaml, imagenet10) is portable; a path recorded on another host, or OS, is not
+        if data and (
+            "://" in str(data) or not any(sep in str(data) for sep in "/\\") or checks.check_file(data, hard=False)
+        ):
+            return data
+        default = TASK2DATA.get(self.task)
+        LOGGER.warning(
+            f"Checkpoint dataset '{data}' was not found. Using default 'data={default}'. Pass data=... to validate on "
+            f"the original dataset."
+            if data
+            else f"'data' argument is missing. Using default 'data={default}'."
+        )
+        return default
 
     def _smart_load(self, key: str):
         """Intelligently load the appropriate module based on the model task.

@@ -266,7 +266,7 @@ def check_imgsz(imgsz, stride=32, min_dim=1, max_dim=2, floor=0):
         LOGGER.warning(f"updating to 'imgsz={max(imgsz)}'. {msg}")
         imgsz = [max(imgsz)]
     # Make image size a multiple of the stride
-    sz = [max(math.ceil(x / stride) * stride, floor) for x in imgsz]
+    sz = [max(math.ceil(x / stride) * stride, floor, stride) for x in imgsz]  # at least one stride, i.e. imgsz=0
 
     # Print warning message if image size was updated
     if sz != imgsz:
@@ -442,6 +442,8 @@ def check_font(font="Arial.ttf"):
 
     # Check system fonts in matplotlib's cached list, findSystemFonts() rescans the OS in every process (7s on macOS)
     matches = [f.fname for f in font_manager.fontManager.ttflist if font in f.fname and os.path.exists(f.fname)]
+    if not matches:  # font installed after matplotlib's cached list was built, rescan the OS
+        matches = [f for f in font_manager.findSystemFonts() if font in f]
     if any(matches):
         return matches[0]
 

@@ -138,8 +138,6 @@ def non_max_suppression(
 
     # shape(1,6300,84) a.k.a (1,features,anchor points) -> (1,anchor points, features)
     prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
-    if not rotated:
-        prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
 
     t = time.time()
     # 6 = bounding box & class & confidence
@@ -166,6 +164,8 @@ def non_max_suppression(
         # filt: image_anchor_point_candidates
         filt = xc[xi]  # confidence for each anchor point in an image index
         x = x[filt] # selected image predictions 
+        if not rotated:
+            x[:, :4] = xywh2xyxy(x[:, :4])
         if return_idxs:
             xk = xk[filt] # selected image anchor point indexes
 

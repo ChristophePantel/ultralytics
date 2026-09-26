@@ -205,7 +205,7 @@ def torch2coreml(
     for m in model.modules():  # MIL types int64 gather indices as fp32 and then rejects them
         if isinstance(m, Detect):
             m._gather = types.MethodType(_coreml_gather, m)
-    ts = torch.jit.trace(model.eval(), im, strict=False)  # TorchScript model
+    ts = torch.jit.trace(model.eval(), im, strict=False, check_trace=False)  # skip re-trace check, like other exports
     fp16 = quantize == 16
     weight_int8 = quantize in {8, "w8a16"}
 
@@ -253,13 +253,5 @@ def torch2coreml(
     ct_model.user_defined_metadata.update({k: str(v) for k, v in m.items()})
 
     if output_file is not None:
-        try:
-            ct_model.save(str(output_file))  # save *.mlpackage
-        except Exception as e:
-            LOGGER.warning(
-                f"{prefix} CoreML export to *.mlpackage failed ({e}), reverting to *.mlmodel export. "
-                f"Known coremltools Python 3.11 and Windows bugs https://github.com/apple/coremltools/issues/1928."
-            )
-            output_file = Path(output_file).with_suffix(".mlmodel")
-            ct_model.save(str(output_file))
+        ct_model.save(str(output_file))  # save *.mlpackage or *.mlmodel
     return ct_model
