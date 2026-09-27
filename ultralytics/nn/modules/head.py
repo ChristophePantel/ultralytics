@@ -47,10 +47,11 @@ class Detect(nn.Module):
         format (str): Export format.
         end2end (bool): End-to-end detection mode.
         max_det (int): Maximum detections per image.
+        agnostic_nms (bool): Whether to select top-k detections class-agnostically in end-to-end mode.
         shape (tuple): Input shape.
         anchors (torch.Tensor): Anchor points.
         strides (torch.Tensor): Feature map strides.
-        legacy (bool): Backward compatibility for v3/v5/v8/v9/v11 models.
+        legacy (bool): Backward compatibility for v3/v5/v8/v9 models.
         xyxy (bool): Output format, xyxy or xywh.
         nc (int): Number of classes.
         nl (int): Number of detection layers.
@@ -104,14 +105,14 @@ class Detect(nn.Module):
         """Select index (batch, k) rows of x (batch, n, channels) along dim 1."""
         return x.gather(1, index if x.ndim == 2 else index[..., None].expand(-1, -1, x.shape[-1]))
 
-    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(self, nc: int = 80, reg_max: int = 16, end2end: bool = False, ch: list[int] | tuple[int, ...] = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the YOLO detection layer with specified number of classes and channels.
 
         Args:
             nc (int): Number of classes.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__()
         self.nc = nc  # number of classes
@@ -164,7 +165,7 @@ class Detect(nn.Module):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
+        """Return the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
         results =  {"box_head":self.cv2, "cls_head":self.cv3}
         # (CP/IRIT): Add the class score prediction in Head 
         if self.use_km_scores:
@@ -173,7 +174,7 @@ class Detect(nn.Module):
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         results = {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3}
         # (CP/IRIT): Add the class score prediction in Head 
         if self.use_km_scores:
@@ -195,9 +196,9 @@ class Detect(nn.Module):
         self._end2end = value
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module = None, cls_head: torch.nn.Module = None, km_head: torch.nn.Module = None # (CP/IRIT): Add the class score prediction in Head
+        self, x: list[torch.Tensor], box_head: nn.Module | None = None, cls_head: nn.Module | None  = None, km_head: torch.nn.Module | None  = None # (CP/IRIT): Add the class score prediction in Head
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes and class probabilities."""
+        """Concatenate and return predicted bounding boxes and class probabilities."""
         if box_head is None or cls_head is None:  # for fused inference
             return {}
         bs = x[0].shape[0]  # batch size
@@ -212,7 +213,17 @@ class Detect(nn.Module):
     def forward(
         self, x: list[torch.Tensor]
     ) -> dict[str, torch.Tensor] | torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Concatenates and returns predicted bounding boxes and class probabilities."""
+        """Run the detection head on multi-level feature maps.
+
+        Args:
+            x (list[torch.Tensor]): Feature maps from each detection level.
+
+        Returns:
+            (dict | torch.Tensor | tuple): In training, the raw prediction dict (with "one2many" and "one2one" keys for
+                end-to-end heads). In inference, decoded predictions of shape (B, 4 + nc, num_anchors), or (B, max_det,
+                6) with [x1, y1, x2, y2, score, class_index] when end-to-end; returned alone in export mode and
+                otherwise as a (predictions, raw prediction dict) tuple.
+        """
         preds = self.forward_head(x, **self.one2many)
         if getattr(self, "one2one_cv2", None) is not None:
             x_detach = [xi.detach() for xi in x] if self.training else x  # detach keeps one2one out of the backbone
@@ -307,7 +318,7 @@ class Detect(nn.Module):
 
         Returns:
             (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6 + extra) and last
-                dimension format [x1, y1, x2, y2, max_class_prob, class_index, extra].
+                dimension format [x1, y1, x2, y2, score, class_index, extra].
         """
     # Segment, Pose and OBB carry task channels after the class scores, Detect has none
         if self.use_km_scores:
@@ -332,7 +343,9 @@ class Detect(nn.Module):
             max_det (int): Maximum detections per image.
 
         Returns:
-            (torch.Tensor, torch.Tensor, torch.Tensor): Top scores, class indices, and filtered indices.
+            scores (torch.Tensor): Top-k scores with shape (batch_size, k, 1).
+            labels (torch.Tensor): Class indices as float with shape (batch_size, k, 1).
+            index (torch.Tensor): Anchor indices of the top-k detections with shape (batch_size, k).
         """
         anchors, nc = scores.shape[1:]  # i.e. shape(16,8400,80)
         k = min(max_det, anchors)
@@ -375,7 +388,16 @@ class Segment(Detect):
         >>> outputs = segment(x)
     """
 
-    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(
+        self,
+        nc: int = 80,
+        nm: int = 32,
+        npr: int = 256,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
+    ):
         """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers.
 
         Args:
@@ -384,7 +406,7 @@ class Segment(Detect):
             npr (int): Number of protos.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.nm = nm  # number of masks
@@ -398,16 +420,20 @@ class Segment(Detect):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for backward compatibility."""
+        """Return the one-to-many head components, here for backward compatibility."""
         return {"box_head": self.cv2, "cls_head": self.cv3, "mask_head": self.cv4}
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3, "mask_head": self.one2one_cv4}
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor] | dict[str, torch.Tensor]:
-        """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+        """Return predictions with mask prototypes.
+
+        Returns raw predictions with prototypes attached in training, `(outputs, proto)` in export mode, and
+        `((outputs, proto), raw predictions)` otherwise.
+        """
         outputs = super().forward(x)
         preds = outputs[1] if isinstance(outputs, tuple) else outputs
         proto = self.proto(x[0])  # mask protos
@@ -429,7 +455,7 @@ class Segment(Detect):
     def forward_head(
         self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, mask_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and mask coefficients."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and mask coefficients."""
         preds = super().forward_head(x, box_head, cls_head)
         if mask_head is not None:
             bs = x[0].shape[0]  # batch size
@@ -458,7 +484,16 @@ class Segment26(Segment):
         >>> outputs = segment(x)
     """
 
-    def __init__(self, nc: int = 80, nm: int = 32, npr: int = 256, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(
+        self,
+        nc: int = 80,
+        nm: int = 32,
+        npr: int = 256,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
+    ):
         """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers.
 
         Args:
@@ -467,13 +502,17 @@ class Segment26(Segment):
             npr (int): Number of protos.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, nm, npr, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.proto = Proto26(ch, self.npr, self.nm, nc, **kwargs)  # protos # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor] | dict[str, torch.Tensor]:
-        """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+        """Return predictions with mask prototypes.
+
+        Returns raw predictions with prototypes attached in training, `(outputs, proto)` in export mode, and
+        `((outputs, proto), raw predictions)` otherwise.
+        """
         outputs = Detect.forward(self, x)
         preds = outputs[1] if isinstance(outputs, tuple) else outputs
         proto = self.proto(x)  # mask protos
@@ -516,7 +555,9 @@ class OBB(Detect):
         >>> outputs = obb(x)
     """
 
-    def __init__(self, nc: int = 80, ne: int = 1, reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(
+        self, nc: int = 80, ne: int = 1, reg_max: int = 16, end2end: bool = False, ch: list[int] | tuple[int, ...] = (), **kwargs # (CP/IRIT): Add open configuration parameters
+    ):
         """Initialize OBB with number of classes `nc` and layer channels `ch`.
 
         Args:
@@ -524,7 +565,7 @@ class OBB(Detect):
             ne (int): Number of extra parameters.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.ne = ne  # number of extra parameters
@@ -536,12 +577,12 @@ class OBB(Detect):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for backward compatibility."""
+        """Return the one-to-many head components, here for backward compatibility."""
         return {"box_head": self.cv2, "cls_head": self.cv3, "angle_head": self.cv4}
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3, "angle_head": self.one2one_cv4}
 
     def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -552,7 +593,7 @@ class OBB(Detect):
     def forward_head(
         self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, angle_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and angles."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and angles."""
         preds = super().forward_head(x, box_head, cls_head)
         if angle_head is not None:
             bs = x[0].shape[0]  # batch size
@@ -569,9 +610,10 @@ class OBB(Detect):
 
 
 class OBB26(OBB):
-    """YOLO26 OBB detection head for detection with rotation models. This class extends the OBB head with modified angle
-    processing that outputs raw angle predictions without sigmoid transformation, compared to the original
-    OBB class.
+    """YOLO26 OBB detection head for detection with rotation models.
+
+    This class extends the OBB head with modified angle processing that outputs raw angle predictions without the
+    sigmoid transformation used by the original OBB class.
 
     Attributes:
         ne (int): Number of extra parameters.
@@ -590,7 +632,7 @@ class OBB26(OBB):
     def forward_head(
         self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, angle_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and raw angles."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and raw angles."""
         preds = Detect.forward_head(self, x, box_head, cls_head)
         if angle_head is not None:
             bs = x[0].shape[0]  # batch size
@@ -622,7 +664,15 @@ class Pose(Detect):
         >>> outputs = pose(x)
     """
 
-    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(
+        self,
+        nc: int = 80,
+        kpt_shape: tuple = (17, 3),
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
+    ):
         """Initialize YOLO network with default parameters and Convolutional Layers.
 
         Args:
@@ -630,7 +680,7 @@ class Pose(Detect):
             kpt_shape (tuple): Number of keypoints, number of dims (2 for x,y or 3 for x,y,visible).
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
@@ -643,12 +693,12 @@ class Pose(Detect):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for backward compatibility."""
+        """Return the one-to-many head components, here for backward compatibility."""
         return {"box_head": self.cv2, "cls_head": self.cv3, "pose_head": self.cv4}
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3, "pose_head": self.one2one_cv4}
 
     def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -659,7 +709,7 @@ class Pose(Detect):
     def forward_head(
         self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, pose_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and keypoints."""
         preds = super().forward_head(x, box_head, cls_head)
         if pose_head is not None:
             bs = x[0].shape[0]  # batch size
@@ -706,7 +756,15 @@ class Pose26(Pose):
         >>> outputs = pose(x)
     """
 
-    def __init__(self, nc: int = 80, kpt_shape: tuple = (17, 3), reg_max=16, end2end=False, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(
+        self,
+        nc: int = 80,
+        kpt_shape: tuple = (17, 3),
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
+    ):
         """Initialize YOLO network with default parameters and Convolutional Layers.
 
         Args:
@@ -714,7 +772,7 @@ class Pose26(Pose):
             kpt_shape (tuple): Number of keypoints, number of dims (2 for x,y or 3 for x,y,visible).
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, kpt_shape, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.flow_model = RealNVP()
@@ -733,7 +791,7 @@ class Pose26(Pose):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for backward compatibility."""
+        """Return the one-to-many head components, here for backward compatibility."""
         return {
             "box_head": self.cv2,
             "cls_head": self.cv3,
@@ -744,7 +802,7 @@ class Pose26(Pose):
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {
             "box_head": self.one2one_cv2,
             "cls_head": self.one2one_cv3,
@@ -762,7 +820,7 @@ class Pose26(Pose):
         kpts_head: torch.nn.Module,
         kpts_sigma_head: torch.nn.Module,
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and keypoints."""
         preds = Detect.forward_head(self, x, box_head, cls_head)
         if pose_head is not None:
             bs = x[0].shape[0]  # batch size
@@ -807,7 +865,11 @@ class Depth(nn.Module):
     progressive upsampling and fusion.
 
     Attributes:
+        export (bool): Export mode flag.
         nl (int): Number of pyramid levels.
+        proj (nn.ModuleList): 1x1 projections of each pyramid level to c_mid channels.
+        refine (nn.ModuleList): Refinement blocks applied after each top-down fusion step.
+        head (nn.Sequential): Output head that upsamples 2x and predicts a single-channel log-depth map.
         cal_a (torch.Tensor): Log-affine calibration scale buffer, identity 1.0 by default.
         cal_b (torch.Tensor): Log-affine calibration offset buffer, identity 0.0 by default.
 
@@ -819,12 +881,12 @@ class Depth(nn.Module):
 
     export = False  # export mode
 
-    def __init__(self, c_mid: int = 256, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(self, c_mid: int = 256, ch: list[int] | tuple[int, ...] = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize Depth head.
 
         Args:
             c_mid (int): Number of intermediate channels for the fusion decoder.
-            ch (tuple): Input channel sizes from backbone feature maps (P3, P4, P5).
+            ch (list[int] | tuple[int, ...]): Input channel sizes from backbone feature maps (P3, P4, P5).
         """
         super().__init__()
         self.nl = len(ch)  # number of detection layers (pyramid levels)
@@ -852,12 +914,13 @@ class Depth(nn.Module):
         """Fuse multi-scale features and predict depth.
 
         Args:
-            x: List of feature tensors [P3, P4, P5] from the backbone/neck.
+            x (list[torch.Tensor]): Feature tensors [P3, P4, P5] from the backbone/neck.
 
         Returns:
-            Training: dict {"depth": (B, 1, H/4, W/4)}, the raw head output the loss supervises.
-            Eval: (B, 1, H/4, W/4) with calibration applied; the predictor/validator resize to image/GT size.
-            Export (self.export=True): (B, 1, H, W), upsampled 4x to the input size. Output is unbounded.
+            (dict[str, torch.Tensor] | torch.Tensor): In training, a dict {"depth": (B, 1, H/4, W/4)} with the raw head
+                output the loss supervises. In eval, a (B, 1, H/4, W/4) tensor with calibration applied; the
+                predictor/validator resize it to image/GT size. In export mode, a (B, 1, H, W) tensor upsampled 4x to
+                the input size. Depth values are positive (exp of the clamped head output).
         """
         # Project all levels to same channel dim
         feats = [self.proj[i](x[i]) for i in range(self.nl)]
@@ -925,7 +988,16 @@ class Classify(nn.Module):
         self.linear = nn.Linear(c_, c2)  # to x(b,c2)
 
     def forward(self, x: list[torch.Tensor] | torch.Tensor) -> torch.Tensor | tuple:
-        """Perform forward pass on input feature maps."""
+        """Perform forward pass on input feature maps.
+
+        Args:
+            x (list[torch.Tensor] | torch.Tensor): Input feature map, or a list of feature maps concatenated along the
+                channel dimension.
+
+        Returns:
+            (torch.Tensor | tuple): Logits of shape (B, c2) in training; softmax probabilities in export mode; otherwise
+                a (probabilities, logits) tuple.
+        """
         if isinstance(x, list):
             x = torch.cat(x, 1)
         x = self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
@@ -964,7 +1036,7 @@ class WorldDetect(Detect):
         with_bn: bool = False,
         reg_max: int = 16,
         end2end: bool = False,
-        ch: tuple = (),
+        ch: list[int] | tuple[int, ...] = (),
         **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
@@ -975,7 +1047,7 @@ class WorldDetect(Detect):
             with_bn (bool): Whether to use batch normalization in contrastive head.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max=reg_max, end2end=end2end, ch=ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))
@@ -983,7 +1055,16 @@ class WorldDetect(Detect):
         self.cv4 = nn.ModuleList(BNContrastiveHead(embed, **kwargs) if with_bn else ContrastiveHead(**kwargs) for _ in ch) # (CP/IRIT): Add open configuration parameters
 
     def forward(self, x: list[torch.Tensor], text: torch.Tensor) -> dict[str, torch.Tensor] | tuple:
-        """Concatenate and return predicted bounding boxes and class probabilities."""
+        """Concatenate and return predicted bounding boxes and class probabilities.
+
+        Args:
+            x (list[torch.Tensor]): Feature maps from each detection level.
+            text (torch.Tensor): Text embeddings with shape (B, nc, embed).
+
+        Returns:
+            (dict[str, torch.Tensor] | torch.Tensor | tuple): Raw prediction dict in training, decoded predictions of
+                shape (B, 4 + nc, num_anchors) in export mode, otherwise a (predictions, raw prediction dict) tuple.
+        """
         feats = list(x)  # snapshot references for anchor generation; the loop below reassigns x[i], never mutates
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv4[i](self.cv3[i](x[i]), text)), 1)
@@ -998,13 +1079,9 @@ class WorldDetect(Detect):
         return y if self.export else (y, preds)
 
     def bias_init(self):
-        """Initialize Detect() biases, WARNING: requires stride availability."""
-        m = self  # self.model[-1]  # Detect() module
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
-        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
-        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
+        """Initialize box biases; class scores come from text-embedding similarity, so cv3 keeps its defaults."""
+        for a in self.cv2:
             a[-1].bias.data[:] = 1.0  # box
-            # b[-1].bias.data[:] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 
 class LRPCHead(nn.Module):
@@ -1056,7 +1133,18 @@ class LRPCHead(nn.Module):
         return linear
 
     def forward(self, cls_feat: torch.Tensor, loc_feat: torch.Tensor, conf: float) -> tuple[tuple, torch.Tensor]:
-        """Process classification and localization features to generate detection proposals."""
+        """Process classification and localization features to generate detection proposals.
+
+        Args:
+            cls_feat (torch.Tensor): Classification features with shape (B, C, H, W).
+            loc_feat (torch.Tensor): Localization features with shape (B, C, H, W).
+            conf (float): Proposal filter confidence threshold; 0 keeps every anchor (static export).
+
+        Returns:
+            loc (torch.Tensor): Box regression output of the localization module.
+            cls (torch.Tensor): Class scores with shape (B, num_classes, N) for the N kept anchors.
+            mask (torch.Tensor | None): Boolean mask of kept anchors, or None when `conf` is 0 and the head is enabled.
+        """
         if self.enabled:
             if not conf:  # static export, every anchor passes the proposal filter
                 cls_feat = self.vocab(cls_feat.flatten(2).transpose(-1, -2))
@@ -1064,7 +1152,7 @@ class LRPCHead(nn.Module):
             pf_score = self.pf(cls_feat)[0, 0].flatten(0)
             mask = pf_score.sigmoid() > conf
             cls_feat = cls_feat.flatten(2).transpose(-1, -2)
-            cls_feat = self.vocab(cls_feat[:, mask] if conf else cls_feat * mask.unsqueeze(-1).int())
+            cls_feat = self.vocab(cls_feat[:, mask])
             return self.loc(loc_feat), cls_feat.transpose(-1, -2), mask
         else:
             cls_feat = self.vocab(cls_feat)
@@ -1109,17 +1197,24 @@ class YOLOEDetect(Detect):
     is_fused = False
 
     def __init__(
-        self, nc: int = 80, embed: int = 512, with_bn: bool = False, reg_max=16, end2end=False, ch: tuple = (), **kwargs, # (CP/IRIT): Add open configuration parameters
+        self,
+        nc: int = 80,
+        embed: int = 512,
+        with_bn: bool = True,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+        **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
         Args:
             nc (int): Number of classes.
             embed (int): Embedding dimension.
-            with_bn (bool): Whether to use batch normalization in contrastive head.
+            with_bn (bool): Whether to use batch normalization in contrastive head. Must be True.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))
@@ -1137,7 +1232,7 @@ class YOLOEDetect(Detect):
                 for x in ch
             )
         )
-        self.cv4 = nn.ModuleList(BNContrastiveHead(embed, **kwargs) if with_bn else ContrastiveHead(**kwargs) for _ in ch) # (CP/IRIT): Add open configuration parameters
+        self.cv4 = nn.ModuleList(BNContrastiveHead(embed, **kwargs) for _ in ch) # (CP/IRIT): Add open configuration parameters
         if end2end:
             self.one2one_cv3 = copy.deepcopy(self.cv3)  # overwrite with new cv3
             self.one2one_cv4 = copy.deepcopy(self.cv4)
@@ -1147,8 +1242,13 @@ class YOLOEDetect(Detect):
         self.embed = embed
 
     @smart_inference_mode(False)  # fused layers stay in the model, so they must not be inference tensors
-    def fuse(self, txt_feats: torch.Tensor = None):
-        """Fuse text features with model weights for efficient inference."""
+    def fuse(self, txt_feats: torch.Tensor | None = None):
+        """Fuse text features with model weights for efficient inference.
+
+        Args:
+            txt_feats (torch.Tensor, optional): Text prompt embeddings to fuse into the classification heads. If None,
+                only the unused detection branch is removed.
+        """
         if txt_feats is None:  # remove the unused detection branch
             super().fuse()
             return
@@ -1216,7 +1316,15 @@ class YOLOEDetect(Detect):
         return vpe
 
     def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
-        """Process features with class prompt embeddings to generate detections."""
+        """Process features with class prompt embeddings to generate detections.
+
+        Args:
+            x (list[torch.Tensor]): Feature maps from each detection level followed by class prompt embeddings with
+                shape (B, nc, embed).
+
+        Returns:
+            (dict | torch.Tensor | tuple): Same outputs as `Detect.forward`.
+        """
         if hasattr(self, "lrpc"):  # for prompt-free inference
             return self.forward_lrpc(x[:3])
         return super().forward(x)
@@ -1263,16 +1371,16 @@ class YOLOEDetect(Detect):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
+        """Return the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
         return {"box_head": self.cv2, "cls_head": self.cv3, "contrastive_head": self.cv4}
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {"box_head": self.one2one_cv2, "cls_head": self.one2one_cv3, "contrastive_head": self.one2one_cv4}
 
     def forward_head(self, x, box_head, cls_head, contrastive_head):
-        """Concatenates and returns predicted bounding boxes, class probabilities, and contrastive scores."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and contrastive scores."""
         assert len(x) == 4, f"Expected 4 features including 3 feature maps and 1 text embeddings, but got {len(x)}."
         if box_head is None or cls_head is None:  # for fused inference
             return {}
@@ -1331,10 +1439,10 @@ class YOLOESegment(YOLOEDetect):
         nm: int = 32,
         npr: int = 256,
         embed: int = 512,
-        with_bn: bool = False,
-        reg_max=16,
-        end2end=False,
-        ch: tuple = (),
+        with_bn: bool = True,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
         **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLOESegment with class count, mask parameters, and embedding dimensions.
@@ -1344,10 +1452,10 @@ class YOLOESegment(YOLOEDetect):
             nm (int): Number of masks.
             npr (int): Number of protos.
             embed (int): Embedding dimension.
-            with_bn (bool): Whether to use batch normalization in contrastive head.
+            with_bn (bool): Whether to use batch normalization in contrastive head. Must be True.
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, embed, with_bn, reg_max, end2end, ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         self.nm = nm
@@ -1361,12 +1469,12 @@ class YOLOESegment(YOLOEDetect):
 
     @property
     def one2many(self):
-        """Returns the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
+        """Return the one-to-many head components, here for v3/v5/v8/v9/v11 backward compatibility."""
         return {"box_head": self.cv2, "cls_head": self.cv3, "mask_head": self.cv5, "contrastive_head": self.cv4}
 
     @property
     def one2one(self):
-        """Returns the one-to-one head components."""
+        """Return the one-to-one head components."""
         return {
             "box_head": self.one2one_cv2,
             "cls_head": self.one2one_cv3,
@@ -1381,7 +1489,11 @@ class YOLOESegment(YOLOEDetect):
         return {"mask_coefficient": mc if index is None else mc[..., index]}
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor] | dict[str, torch.Tensor]:
-        """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+        """Return predictions with mask prototypes.
+
+        Returns raw predictions with prototypes attached in training, `(outputs, proto)` in export mode, and
+        `((outputs, proto), raw predictions)` otherwise.
+        """
         outputs = super().forward(x)
         preds = outputs[1] if isinstance(outputs, tuple) else outputs
         proto = self.proto(x[0])  # mask protos
@@ -1408,20 +1520,18 @@ class YOLOESegment(YOLOEDetect):
         mask_head: torch.nn.Module,
         contrastive_head: torch.nn.Module,
     ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and mask coefficients."""
+        """Concatenate and return predicted bounding boxes, class probabilities, and mask coefficients."""
         preds = super().forward_head(x, box_head, cls_head, contrastive_head)
         if mask_head is not None:
             bs = x[0].shape[0]  # batch size
             preds["mask_coefficient"] = torch.cat([mask_head[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)
         return preds
 
-    def fuse(self, txt_feats: torch.Tensor = None):
+    def fuse(self, txt_feats: torch.Tensor | None = None):
         """Fuse text features with model weights for efficient inference."""
         super().fuse(txt_feats)
-        if txt_feats is None:  # remove training-only prototype layers
-            if hasattr(self.proto, "fuse"):
-                self.proto.fuse()
-            return
+        if txt_feats is None and hasattr(self.proto, "fuse"):  # remove training-only prototype layers
+            self.proto.fuse()
 
 
 class YOLOESegment26(YOLOESegment):
@@ -1435,10 +1545,10 @@ class YOLOESegment26(YOLOESegment):
         nm (int): Number of masks. Defaults to 32.
         npr (int): Number of prototype channels. Defaults to 256.
         embed (int): Embedding dimensionality. Defaults to 512.
-        with_bn (bool): Whether to use Batch Normalization. Defaults to False.
+        with_bn (bool): Whether to use Batch Normalization. Must be True.
         reg_max (int): Maximum number of DFL channels. Defaults to 16.
         end2end (bool): Whether to use end-to-end detection mode. Defaults to False.
-        ch (tuple[int, ...]): Input channels for each scale.
+        ch (list[int] | tuple[int, ...]): Input channels for each scale.
 
     Attributes:
         nm (int): Number of segmentation masks.
@@ -1454,10 +1564,10 @@ class YOLOESegment26(YOLOESegment):
         nm: int = 32,
         npr: int = 256,
         embed: int = 512,
-        with_bn: bool = False,
-        reg_max=16,
-        end2end=False,
-        ch: tuple = (),
+        with_bn: bool = True,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
         **kwargs, # (CP/IRIT): Add open configuration parameters
     ):
         """Initialize YOLOESegment26 with class count, mask parameters, and embedding dimensions."""
@@ -1472,7 +1582,11 @@ class YOLOESegment26(YOLOESegment):
             self.one2one_cv5 = copy.deepcopy(self.cv5)
 
     def forward(self, x: list[torch.Tensor]) -> tuple | list[torch.Tensor] | dict[str, torch.Tensor]:
-        """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+        """Return predictions with mask prototypes.
+
+        Returns raw predictions with prototypes attached in training, `(outputs, proto)` in export mode, and
+        `((outputs, proto), raw predictions)` otherwise.
+        """
         outputs = YOLOEDetect.forward(self, x)
         preds = outputs[1] if isinstance(outputs, tuple) else outputs
         proto = self.proto([xi.detach() for xi in x], return_semantic=False)  # mask protos
@@ -1529,6 +1643,7 @@ class RTDETRDecoder(nn.Module):
     """
 
     export = False  # export mode
+    format = None  # export format
     max_det = 300  # max detections per image
     shapes = []
     anchors = torch.empty(0)
@@ -1538,7 +1653,7 @@ class RTDETRDecoder(nn.Module):
     def __init__(
         self,
         nc: int = 80,
-        ch: tuple = (512, 1024, 2048),
+        ch: list[int] | tuple[int, ...] = (512, 1024, 2048),
         hd: int = 256,  # hidden dim
         nq: int = 300,  # num queries
         ndp: int = 4,  # num decoder points
@@ -1559,17 +1674,17 @@ class RTDETRDecoder(nn.Module):
 
         Args:
             nc (int): Number of classes.
-            ch (tuple): Channels in the backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channels in the backbone feature maps.
             hd (int): Dimension of hidden layers.
             nq (int): Number of query points.
-            ndp (int): Number of decoder points.
+            ndp (int): Number of sampling points per attention head per feature level in the decoder.
             nh (int): Number of heads in multi-head attention.
             ndl (int): Number of decoder layers.
             d_ffn (int): Dimension of the feed-forward networks.
             dropout (float): Dropout rate.
-            act (nn.Module): Activation function.
-            eval_idx (int): Evaluation index.
-            nd (int): Number of denoising.
+            act (nn.Module, optional): Activation function. Defaults to nn.ReLU() if None.
+            eval_idx (int): Index of the decoder layer used for inference; negative values count from the end.
+            nd (int): Number of denoising queries.
             label_noise_ratio (float): Label noise ratio.
             box_noise_scale (float): Box noise scale.
             learnt_init_query (bool): Whether to learn initial query embeddings.
@@ -1623,9 +1738,9 @@ class RTDETRDecoder(nn.Module):
             batch (dict, optional): Batch information for training.
 
         Returns:
-            outputs (tuple | torch.Tensor): During training, returns a tuple of bounding boxes, scores, and other
-                metadata. During inference, returns a tensor of shape (bs, num_queries, 6) containing bounding boxes,
-                confidence scores, and class labels.
+            (tuple | torch.Tensor): During training, a tuple of (dec_bboxes, dec_scores, enc_bboxes, enc_scores,
+                dn_meta). During inference, a tensor of shape (bs, k, 6) with [cx, cy, w, h, score, class_index] (see
+                `postprocess`), returned alone in export mode and otherwise as a (predictions, raw outputs) tuple.
         """
         from ultralytics.models.utils.ops import get_cdn_group
 
@@ -1676,7 +1791,7 @@ class RTDETRDecoder(nn.Module):
 
         Returns:
             (torch.Tensor): Processed predictions with shape (batch_size, num_queries, 6), limited to max_det during
-                export, and last dimension format [cx, cy, w, h, max_class_prob, class_index].
+                export, and last dimension format [cx, cy, w, h, score, class_index].
         """
         k = min(self.num_queries, self.max_det) if self.export else self.num_queries
         k = (
@@ -1707,8 +1822,9 @@ class RTDETRDecoder(nn.Module):
             eps (float, optional): Small value for numerical stability.
 
         Returns:
-            anchors (torch.Tensor): Generated anchor boxes.
-            valid_mask (torch.Tensor): Valid mask for anchors.
+            anchors (torch.Tensor): Anchor boxes in inverse-sigmoid (logit) space with shape (1, sum(h * w), 4), set to
+                inf where invalid.
+            valid_mask (torch.Tensor): Boolean mask of valid anchors with shape (1, sum(h * w), 1).
         """
         anchors = []
         for i, (h, w) in enumerate(shapes):
@@ -1768,9 +1884,9 @@ class RTDETRDecoder(nn.Module):
 
         Returns:
             embeddings (torch.Tensor): Query embeddings for decoder.
-            refer_bbox (torch.Tensor): Reference bounding boxes.
-            enc_bboxes (torch.Tensor): Encoded bounding boxes.
-            enc_scores (torch.Tensor): Encoded scores.
+            refer_bbox (torch.Tensor): Reference bounding boxes as unnormalized logits.
+            enc_bboxes (torch.Tensor): Encoder top-k bounding boxes, sigmoid-normalized.
+            enc_scores (torch.Tensor): Encoder top-k class logits.
         """
         bs = feats.shape[0]
         if self.dynamic or self.shapes != shapes:
@@ -1864,12 +1980,12 @@ class v10Detect(Detect):
         >>> outputs = v10_detect(x)
     """
 
-    def __init__(self, nc: int = 80, ch: tuple = (), **kwargs): # (CP/IRIT): Add open configuration parameters
+    def __init__(self, nc: int = 80, ch: list[int] | tuple[int, ...] = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the v10Detect object with the specified number of classes and input channels.
 
         Args:
             nc (int): Number of classes.
-            ch (tuple): Tuple of channel sizes from backbone feature maps.
+            ch (list[int] | tuple[int, ...]): Channel sizes from backbone feature maps.
         """
         super().__init__(nc, end2end=True, ch=ch, **kwargs) # (CP/IRIT): Add open configuration parameters
         c3 = max(ch[0], min(self.nc, 100))  # channels
@@ -1897,6 +2013,7 @@ class SemanticSegment(nn.Module):
         stride (torch.Tensor): Feature map strides.
         export (bool): Export mode flag.
         format (str): Export format.
+        bake_argmax (bool): Whether TensorRT or Hailo exports bake the argmax class map into the output.
         classifier (nn.Sequential): Final convolutional classifier head.
         aux_head (nn.Sequential | None): Auxiliary classifier on P4 for deep supervision.
     """
@@ -1905,12 +2022,12 @@ class SemanticSegment(nn.Module):
     format = None  # export format
     bake_argmax = False  # export: emit [B, H, W] class map (TensorRT>=10 and multi-class Hailo-10/15)
 
-    def __init__(self, nc=19, ch=(), **kwargs):
+    def __init__(self, nc: int = 19, ch: list[int] | tuple[int, ...] = (), **kwargs): # (CP/IRIT): Add open configuration parameters
         """Initialize the semantic segmentation head.
 
         Args:
             nc (int): Number of semantic classes.
-            ch (tuple): Tuple of channel sizes from neck feature maps (P3, P4).
+            ch (list[int] | tuple[int, ...]): Channel sizes from neck feature maps (P3, P4).
         """
         super().__init__()
         self.nc = nc
