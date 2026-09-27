@@ -347,10 +347,7 @@ class Detect(nn.Module):
         return scores[..., None], (index % nc)[..., None].float(), self._gather(ori_index, index // nc)
 
     def fuse(self) -> None:
-        """Remove the one2many head for inference optimization."""
-        self.cv2 = self.cv3 = None
-        if self.use_km_scores:
-            self.cv3_km = None
+        """Remove the unused detection branch for inference."""
         end2end = self.end2end
         for name in tuple(self._modules):
             if name.startswith("one2one_"):
