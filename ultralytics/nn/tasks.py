@@ -2021,6 +2021,7 @@ def parse_model(d, ch, verbose=True, **kwargs): # (CP/IRIT): Add open configurat
         depth, width, max_channels = scales[scale]
 
     restricted = _SafeLoad.restricted()
+    default_act = Conv.default_act  # restore before returning: Conv.default_act is process-wide state
     if act:
         # redefine default activation, i.e. Conv.default_act = torch.nn.SiLU(). Under restricted loading, resolve the
         # spec without eval() (see _SafeLoad.activation).
@@ -2209,6 +2210,7 @@ def parse_model(d, ch, verbose=True, **kwargs): # (CP/IRIT): Add open configurat
         if i == 0:
             ch = []
         ch.append(c2)
+    Conv.default_act = default_act
     return torch.nn.Sequential(*layers), sorted(save)
 
 

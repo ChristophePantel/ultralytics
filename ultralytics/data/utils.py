@@ -233,7 +233,7 @@ def check_image(im_file: str) -> tuple[str, tuple[int, int]]:
     shape = exif_size(im)  # image size
     shape = (shape[1], shape[0])  # hw
     assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
-    assert im.format.lower() in IMG_FORMATS, f"Invalid image format {im.format}. {FORMATS_HELP_MSG}"
+    assert im.format.lower() in IMG_FORMATS | {"jpeg2000"}, f"Invalid image format {im.format}. {FORMATS_HELP_MSG}"
     if im.format.lower() in {"jpg", "jpeg"}:
         with open(im_file, "rb") as f:
             f.seek(-2, 2)
@@ -348,7 +348,8 @@ def verify_image_label(args: tuple) -> list:
             with open(lb_file, encoding="utf-8") as f:
                 # Extract the various data items from each line
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                # TODO (CP/IRIT): why not 5 (cls, x, y, w, h)
+                if nkpt and not keypoint:  # pose labels for a box task: keep the box, drop the keypoints
+                    lb = [x[:5] if len(x) == 5 + nkpt * ndim else x for x in lb]
                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
                     assert not any(len(x) == 5 for x in lb), "labels mix segment and detection rows"
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
@@ -709,7 +710,9 @@ def check_det_dataset(dataset: str, autodownload: bool = True, split: str = "") 
                 raise FileNotFoundError(m)
             t = time.time()
             r = None  # success
-            if s.startswith("http") and s.endswith(".zip"):  # URL
+            if s.startswith("http") and s.endswith(
+                (".zip", ".tar", ".gz", ".tgz", ".xz", ".bz2", ".txz", ".tbz2")
+            ):  # URL
                 safe_download(url=s, dir=DATASETS_DIR, delete=True)
             elif s.startswith("bash "):  # bash script
                 LOGGER.info(f"Running {s} ...")
