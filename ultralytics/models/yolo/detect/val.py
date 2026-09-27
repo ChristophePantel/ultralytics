@@ -519,17 +519,20 @@ class DetectionValidator(BaseValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        device = preds["scores"].device
-        dtype = preds["scores"].dtype
-        batch_scores = batch["scores"].to( device = device, dtype = dtype)
-        pred_scores = preds["scores"]
-        bce = self.scores_bce( batch_scores, pred_scores)
-        # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
-        if self.use_km_metrics:
-            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix ).cpu().numpy()}
+        if self.use_scores:
+            device = preds["scores"].device
+            dtype = preds["scores"].dtype
+            batch_scores = batch["scores"].to( device = device, dtype = dtype)
+            pred_scores = preds["scores"]
+            bce = self.scores_bce( batch_scores, pred_scores)
+            # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
+            if self.use_km_metrics:
+                matched = self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix )
+            else:
+                matched = self.match_predictions(preds["cls"], batch["cls"], iou, bce)
         else:
-            result = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou, bce).cpu().numpy()}
-        return result
+            matched = self.match_predictions(preds["cls"], batch["cls"], iou)
+        return {"tp": matched.cpu().numpy()}
 
     def scores_bce(self, batch_scores, prediction_scores):
         """Compute binary cross entropy between expected scores and predicted scores.

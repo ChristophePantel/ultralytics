@@ -1041,9 +1041,9 @@ def ap_per_class(
         # nt[ci] is the number of times the label c appears (in GT) - number of ground truth objects for class c 
         n_l = nt[ci]  # number of labels in GT
         # Array (N,IoI_threshold) with value 1 if the prediction (class and bounding box) is correct and 0 if it is erroneous (the predicted class is c)
-        # tp_i = tp[i,:].astype(int)
+        tp_i = tp[i,:].astype(int)
         # Array (N,IoI_threshold) with value 0 if the prediction (class and bounding box) is correct and 1 if it is erroneous (the predicted class is c)
-        # c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
+        c_tp_i = 1 - tp_i # contains the line where the class c was predicted but either the bounding box or the class c is incorrect (vector)
 
         # n_p returns the number of times the class c has been predicted - number of predicted objects for class c
         n_p = i.sum()  # number of predictions
@@ -1345,12 +1345,13 @@ class DetMetrics(SimpleClass, DataExportMixin):
         summary: Generate a summarized representation of per-class detection metrics as a list of dictionaries.
     """
 
-    def __init__(self, names: dict[int, str] | None = None) -> None:
+    def __init__(self, names: dict[int, str] | None = None, use_scores = False) -> None:
         """Initialize a DetMetrics instance with class names.
 
         Args:
             names (dict[int, str], optional): Dictionary of class names.
         """
+        self.use_scores = use_scores
         # Dictionary that maps class_id -> class_name
         self.names = names if names is not None else {}
         # Metric aggregator (handles AP, Precision, Recall)
@@ -1362,9 +1363,10 @@ class DetMetrics(SimpleClass, DataExportMixin):
 
         # DONE (CP/IRIT): Adding scores, both predicted and target
         # tp => true positives, conf => confidences, pred_cls => predicted classes, pred_scores => predicted_scores, target_cls => Ground Truth class, target_scorse => GT scores, target_image
-        self.stats = {"tp": [], # fn=[], 
-                          "conf": [], "pred_cls": [], "pred_scores": [], "target_cls": [], "target_scores": [], "target_img": []}
-
+        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+        if self.use_scores:
+            self.starts["pred_scores"] = []
+            self.starts["target_scores"] = []
         # Number of targets per class (computed later)
         self.nt_per_class = None
 

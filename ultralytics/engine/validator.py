@@ -323,7 +323,7 @@ class BaseValidator:
 
     # TODO (CP/IRIT): Adapt to use knowledge model.
     def match_predictions(
-        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor, use_scipy: bool = False, compatibility_threshold :int = 0, compatibility_matrix = None
+        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, bce: torch.Tensor = None, use_scipy: bool = False, compatibility_threshold :int = 0, compatibility_matrix = None
     ) -> torch.Tensor:
         """Match predictions to ground truth objects using IoU.
 
