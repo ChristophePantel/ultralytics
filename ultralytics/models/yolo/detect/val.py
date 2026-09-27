@@ -120,13 +120,13 @@ class DetectionValidator(BaseValidator):
         batch["img"] = (batch["img"].half() if self.args.quantize == 16 else batch["img"].float()) / 255
         
         # TODO(CP/IRIT): manage "scores" in the same way
-        keys = {"batch_idx", "cls", "bboxes"}
-        if self.use_scores:
-            keys.add("scores")
-            if self.use_km:
-                keys.add("variant")
-        for k in keys:
-            batch[k] = batch[k].to(self.device, non_blocking=True)
+        # keys = {"batch_idx", "cls", "bboxes"}
+        # if self.use_scores:
+        #     keys.add("scores")
+        #     if self.use_km:
+        #         keys.add("variant")
+        # for k in keys:
+        #     batch[k] = batch[k].to(self.device, non_blocking=True)
 
         return batch
 
@@ -175,7 +175,7 @@ class DetectionValidator(BaseValidator):
             # class_variants, variant_to_class = km.variants(class_codes,inverted_full_composition)
             # generalized_class_variants = km.generalize(class_codes,class_variants,self.refinement)
             self.class_variants = km.encode_variants(self.nc, self.variants)
-        self.no_detection = []
+        # self.no_detection = []
         self.end2end = getattr(model, "end2end", False)
         native_model = model.model if getattr(model, "format", None) == "pt" else model
         if self.end2end and hasattr(native_model, "set_head_attr"):
@@ -516,6 +516,9 @@ class DetectionValidator(BaseValidator):
             (dict[str, np.ndarray]): Dictionary containing 'tp' key with correct prediction matrix of shape (N, 10) for
                 10 IoU levels.
         """
+        print(batch["cls"].shape, preds["cls"].shape)
+        if preds["cls"].shape[0] != 0:
+            pass
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])

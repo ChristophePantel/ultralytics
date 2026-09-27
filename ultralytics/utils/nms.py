@@ -227,11 +227,11 @@ def non_max_suppression(
                     # selected_class_from_variant = selected_variant.to(cpu).apply_(variant_to_class.get).to(class_variants.device)
                     # neq_indexes, neq_values = torch.where(selected_class_from_variant != selected_class)
                     # TODO (CP/IRIT): Duplicate bounding boxes for each class in each selected variant, keep the variant index for the fusion phase 
-                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc + 1/var + nc + extra
+                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc/scores + 1/var + nc/km_scores + extra
                     x = torch.cat((box[i], x[i, 4 + j, None], selected_classes_from_variants, selected_scores, selected_variants, selected_km_scores, mask[i]), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
                 else: # use_variant_selection
                     # TODO (CP/IRIT): When variants are not in use, the class index is returned as variant index
-                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc + 1/var + nc + extra
+                    # (CP/IRIT): size 4/box + 1/conf + 1/cls + nc/scores + 1/var + nc + extra
                     x = torch.cat((box[i], x[i, 4 + j, None], j[:, None], selected_scores, selected_class, selected_km_scores, mask[i]), 1) # box[i] box of the i-th prediction, selected_image_prediction[i, 4+j] score of the j-th class in the i-th prediction, j[:] class number, cls[i] scores of the i-th prediction, mask[i] extra data of the i-th prediction
             else: # use_km_scores
                 # (CP/IRIT): size 4/box + 1/conf + 1/cls + mask
@@ -245,7 +245,6 @@ def non_max_suppression(
             x = torch.cat((box, conf, j.float(), mask), 1)[filt]
             if return_idxs:
                 xk = xk[filt]
-        
 
         # Filter by class
         if classes is not None:
