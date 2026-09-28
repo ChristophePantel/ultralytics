@@ -88,7 +88,7 @@ Ultralytics Platform manages storage efficiently:
 Reference datasets using the `ul://` URI format (see [Using Platform Datasets](../api/index.md#using-platform-datasets)):
 
 ```bash
-yolo train data=ul://username/datasets/my-dataset
+yolo train model=yolo26n.pt data=ul://username/datasets/my-dataset
 ```
 
 This allows training on the platform's datasets from any machine with your [API key](../account/api-keys.md) configured.
@@ -123,7 +123,7 @@ Dataset pages can show up to six tabs, depending on the dataset state and your p
 
 ### Clustering
 
-Explore your dataset as an interactive 2D scatter plot where visually similar images sit close together — useful for surfacing clusters, duplicates, and outliers, and for inspecting how splits or classes are distributed across your data. Lasso a region of the plot to filter the gallery to those images. Analysis needs between 20 and 200,000 non-errored images. The same embeddings let you [find similar images](datasets.md#find-similar-images) in public datasets and add them to yours. See [Clustering](datasets.md#clustering) for details.
+Explore your dataset as an interactive 2D scatter plot where visually similar images sit close together — useful for surfacing clusters, duplicates, and outliers, and for inspecting how splits or classes are distributed across your data. Lasso a region of the plot to filter the gallery to those images. Analysis needs between 20 and 200,000 non-errored images. The same embeddings let you [find similar images](datasets.md#find-similar-images) in public, your own, and team datasets and add them to yours. See [Clustering](datasets.md#clustering) for details.
 
 ### Statistics and Visualization
 
