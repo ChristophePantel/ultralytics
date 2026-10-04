@@ -38,7 +38,7 @@ Here is a short description of each format and when to reach for it. For the ful
 
 - **PyTorch** (`.pt`): The native training and inference format, offering maximum flexibility and GPU acceleration through NVIDIA CUDA or [AMD ROCm](../integrations/amd.md) — ideal for research and prototyping with no export step required.
 - **[TorchScript](../integrations/torchscript.md)** (`torchscript`): Serializes the model for a Python-free C++ runtime, suited to production systems where Python is unavailable.
-- **[ONNX](../integrations/onnx.md)** (`onnx`): A framework-agnostic interchange format with broad cross-platform and hardware support through ONNX Runtime.
+- **[ONNX](../integrations/onnx.md)** (`onnx`): A framework-agnostic interchange format with broad cross-platform and hardware support through ONNX Runtime, including NVIDIA GPUs through CUDA and [AMD GPUs through MIGraphX](../integrations/amd.md).
 - **[OpenVINO](../integrations/openvino.md)** (`openvino`): Intel's toolkit for optimized inference on Intel CPUs, integrated GPUs, and NPUs, common in IoT and [edge computing](https://www.ultralytics.com/glossary/edge-computing).
 - **[TensorRT](../integrations/tensorrt.md)** (`engine`): NVIDIA's high-performance runtime delivering top-tier GPU inference with FP16 and INT8 optimization.
 - **[CoreML](../integrations/coreml.md)** (`coreml`): Apple's on-device format for iOS, macOS, watchOS, and tvOS, using the Apple Neural Engine.
@@ -57,7 +57,7 @@ Here is a short description of each format and when to reach for it. For the ful
 - **[DEEPX](../integrations/deepx.md)** (`deepx`): Targets DEEPX NPU hardware with INT8 quantization for embedded edge inference.
 - **[Qualcomm QNN](../integrations/qnn.md)** (`qnn`): On-device inference on Snapdragon Hexagon NPU, Adreno GPU, and CPU through the Qualcomm AI stack.
 
-The [Hailo integration](../integrations/hailo.md) exports YOLO detection, segmentation, semantic segmentation, depth estimation, classification, pose, and OBB models directly to Hailo HEF; see its compatibility table for validated models and targets. The [Ambarella integration](../integrations/ambarella.md) follows an ONNX-first workflow and compiles ONNX exports to the AmbaPB format with Ambarella's CVflow toolchain for CVflow® SoCs such as the CV72, optionally using SpongeTorch compression-aware training. The [Huawei Ascend integration](../integrations/ascend.md) compiles ONNX exports to the `.om` offline format with the CANN ATC compiler for FP16 inference on Ascend AI Processors.
+The [Hailo integration](../integrations/hailo.md) exports YOLO detection, segmentation, semantic segmentation, depth estimation, classification, pose, and OBB models directly to Hailo HEF; see its compatibility table for validated models and targets. The [Ambarella integration](../integrations/ambarella.md) follows an ONNX-first workflow and compiles ONNX exports to the AmbaPB format with Ambarella's CVflow toolchain for CVflow® SoCs such as the CV72, optionally using SpongeTorch compression-aware training. The [Huawei Ascend integration](../integrations/ascend.md) compiles ONNX exports to the `.om` offline format with the CANN ATC compiler for FP16 inference on Ascend AI Processors. For AMD Xilinx Zynq UltraScale+, Kria and Versal devices, native export is coming soon, and the [AMD Xilinx guide](../integrations/xilinx.md) shows how to deploy today with AMD Vitis AI.
 
 ## Deployment Options Compared
 
