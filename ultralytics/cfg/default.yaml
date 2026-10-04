@@ -63,7 +63,7 @@ km_decomposition_exclusion_weight: 1.0 # (float) weight of the decomposition exc
 
 # Segmentation
 overlap_mask: True # (bool) merge instance masks into one mask during training (segment only)
-mask_ratio: 4 # (int) mask downsample ratio (segment only)
+mask_ratio: 4 # (int) training mask downsample ratio (segment only), does not change predicted mask resolution
 
 # Classification
 dropout: 0.0 # (float) dropout for classification head (classify only)
