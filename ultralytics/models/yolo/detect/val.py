@@ -530,8 +530,11 @@ class DetectionValidator(BaseValidator):
             dtype = preds["scores"].dtype
             batch_scores = batch["scores"].to( device = device, dtype = dtype)
             pred_scores = preds["scores"]
+            print(batch_scores.shape,pred_scores.shape)
+            if batch_scores.shape != pred_scores.shape:
+                pass
             bce = self.scores_bce( batch_scores, pred_scores)
-            # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction
+            # TODO (CP/IRIT): preds["cls"] values must be adapted to many class prediction and to variants
             if self.use_km_metrics:
                 matched = self.match_predictions(preds["cls"], batch["cls"], iou, bce, compatibility_threshold=self.km_metrics_threshold, compatibility_matrix=self.class_compatibility_matrix )
             else:

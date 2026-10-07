@@ -543,14 +543,12 @@ def verify_image_label(args: tuple) -> tuple | list:
         msg = f"{prefix}{im_file}: ignoring corrupt image/label: {e}"
         # returns a List 
         # return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg, scores, variant
+        results = [None, None, None, None, None, nm, nf, ne, nc, msg]
         if use_scores:
+            results.append(None)
             if use_km:
-                return [None, None, None, None, None, nm, nf, ne, nc, msg, None, None]
-            else:
-                return [None, None, None, None, None, nm, nf, ne, nc, msg, None]
-        else:
-            return [None, None, None, None, None, nm, nf, ne, nc, msg]
-
+                results.append(None)
+        return results
 
 def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[int, str]):
     """Visualize YOLO detection annotations (bounding boxes and class labels) on an image.

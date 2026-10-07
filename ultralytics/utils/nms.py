@@ -131,9 +131,14 @@ def non_max_suppression(
     # maximum only makes sense for a single class prediction
     # xc: anchor point candidates: maximum confidence is over threshold
     xc =  pred_scores.amax(1) > conf_thres  # candidates
+    
+    if (torch.where(xc)[0].shape[0] != 0):
+        pass
+    
     # Associate its index to each anchor point in each image from the batch
     # xinds: anchor point indexes
     xinds = torch.arange(prediction.shape[-1], device=prediction.device).expand(bs, -1)[..., None]  # to track idxs
+    
 
     # Settings
     # min_wh = 2  # (pixels) minimum box width and height
@@ -263,6 +268,8 @@ def non_max_suppression(
         n = x.shape[0]  # number of boxes
         if not n:  # no boxes
             continue
+        else:
+            pass
         if n > max_nms:  # excess boxes
             filt = x[:, 4].argsort(descending=True)[:max_nms]  # sort by confidence and remove excess boxes
             x = x[filt]
