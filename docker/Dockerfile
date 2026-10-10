@@ -4,13 +4,12 @@
 # Image is CUDA-optimized for YOLO single/multi-GPU training and inference
 
 # Start FROM PyTorch image https://hub.docker.com/r/pytorch/pytorch
-FROM pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+FROM pytorch/pytorch:2.14.1-cuda13.2-cudnn9-runtime
 
 # Set environment variables
 # Avoid DDP error "MKL_THREADING_LAYER=INTEL is incompatible with libgomp.so.1 library"
 # Suppress TensorFlow cuDNN, cuBLAS, and cuFFT Registration Warnings and PyTorch NNPACK warnings
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     UV_BREAK_SYSTEM_PACKAGES=1 \
