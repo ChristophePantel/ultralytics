@@ -336,7 +336,7 @@ class LoadImagesAndVideos:
         fps (float): Frames per second of the current video as reported by OpenCV.
         count (int): Counter for iteration, initialized at 0 during __iter__().
         ni (int): Number of images.
-        cv2_flag (int): OpenCV flag for image reading (grayscale or color/BGR).
+        cv2_flag (int): OpenCV flag for image reading (grayscale, color/BGR, or unchanged for other channel counts).
 
     Methods:
         __init__: Initialize the LoadImagesAndVideos object.
@@ -411,7 +411,7 @@ class LoadImagesAndVideos:
         self.mode = "video" if ni == 0 else "image"  # default to video if no images
         self.vid_stride = vid_stride  # video frame-rate stride
         self.bs = batch
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR  # grayscale or color (BGR)
+        self.cv2_flag = {1: cv2.IMREAD_GRAYSCALE, 3: cv2.IMREAD_COLOR}.get(channels, cv2.IMREAD_UNCHANGED)
         if any(videos):
             self._new_video(videos[0])  # new video
         else:
@@ -574,10 +574,10 @@ class LoadPilAndNumpy:
             raise TypeError(f"Expected PIL/np.ndarray image type, but got {type(im)}")
         pil = isinstance(im, Image.Image)
         if pil:
+            if im.mode.startswith("I;16"):  # convert() clips 16-bit values at 255, scale them like cv2 does
+                im = Image.fromarray((np.asarray(im) >> 8).astype(np.uint8))
             flag = "L" if channels == 1 else "RGB"
             im = np.asarray(im if im.mode == flag else im.convert(flag))  # convert() copies even when mode matches
-            if flag == "L":
-                im = im[..., None]
         im = np.atleast_3d(im)
         # Both routes validate here: a zero dimension divides by zero in LetterBox, and a batched array reads
         # shape[2] as a channel count it is not. Raised rather than asserted so `python -O` keeps the check, and
@@ -745,8 +745,6 @@ def get_best_youtube_url(url: str, method: str = "pytube") -> str | None:
 
     Notes:
         - Requires additional libraries based on the chosen method: pytubefix, pafy, or yt-dlp.
-        - The "pytube" and "yt-dlp" methods only return streams of at least 1080p resolution, and return None if
-          none is found.
         - For the "yt-dlp" method, it looks for formats with video codec, no audio, and *.mp4 extension.
     """
     if method == "pytube":
@@ -757,7 +755,7 @@ def get_best_youtube_url(url: str, method: str = "pytube") -> str | None:
         stream = (
             YouTube(url).streams.filter(file_extension="mp4", only_video=True).order_by("resolution").desc().first()
         )
-        if stream and int(stream.resolution[:-1]) >= 1080:  # check if highest resolution is at least 1080p
+        if stream:
             return stream.url
 
     elif method == "pafy":
@@ -773,9 +771,8 @@ def get_best_youtube_url(url: str, method: str = "pytube") -> str | None:
         with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
             info_dict = ydl.extract_info(url, download=False)  # extract info
         for f in reversed(info_dict.get("formats", [])):  # reversed because best is usually last
-            # Find a format with video codec, no audio, *.mp4 extension at least 1920x1080 size
-            good_size = (f.get("width") or 0) >= 1920 or (f.get("height") or 0) >= 1080
-            if good_size and f["vcodec"] != "none" and f["acodec"] == "none" and f["ext"] == "mp4":
+            # Find a format with video codec, no audio, *.mp4 extension
+            if f["vcodec"] != "none" and f["acodec"] == "none" and f["ext"] == "mp4":
                 return f.get("url")
 
 
