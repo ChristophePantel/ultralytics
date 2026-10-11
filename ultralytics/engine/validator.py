@@ -361,8 +361,6 @@ class BaseValidator:
             correct_class = distances <= compatibility_threshold
         else:
             correct_class = true_classes[:, None] == pred_classes
-        sz_correct_class = torch.numel(correct_class)
-        nz_correct_class = torch.count_nonzero(correct_class)
         # Only keeps the IoU of correct classes (set the incorrect ones to 0)
         iou = iou * correct_class  # zero out the wrong classes
         iou = iou.cpu().numpy()
@@ -370,10 +368,7 @@ class BaseValidator:
         if use_scipy:
             # Iterates over IoU thresholds
             for i, threshold in enumerate(thresholds):
-                iou_over_threshold = (iou >= threshold)
-                sz_iou_over_threshold = iou_over_threshold.size
-                nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
-                cost_matrix = iou * iou_over_threshold
+                cost_matrix = iou * (iou >= threshold)
                 if cost_matrix.any():
                     labels_idx, detections_idx = linear_sum_assignment(-cost_matrix)  # negate to maximize IoU
                     valid = cost_matrix[labels_idx, detections_idx] > 0
