@@ -335,7 +335,7 @@ class BaseValidator:
         """Match predictions to ground truth objects using IoU.
 
         Args:
-            pred_classes (torch.Tensor): Predicted class indices of shape (N,).
+            pred_classes (torch.Tensor): Predicted class indices of shape (N,), ordered by descending confidence.
             true_classes (torch.Tensor): Target class indices of shape (M,).
             iou (torch.Tensor): An MxN tensor containing the pairwise IoU values for ground truth (rows) and predictions
                 (columns).
@@ -366,12 +366,13 @@ class BaseValidator:
         # Only keeps the IoU of correct classes (set the incorrect ones to 0)
         iou = iou * correct_class  # zero out the wrong classes
         iou = iou.cpu().numpy()
-        # Iterates over IoU thresholds
-        for i, threshold in enumerate(self.iouv.cpu().tolist()):
-            iou_over_threshold = (iou >= threshold)
-            sz_iou_over_threshold = iou_over_threshold.size
-            nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
-            if use_scipy:
+        thresholds = self.iouv.cpu().numpy()
+        if use_scipy:
+            # Iterates over IoU thresholds
+            for i, threshold in enumerate(thresholds):
+                iou_over_threshold = (iou >= threshold)
+                sz_iou_over_threshold = iou_over_threshold.size
+                nz_iou_over_threshold = np.count_nonzero(iou_over_threshold)
                 cost_matrix = iou * iou_over_threshold
                 if cost_matrix.any():
                     labels_idx, detections_idx = linear_sum_assignment(-cost_matrix)  # negate to maximize IoU
@@ -382,20 +383,16 @@ class BaseValidator:
                             correct[detections_idx[valid], i] = labels_idx[valid]
                         else:
                             correct[detections_idx[valid], i] = True
-            else:
-                matches = np.nonzero(iou_over_threshold)  # IoU >= threshold and classes match
-                matches = np.array(matches).T
-                if matches.shape[0]:
-                    if matches.shape[0] > 1:
-                        matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                    correct[matches[:, 1].astype(int), i] = True
-                    # TODO (CP/IRIT): Check that code with respect to previous versions.
-                    if self.use_km_metrics:
-                        pred_classes[matches[:,1]] = true_classes[matches[:,0]]
-        result = torch.from_numpy(correct)
-        return result
+        else:
+            # TODO (CP/IRIT): Check that code with respect to previous versions.
+            # if self.use_km_metrics:
+            matched = np.zeros((iou.shape[0], len(thresholds)), dtype=bool)  # targets claimed at each threshold
+            for j in np.flatnonzero((iou >= thresholds.min()).any(0)):  # detections in descending confidence order
+                available = np.where(matched, 0, iou[:, j, None])  # IoU with each unclaimed target per threshold
+                k = available.argmax(0)  # best unclaimed target per threshold
+                correct[j] = available[k, range(len(thresholds))] >= thresholds
+                matched[k, range(len(thresholds))] |= correct[j]
+        return torch.from_numpy(correct)
 
     @smart_inference_mode(False)
     def get_model(self, model, trainer=None):
