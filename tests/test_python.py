@@ -472,25 +472,30 @@ def test_load_tensor_uint8():
 
 
 def test_predict_gray_and_4ch(tmp_path):
-    """Test YOLO prediction on SOURCE converted to grayscale and 4-channel images with various filenames."""
+    """Test YOLO prediction on grayscale, 4-channel, and EXIF-rotated images with various filenames."""
     im = Image.open(SOURCE)
 
     source_grayscale = tmp_path / "grayscale.jpg"
     source_rgba = tmp_path / "4ch.png"
     source_non_utf = tmp_path / "non_UTF_测试文件_tést_image.jpg"
     source_spaces = tmp_path / "image with spaces.jpg"
+    source_exif = tmp_path / "exif.jpg"
 
     im.convert("L").save(source_grayscale)  # grayscale
     im.convert("RGBA").save(source_rgba)  # 4-ch PNG with alpha
     im.save(source_non_utf)  # non-UTF characters in filename
     im.save(source_spaces)  # spaces in filename
+    exif = im.getexif()
+    exif[274] = 6  # stored landscape, displayed portrait
+    im.rotate(90, expand=True).save(source_exif, exif=exif)
 
     # Inference
     model = YOLO(MODEL)
-    for f in source_rgba, source_grayscale, source_non_utf, source_spaces:
+    for f in source_rgba, source_grayscale, source_non_utf, source_spaces, source_exif:
         for source in Image.open(f), cv2.imread(str(f)), f:
             results = model(source, save=True, verbose=True, imgsz=32)
             assert len(results) == 1, f"Expected 1 result for {f.name}, got {len(results)}"
+            np.testing.assert_array_equal(results[0].orig_img, cv2.imread(str(f)))
         f.unlink()  # cleanup
 
 
@@ -503,11 +508,10 @@ def test_predict_ndarray_channels():
     assert gray.ndim == 2, "Expected a 2D grayscale array for this test"
     assert len(model(source=gray, imgsz=32, verbose=False)) == 1  # 2D ndarray auto-expanded to 3 channels
     assert len(model(source=gray.astype("float64"), imgsz=32, verbose=False)) == 1  # non-OpenCV dtype also works
-    bgra = np.zeros((8, 8, 4), dtype="float64")
-    assert LoadPilAndNumpy(bgra, channels=3).im0[0].shape == (8, 8, 3)  # non-OpenCV dtype also falls back for BGRA
     for source_channels, model_channels in ((1, 3), (2, 1), (2, 3), (3, 1), (4, 1), (4, 3)):
-        im = np.zeros((8, 8, source_channels), dtype=np.uint8)
-        assert LoadPilAndNumpy(im, channels=model_channels).im0[0].shape == (8, 8, model_channels)
+        for dtype in (np.uint8, np.float64):  # float64 is a dtype cvtColor rejects
+            im = np.zeros((8, 8, source_channels), dtype=dtype)
+            assert LoadPilAndNumpy(im, channels=model_channels).im0[0].shape == (8, 8, model_channels)
 
 
 def test_single_check_channel_order_and_contiguity():
@@ -1619,6 +1623,36 @@ def test_utils_torchutils():
 
     profile_ops(x, [m], n=3)
     time_sync()
+
+
+@pytest.mark.parametrize("momentum", [0.0, 0.9])
+def test_rmsprop_checkpoint_preserves_square_avg(tmp_path, momentum):
+    """RMSprop checkpoint compression must preserve small second moments and resumed update magnitudes."""
+    from copy import deepcopy
+
+    from ultralytics.utils.patches import torch_load
+    from ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
+
+    param = torch.nn.Parameter(torch.ones(1))
+    optimizer = torch.optim.RMSprop([param], lr=0.01, momentum=momentum)
+    for _ in range(100):
+        param.grad = torch.full_like(param, 1e-4)
+        optimizer.step()
+    state = deepcopy(optimizer.state_dict())
+    checkpoint = tmp_path / "optimizer.pt"
+    torch.save(convert_optimizer_state_dict_to_fp16(deepcopy(state)), checkpoint)
+    saved = torch_load(checkpoint)
+    assert torch.equal(saved["state"][0]["square_avg"], state["state"][0]["square_avg"])
+
+    updates = []
+    for checkpoint_state in (state, saved):
+        resumed_param = torch.nn.Parameter(torch.ones(1))
+        resumed = torch.optim.RMSprop([resumed_param], lr=0.01, momentum=momentum)
+        resumed.load_state_dict(checkpoint_state)
+        resumed_param.grad = torch.full_like(resumed_param, 1e-6)
+        resumed.step()
+        updates.append(1 - resumed_param.detach())
+    assert torch.allclose(updates[0], updates[1], rtol=1e-3, atol=1e-6)
 
 
 def test_rtdetr_remap_cls_by_names():
