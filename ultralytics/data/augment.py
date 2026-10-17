@@ -46,6 +46,8 @@ class BaseTransform:
         if (dataset != None):
             self.use_km = dataset.use_km
             self.use_scores = dataset.use_scores
+        else:
+            pass
 
     def __call__(self, labels):
         """Apply transformation to labels dict.
