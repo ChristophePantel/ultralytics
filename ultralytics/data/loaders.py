@@ -139,11 +139,11 @@ class LoadStreams:
                     raise ConnectionError(f"{st}Failed to open {s}")
                 w = int(self.caps[i].get(cv2.CAP_PROP_FRAME_WIDTH))
                 h = int(self.caps[i].get(cv2.CAP_PROP_FRAME_HEIGHT))
-                fps = self.caps[i].get(cv2.CAP_PROP_FPS)  # warning: may return 0 or nan
+                fps = self.caps[i].get(cv2.CAP_PROP_FPS)  # warning: may return 0, nan or a 90 kHz RTP clock rate
                 self.frames[i] = max(int(self.caps[i].get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float(
                     "inf"
                 )  # infinite stream fallback
-                self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
+                self.fps[i] = fps if 0 < fps < 1000 else 30  # 30 FPS fallback
 
                 success, im = self.caps[i].read()  # guarantee first frame
                 if not success or im is None:
@@ -574,6 +574,7 @@ class LoadPilAndNumpy:
             raise TypeError(f"Expected PIL/np.ndarray image type, but got {type(im)}")
         pil = isinstance(im, Image.Image)
         if pil:
+            im = ImageOps.exif_transpose(im)
             if im.mode.startswith("I;16"):  # convert() clips 16-bit values at 255, scale them like cv2 does
                 im = Image.fromarray((np.asarray(im) >> 8).astype(np.uint8))
             flag = "L" if channels == 1 else "RGB"
@@ -597,6 +598,7 @@ class LoadPilAndNumpy:
                 return cv2.cvtColor(im[..., 0], cv2.COLOR_GRAY2BGR)
             return np.repeat(im, channels, axis=2)
         if channels == 1:
+            im = im.astype(np.float32, copy=False) if im.dtype.kind == "f" else im
             return cv2.cvtColor(im, cv2.COLOR_BGRA2GRAY if c == 4 else cv2.COLOR_BGR2GRAY)[..., None]
         return cv2.cvtColor(im, cv2.COLOR_BGRA2BGR) if u8 and c == 4 else np.ascontiguousarray(im[..., :3])
 
@@ -707,7 +709,7 @@ def autocast_list(source: list[Any]) -> list[Image.Image | np.ndarray]:
     files = []
     for im in source:
         if isinstance(im, (str, Path)):  # filename or uri
-            if str(im).startswith("http"):  # requests follows HTTP 308 redirects that urllib lacks pre-3.11
+            if str(im).lower().startswith(("https://", "http://")):  # requests: urllib pre-3.11 lacks 308 redirects
                 import requests  # scoped as slow import
 
                 im = BytesIO(requests.get(im).content)
