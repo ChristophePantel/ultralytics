@@ -1339,7 +1339,8 @@ Accepted fields: `name`, `description`, `visibility`, `metadata`, `tags`, `licen
 ```
 
 Send an empty `metadata` object (`{}`) to clear it. Project metadata uses the same 128-character key and
-500,000-character serialized-object limits as dataset metadata.
+500,000-character serialized-object limits as dataset metadata. A `name` change that changes the slug returns `409`
+while any model in the project is starting training.
 
 ### Delete Project
 
@@ -1378,6 +1379,8 @@ GET /api/models/{owner}/{project}
 ```
 
 **Python SDK:** `client.models.list(owner, project)`
+
+Listed models omit their validation `plots` and `trainResults`; [Get Model](#get-model) returns them.
 
 **Query Parameters:**
 
@@ -1444,7 +1447,8 @@ PATCH /api/models/{owner}/{project}/{model}
 Accepted fields include `name`, `description`, `color`, `metadata`, `status`, `license`, `datasetSlug`, `trainArgs`,
 `trainResults`, `epochs`, `bestEpoch`, `bestFitness`, `version`, `trainingError`, and `starred`. Passing `projectId` on its
 own moves the model into another project of the same owner; the response returns the model's `slug` in the destination,
-`renamed: true` when that slug was already taken there, and `409` while the model is still training.
+`renamed: true` when that slug was already taken there, and `409` while the model is still training. A `name` change
+that changes the slug returns `409` while training is starting.
 
 ```json
 {
@@ -1786,7 +1790,7 @@ Each format honors only the options in its **Arguments** column of the export ta
 YOLO11 sizes other than nano return `400`.
 
 **Response (`201`):** `id`, `format`, `status` (`queued` or `running`), `region`, and `gpuType` for TensorRT exports.
-An equivalent export that is already in flight returns `409`.
+While an export of the same format is in flight for the model, a new request returns `409` whatever its `args`.
 
 **Supported Formats:**
 
@@ -2641,17 +2645,19 @@ GET /api/explore/search
 
 **Query Parameters:**
 
-| Parameter | Type    | Description                                                                                                                                                                               |
-| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`       | string  | Search term (max 200 chars); for datasets, text matches first, then datasets whose images match                                                                                           |
-| `type`    | string  | `all` (default), `projects`, `datasets`, or `images` (ignores `sort`)                                                                                                                     |
-| `sort`    | string  | `relevance` (default), `newest`, `oldest`, `stars`, `name-asc`, `name-desc`, `count-desc`, `count-asc`; `relevance` ranks dataset matches for `q` by search score, otherwise newest first |
-| `offset`  | int     | Results to skip (default: 0)                                                                                                                                                              |
-| `limit`   | int     | Maximum results per resource type (default: 20, max: 100)                                                                                                                                 |
-| `task`    | string  | Comma-separated task filters: `detect`, `segment`, `semantic`, `depth`, `classify`, `pose`, `obb`                                                                                         |
-| `license` | string  | Comma-separated license identifiers such as `CC-BY-4.0,MIT`; images match their dataset's license                                                                                         |
-| `author`  | string  | Owner username filter                                                                                                                                                                     |
-| `starred` | boolean | Return only content starred by the authenticated caller; requires an API key                                                                                                              |
+| Parameter   | Type    | Description                                                                                                                                                                               |
+| ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`         | string  | Search term (max 200 chars); for datasets, text matches first, then datasets whose images match                                                                                           |
+| `type`      | string  | `all` (default), `projects`, `datasets`, or `images` (ignores `sort`)                                                                                                                     |
+| `sort`      | string  | `relevance` (default), `newest`, `oldest`, `stars`, `name-asc`, `name-desc`, `count-desc`, `count-asc`; `relevance` ranks dataset matches for `q` by search score, otherwise newest first |
+| `offset`    | int     | Results to skip (default: 0)                                                                                                                                                              |
+| `limit`     | int     | Maximum results per resource type (default: 20, max: 100)                                                                                                                                 |
+| `task`      | string  | Comma-separated task filters: `detect`, `segment`, `semantic`, `depth`, `classify`, `pose`, `obb`                                                                                         |
+| `license`   | string  | Comma-separated license identifiers such as `CC-BY-4.0,MIT`; images match their dataset's license                                                                                         |
+| `author`    | string  | Owner username filter                                                                                                                                                                     |
+| `starred`   | boolean | Return only content starred by the authenticated caller; requires an API key                                                                                                              |
+| `minImages` | int     | Return only datasets with at least this many images; ignored by `type=images`                                                                                                             |
+| `maxImages` | int     | Return only datasets with at most this many images; ignored by `type=images`                                                                                                              |
 
 **Response:** `projects`, `datasets`, and `hasMore`. `type=images` returns its matches in `images` instead, best match
 first, each with its source `dataset` and a 0–1 similarity `score`; it needs `q` and searches public datasets, plus your
