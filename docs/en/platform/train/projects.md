@@ -51,7 +51,7 @@ The project page has two main areas:
 | **Models Sidebar** | Resizable list of all models in the project, with checkboxes for chart selection |
 | **Main Panel**     | Charts dashboard or comparison table (toggle between views)                      |
 
-A controls row above both areas holds the model search box, **Compare with AI** (Editor role or higher, once the project has two or more completed models), the **Diff** toggle (table view only, badged with how many columns differ), the view-options dropdown, and the view-mode toggle.
+A controls row above both areas holds the model search box, **Compare with AI** (Editor role or higher, once the project has two or more completed models), the **Diff** toggle (table view only, badged with how many columns differ), the view-options dropdown, and the view-mode toggle. On desktop, the controls row and models sidebar stay in view while the charts or table scroll.
 
 ![Ultralytics Platform Project Page Sidebar And Charts](https://cdn.ul.run/i/4ebc844d81876e0499e28cf106859b4a.avif)<!-- screenshot -->
 
@@ -95,14 +95,14 @@ The controls row above the models list provides:
 
 - **Search** to filter models by name
 - **Status filter**: All, Completed, Untrained, Running, Starting, or Failed
-- **Group by**: None or Task — grouping applies in Compact and Table modes
+- **Group by**: None or Task (default), in every view mode
 - **Sort by**: Created, Name, or Size, each ascending or descending
 
 ### Models Sidebar
 
 The resizable sidebar lists all models in the project:
 
-- **Checkboxes** to select which models appear in charts and the comparison table
+- **Checkboxes** to select which models appear in charts and the comparison table; charts leave out models hidden by the search, the status filter, or a collapsed task group
 - **Drag and drop** `.pt` files directly onto the sidebar to upload models ([model upload details](models.md#upload-model))
 - **Training progress** shown for running models (epoch count and progress bar)
 - **Model color** picker, used consistently across every chart
@@ -139,7 +139,7 @@ Clone a public project to your own account:
 
 1. Visit the public project page
 2. Click **Clone Project**
-3. The project and its completed models are copied to your workspace; you choose the clone's visibility in the clone dialog
+3. The project and its completed models are copied to your workspace (only the selected ones when you select some in the model list); you choose the clone's visibility in the clone dialog
 
 !!! info "Clone Behavior"
 
@@ -187,6 +187,8 @@ Switch to table view for side-by-side comparison of training arguments and final
 
 ## Upload Models
 
+You can also [import models from W&B](../integrations/weights-biases.md) into automatically created or existing projects.
+
 Upload existing `.pt` model files:
 
 1. **Drag and drop** files onto the project page or models sidebar
@@ -224,6 +226,8 @@ Remove a project you no longer need:
 
 1. Open the **More actions** menu in the header and select **Delete Project**
 2. Confirm deletion
+
+To delete several projects at once, select their rows in the table view of the **Projects** tab on your profile (or on a team profile where you are an Editor or above) and click **Delete (N)**, choose it from the right-click menu, or press `Cmd/Ctrl+Delete`.
 
 !!! warning "Cascading Delete"
 

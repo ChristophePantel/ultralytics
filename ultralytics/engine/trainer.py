@@ -54,6 +54,7 @@ from ultralytics.utils.torch_utils import (
     TORCH_1_11,
     TORCH_2_0,
     TORCH_2_4,
+    TORCH_2_8,
     TORCH_2_13,
     EarlyStopping,
     ModelEMA,
@@ -291,11 +292,13 @@ class BaseTrainer:
             os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"  # set to enforce timeout
         elif device_type == "xpu" and not (hasattr(dist, "is_xccl_available") and dist.is_xccl_available()):
             raise RuntimeError("Multi-XPU training requires XCCL, which is not available in this PyTorch build.")
+        backend = {"npu": "hccl", "xpu": "xccl"}.get(device_type, "nccl" if dist.is_nccl_available() else "gloo")
         dist.init_process_group(
-            backend={"npu": "hccl", "xpu": "xccl"}.get(device_type, "nccl" if dist.is_nccl_available() else "gloo"),
+            backend=backend,
             timeout=timedelta(seconds=10800),  # 3 hours
             rank=RANK,
             world_size=self.world_size,
+            **({"device_id": self.device} if backend == "nccl" and TORCH_2_8 else {}),  # bind NCCL to this rank's GPU
         )
 
     def _build_train_pipeline(self):
@@ -881,12 +884,14 @@ class BaseTrainer:
 
         cfg, weights = self.model, None
         ckpt = None
-        if str(self.model).endswith(".pt"):
+        if str(self.model).lower().endswith(".pt"):
             weights, ckpt = load_checkpoint(self.model)
             cfg = weights.yaml
-        if isinstance(self.args.pretrained, (str, Path)) and not self.resume:
+        if self.resume:  # load_checkpoint() returns the student, rebuild a distillation run from its wrapper
+            weights = ckpt.get("ema") or ckpt.get("model")
+        elif isinstance(self.args.pretrained, (str, Path)):
             weights, _ = load_checkpoint(self.args.pretrained)
-        elif self.args.pretrained is False and not self.resume:
+        elif self.args.pretrained is False:
             weights = None
 
         # rebuild DistillationModel from resuming checkpoint
@@ -1183,7 +1188,7 @@ class BaseTrainer:
             lr_fit = round(0.002 * 5 / (4 + nc), 6)  # lr0 fit equation to 6 decimal places
             name, lr, momentum = ("MuSGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
             self.args.optimizer, self.args.lr0 = name, lr  # resume rebuilds this choice from train_args
-            self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
+            self.args.warmup_bias_lr = 0.0  # start bias warmup at zero
 
         use_muon = name == "MuSGD"
         for module_name, module in unwrap_model(model).named_modules():

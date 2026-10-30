@@ -487,7 +487,7 @@ class Results(SimpleClass, DataExportMixin):
     def plot(
         self,
         conf: bool = True,
-        line_width: float | None = None,
+        line_width: int | None = None,
         font_size: float | None = None,
         font: str = "Arial.ttf",
         pil: bool = False,
@@ -508,7 +508,7 @@ class Results(SimpleClass, DataExportMixin):
 
         Args:
             conf (bool): Whether to plot detection confidence scores.
-            line_width (float | None): Line width of bounding boxes. If None, scaled to image size.
+            line_width (int | None): Line width of bounding boxes. If None, scaled to image size.
             font_size (float | None): Font size for text. If None, scaled to image size.
             font (str): Font to use for text.
             pil (bool): Whether to return the image as a PIL Image.
@@ -713,8 +713,7 @@ class Results(SimpleClass, DataExportMixin):
             d = self.depth.data
             d = d[d > 0]
             return f"depth {float(d.min()):.2f}-{float(d.max()):.2f}m, " if len(d) else "depth (no valid pixels), "
-        if self.semantic_mask is not None:
-            return ""
+        return ""
 
     def save_txt(self, txt_file: str | Path, save_conf: bool = False) -> str:
         """Save detection results to a text file.
@@ -819,7 +818,8 @@ class Results(SimpleClass, DataExportMixin):
         if self.depth is not None:
             LOGGER.warning("Depth task does not support `save_crop`.")
             return
-        for d in (self.obb if self.obb is not None else self.boxes).cpu():  # one host transfer avoids per-box GPU syncs
+        boxes = self.obb if self.obb is not None else self.boxes
+        for d in boxes.cpu() if boxes is not None else []:  # one host transfer avoids per-box GPU syncs
             save_one_box(
                 d.xyxyxyxy if self.obb is not None else d.xyxy,
                 self.orig_img.copy(),

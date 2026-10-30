@@ -365,8 +365,8 @@ class BasePredictor:
             )
             dataset = self.dataset
             batches = ((batch, dataset) for batch in dataset)
-            if (  # overlap loading with GPU work; each batch carries a snapshot of the loader's mode, frame and fps
-                self.device.type == "cuda"
+            if (  # overlap loading with inference; each batch carries a snapshot of the loader's mode, frame and fps
+                (self.device.type == "cuda" or getattr(self.model, "prefetch", False))
                 and isinstance(dataset, LoadImagesAndVideos)
                 and (dataset.nf > dataset.ni or len(dataset) > 1)
             ):
@@ -476,6 +476,8 @@ class BasePredictor:
         )
 
         self.device = self.model.device  # update device
+        if self.device.type == "cpu" and self.model.format in {"onnx", "openvino"}:
+            torch.set_num_threads(min(2, torch.get_num_threads()))  # pre/postprocess only; idle OpenMP threads spin
         self.model.eval()
         self.model = attempt_compile(self.model, device=self.device, mode=self.args.compile)
 
