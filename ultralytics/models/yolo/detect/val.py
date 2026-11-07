@@ -60,7 +60,7 @@ class DetectionValidator(BaseValidator):
         self.is_lvis = False
         self.class_map = None
         self.args.task = "detect"
-        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP50-95
         self.niou = self.iouv.numel()
         if self.use_km_metrics:
             self.metrics = KnowledgeModelDetMetrics(threshold=self.km_metrics_threshold)
