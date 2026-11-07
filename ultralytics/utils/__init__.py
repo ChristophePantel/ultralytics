@@ -777,8 +777,8 @@ class YAML:
             {'names': {0: 'person'}, 'nc': 1}
         """
         n, c = self._peek()
-        if c == "---" or c.startswith("--- "):  # document start, possibly with content on the same line
-            self.lines[self.i] = c[4:]
+        while c[:1] == "%" or c == "---" or c.startswith("--- "):  # %YAML/%TAG directives, then the document start
+            self.lines[self.i] = "" if c[0] == "%" else c[4:]
             n, c = self._peek()
         v = None if n < 0 else self._node(n, c, -1)
         if (m := self._peek())[0] >= 0:  # a single document only, so '...' and later content raise
@@ -807,7 +807,7 @@ class YAML:
         """Split a 'key: value' line into (key, rest), or return None if it is not a mapping entry."""
         if c[0] in "\"'":
             m = cls._QUOTED.match(c)
-            tail = c[m.end() :] if m else ""
+            tail = c[m.end() :].lstrip(" \t") if m else ""
             return (cls._unquote(m[0]), tail[1:].strip(" \t")) if tail[:1] == ":" and tail[1:2] in {"", " "} else None
         j = c.find(": ")
         j = len(c) - 1 if j < 0 and c[-1] == ":" else j
@@ -1263,7 +1263,7 @@ IS_JETSON = is_jetson()
 IS_JUPYTER = is_jupyter()
 IS_PIP_PACKAGE = is_pip_package()
 IS_RASPBERRYPI = is_raspberrypi()
-IS_DEBIAN, IS_DEBIAN_BOOKWORM, IS_DEBIAN_TRIXIE = is_debian([None, "bookworm", "trixie"])
+IS_DEBIAN, IS_DEBIAN_BOOKWORM = is_debian([None, "bookworm"])
 IS_UBUNTU = is_ubuntu()
 GIT = GitRepo()
 USER_CONFIG_DIR = get_user_config_dir()  # Ultralytics settings dir

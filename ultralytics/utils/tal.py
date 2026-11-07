@@ -113,7 +113,7 @@ class TaskAlignedAssigner(nn.Module):
             https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
         """
         # get batch size
-        self.bs = pd_scores.shape[0]
+        self.bs, _, self.num_classes = pd_scores.shape
         # get the maximum number of boxes in an image
         self.n_max_boxes = gt_bboxes.shape[1]
         device = gt_bboxes.device

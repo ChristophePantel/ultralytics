@@ -58,13 +58,13 @@ Using the maximum batch size supported by your GPU, you can fully take advantage
   <strong>Watch:</strong> How to Speed Up Ultralytics YOLO26 Inference by 2× with Batch Processing | Python & GPU | MLOps 🚀
 </p>
 
-With respect to YOLO26, you can set the `batch` parameter in the [Train mode arguments](../modes/train.md) to match your GPU capacity. On a single accelerator, `batch=-1` profiles the model and picks a [batch size](https://www.ultralytics.com/glossary/batch-size) targeting roughly 60% memory utilization; a fraction such as `batch=0.70` targets a different share. Multi-GPU runs require an explicit global batch size that is a multiple of the device count. On CPU and Apple silicon, AutoBatch warns and falls back to `batch=16`.
+With respect to YOLO26, you can set the `batch` parameter in the [Train mode arguments](../modes/train.md) to match your GPU capacity. On a single accelerator, `batch=-1` profiles the model and picks a [batch size](https://www.ultralytics.com/glossary/batch-size) targeting roughly 60% memory utilization; a fraction such as `batch=0.70` targets a different share. Multi-GPU runs require an explicit global batch size of at least the device count. On CPU and Apple silicon, AutoBatch warns and falls back to `batch=16`.
 
 ### Subset Training
 
 Subset training is a practical strategy that involves training your model on a smaller set of data that represents the larger dataset. It can save time and resources, especially during initial model development and testing. If you are running short on time or experimenting with different model configurations, subset training is a good option.
 
-When it comes to YOLO26, you can implement subset training with the `fraction` parameter. Use a ratio such as `fraction=0.1` for 10% of the training data, an integer such as `fraction=300` for exactly 300 training images, or a `[train, val, test]` list such as `fraction=[300, 100, 0]` to limit each split and skip test images. Two-item lists such as `[300, 100]` leave the test split full. NDJSON datasets select evenly spaced records before downloading them, so repeated runs reuse the exact subset. This technique supports quick iterations and tuning before committing to the full dataset.
+When it comes to YOLO26, you can implement subset training with the `fraction` parameter. Use a ratio such as `fraction=0.1` for 10% of the training data, an integer such as `fraction=300` for exactly 300 training images, or a `[train, val, test]` list such as `fraction=[300, 100, 0]` to limit each split and skip test images. Two-item lists such as `[300, 100]` leave the test split full. NDJSON datasets select evenly spaced records before downloading them, so repeated runs reuse the exact subset. Image-folder classification datasets also select evenly spaced samples. For other image-folder datasets, `fraction` selects the first N images in sorted image-path order, not a random sample, so manually curate subsets when ordering could exclude sources or classes. When preparing train/val splits, keep near-duplicate groups entirely within one split.
 
 ### Multi-scale Training
 
@@ -192,7 +192,7 @@ Training computer vision models involves following good practices, optimizing yo
 
 ### How can I improve GPU utilization when training a large dataset with Ultralytics YOLO?
 
-To improve GPU utilization, set the `batch` parameter to the maximum size supported by your GPU. On a single accelerator, `batch=-1` profiles the model and targets roughly 60% memory utilization. It falls back to `batch=16` on CPU and Apple silicon, while multi-GPU runs require an explicit global batch size that is a multiple of the device count. For further information, refer to the [Train mode arguments](../modes/train.md).
+To improve GPU utilization, set the `batch` parameter to the maximum size supported by your GPU. On a single accelerator, `batch=-1` profiles the model and targets roughly 60% memory utilization. It falls back to `batch=16` on CPU and Apple silicon, while multi-GPU runs require an explicit global batch size of at least the device count. For further information, refer to the [Train mode arguments](../modes/train.md).
 
 ### What is mixed precision training, and how do I enable it in YOLO26?
 

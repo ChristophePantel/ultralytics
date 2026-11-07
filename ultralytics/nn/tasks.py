@@ -90,7 +90,7 @@ from ultralytics.utils import (
     colorstr,
     emojis,
 )
-from ultralytics.utils.checks import REMOTE_FILE_PREFIXES, check_file, check_requirements, check_suffix, check_yaml
+from ultralytics.utils.checks import REMOTE_FILE_PREFIXES, check_file, check_suffix, check_yaml
 from ultralytics.utils.loss import (
     DepthLoss26,
     E2ELoss,
@@ -443,7 +443,7 @@ class BaseModel(torch.nn.Module):
             v_src, v_tgt = csd[k], state_dict[k]
             if v_src.shape[1:] != v_tgt.shape[1:]:  # cls-conv input width differs across model scales; copy bias only
                 continue
-            v_tgt[valid] = v_src[idx[valid]].to(v_tgt.dtype)
+            v_tgt[valid] = v_src[idx[valid]].to(v_tgt)
             csd.pop(k)  # prevent intersect_dicts from copying these rows in the wrong (source) order
             remapped += 1
         if verbose and remapped:
@@ -1029,7 +1029,7 @@ class RTDETRDetectionModel(DetectionModel):
             v_src, v_tgt = csd[k], state_dict[k]
             if v_src.ndim != v_tgt.ndim or v_src.shape[1:] != v_tgt.shape[1:]:
                 continue
-            v_tgt[valid] = v_src[idx[valid]].to(v_tgt.dtype)
+            v_tgt[valid] = v_src[idx[valid]].to(v_tgt)
             csd.pop(k)  # prevent intersect_dicts from copying these rows in the wrong (source) order
             remapped += 1
         if verbose and remapped:
@@ -1862,9 +1862,9 @@ class _SafeLoad:
 def torch_safe_load(weight, safe_only=None):
     """Load a PyTorch checkpoint with torch.load(), handling legacy module paths and common load failures.
 
-    If a ModuleNotFoundError is raised for a third-party module (and `safe_only` is off), a warning is logged, the
-    missing module is installed via check_requirements(), and the load is retried. A corrupt cached official asset
-    requested by bare name is re-downloaded once; other unreadable files raise a TypeError.
+    A checkpoint that needs a missing third-party module raises a ModuleNotFoundError, and nothing is installed. A
+    corrupt cached official asset requested by bare name is re-downloaded once; other unreadable files raise a
+    TypeError.
 
     Args:
         weight (str | Path): The file path of the PyTorch model.
@@ -1979,18 +1979,7 @@ def torch_safe_load(weight, safe_only=None):
                     "Ultralytics model, i.e. 'yolo predict model=yolo26n.pt'"
                 )
             ) from e
-        if safe_only:
-            # Under weights_only loading, do not auto-install a module named by the checkpoint or fall back to a
-            # weights_only=False reload.
-            raise
-        LOGGER.warning(
-            f"{weight} appears to require '{e.name}', which is not in Ultralytics requirements."
-            f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
-            f"\nRecommended fixes are to train a new model using the latest 'ultralytics' package or to "
-            f"run a command with an official Ultralytics model, i.e. 'yolo predict model=yolo26n.pt'"
-        )
-        check_requirements(e.name)  # install missing module
-        ckpt = torch_load(file, map_location="cpu")
+        raise
 
     if isinstance(ckpt, torch.jit.ScriptModule):
         raise TypeError(torchscript_error)  # default path: torch.load dispatched to torch.jit.load and succeeded
