@@ -188,7 +188,7 @@ When exporting your YOLO26 model to ONNX format, you can customize the process u
 | `fraction` | `float`, `int`, or `list` | `1.0`    | Calibration subset as a ratio, image count, or `[train, val, test]` ratios/counts. Two-item lists leave `test` full, while `0` skips it.                                                                                                                                                                                                                                                   |
 | `dynamic`  | `bool`                    | `False`  | Allows dynamic input sizes, enhancing flexibility in handling varying image dimensions.                                                                                                                                                                                                                                                                                                    |
 | `simplify` | `bool`                    | `True`   | Simplifies the model graph with `onnxslim`, potentially improving performance and compatibility.                                                                                                                                                                                                                                                                                           |
-| `opset`    | `int`                     | `None`   | Specifies the ONNX opset version for compatibility with different ONNX parsers and runtimes. If not set, uses the latest supported version.                                                                                                                                                                                                                                                |
+| `opset`    | `int`                     | `None`   | Specifies the ONNX opset version for compatibility with different ONNX parsers and runtimes. If not set, uses opset `18` (lower on PyTorch < 2.4), capped at the installed `onnx` version.                                                                                                                                                                                                 |
 | `nms`      | `bool`, optional          | `None`   | Select raw output (`None`, default), embedded NMS (`True`), or the NMS-free head (`False`).                                                                                                                                                                                                                                                                                                |
 | `batch`    | `int`                     | `1`      | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                                                                                                                                                                                                                                    |
 | `device`   | `str`                     | `None`   | Specifies the device for exporting: GPU (`device=0`), CPU (`device=cpu`), MPS for Apple silicon (`device=mps`).                                                                                                                                                                                                                                                                            |
@@ -221,6 +221,21 @@ Once you've successfully exported your Ultralytics YOLO26 models to ONNX format,
 - **[ONNX Tutorials on GitHub](https://github.com/onnx/tutorials)**: A collection of comprehensive tutorials that cover various aspects of using and implementing ONNX models in different scenarios.
 
 - **[Triton Inference Server](../guides/triton-inference-server.md)**: Learn how to deploy your ONNX models with NVIDIA's Triton Inference Server for high-performance, scalable deployments.
+
+## Windows ML Inference
+
+On Windows 11 24H2 (build 26100) or newer with Python 3.10+, you can install `onnxruntime-windowsml` in a separate environment to let [Windows ML select execution providers](https://learn.microsoft.com/en-us/windows/ai/new-windows-ml/select-execution-providers) for your hardware. Install it instead of other ONNX Runtime builds, then use the same exported `.onnx` model with `YOLO("model.onnx")`. The backend preserves the PyTorch thread count and supplied session options, including an explicit provider policy. Without a supplied policy, Windows ML selects hardware for maximum performance, even when the PyTorch device is `cpu`. Measure prediction latency on your device before choosing this runtime; it is optional and is not installed by default.
+
+On integrated GPUs that share power with the CPU, idle PyTorch threads in preprocessing and postprocessing can slow Windows ML inference. Call `torch.set_num_threads(1)` before predicting to reduce this. It applies to the whole process, so other PyTorch models in that process also run on one thread.
+
+```python
+import torch
+
+from ultralytics import YOLO
+
+torch.set_num_threads(1)  # optional, measure on your device
+results = YOLO("yolo26n.onnx")("https://ultralytics.com/images/bus.jpg")
+```
 
 ## AMD GPU Inference with MIGraphX
 

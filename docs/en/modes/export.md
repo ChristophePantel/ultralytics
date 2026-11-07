@@ -105,7 +105,7 @@ Not every export format supports every precision. Explicit `quantize` requests e
 | TensorRT      | ✅                | ✅                | ✅         | ❌                | INT8 needs representative calibration data.                                                                                                                                                                                                             |
 | CoreML        | ✅¹               | ✅                | ✅         | ✅                | CoreML INT8 is weight quantization; W8A16 uses INT8 weights with FP16 activations. ¹Unset NMS ML Programs default to FP16, and segment/pose `nms=True` exports are always FP16.                                                                         |
 | Core AI       | ✅                | ✅                | ❌         | ❌                | FP32 by default or an FP16 `.aimodel` asset with `quantize=16`; no INT8 path.                                                                                                                                                                           |
-| TF SavedModel | ✅                | ❌                | ✅         | ❌                | INT8 export uses TensorFlow calibration.                                                                                                                                                                                                                |
+| TF SavedModel | ✅                | ❌                | ✅         | ❌                | INT8 goes to `.tflite` files beside an FP32 SavedModel.                                                                                                                                                                                                 |
 | TF GraphDef   | ✅                | ❌                | ❌         | ❌                | No export-time precision conversion.                                                                                                                                                                                                                    |
 | Edge TPU      | ❌                | ❌                | ✅ auto    | ❌                | Edge TPU requires INT8; it is auto-enabled when unset.                                                                                                                                                                                                  |
 | LiteRT        | ✅                | ❌                | ✅         | ✅                | Static INT8 (`8`) and `"w8a16"` (int8 weights + **int16** activations) use calibration data; also supports `"w8a32"` dynamic INT8 (no calibration). `quantize=16` is not a separate export; an FP32 model runs in FP16 at runtime via the GPU delegate. |
@@ -268,6 +268,8 @@ To enable this feature, use the `dynamic=True` flag during export:
 
 Dynamic input sizing is particularly useful for applications where input dimensions may vary, such as video processing or when handling images from different sources.
 
+A dynamic export loaded with `YOLO()` predicts and validates at its export `imgsz` (the longer side of a non-square export), as a PyTorch model uses its training `imgsz`. Pass `imgsz` to run it at another size.
+
 ### Why do exported model predictions differ from PyTorch on non-square images?
 
 PyTorch models and dynamic exports use [minimum-rectangle padding](../modes/predict.md#fixed-shape-vs-minimum-rectangle-rect) by default, while static exports pad to the full `imgsz`, so detections near the confidence threshold can differ. Use `rect=False` for native inference to match a static export, or export with `dynamic=True` where supported.
@@ -280,7 +282,7 @@ Understanding and configuring export arguments is crucial for optimizing model p
 - **`imgsz:`** Desired image size for the model input (e.g., `640` or `(height, width)`).
 - **`quantize:`** Quantization precision, such as `8`/`"int8"`, `16`/`"fp16"`, `32`/`"fp32"`, or the mixed weight/activation schemes `"w8a16"` and `"w8a32"` (LiteRT dynamic INT8) on supported formats. See [Quantization Options](#quantization-options).
 - **`dynamic:`** Accepts variable input sizes on formats that support dynamic shapes, such as ONNX, OpenVINO, and TensorRT.
-- **`nms:`** Selects raw outputs for external NMS (`None`), embedded NMS (`True`), or the NMS-free head (`False`).
+- **`nms:`** Selects raw outputs for external NMS (`None`; YOLO26 keeps its NMS-free head on Axelera), embedded NMS (`True`), or the NMS-free head (`False`).
 - **`device:`** Device used to trace the model during export, such as `cpu` or `0` for the first CUDA GPU; FP16 TorchScript requires a GPU.
 
 For deployment on specific hardware platforms, consider using specialized export formats like [TensorRT](../integrations/tensorrt.md) for NVIDIA GPUs, [CoreML](../integrations/coreml.md) for Apple devices, or [Edge TPU](../integrations/edge-tpu.md) for Google Coral devices.
@@ -291,7 +293,7 @@ When you export a YOLO model to formats like ONNX or TensorRT, the output tensor
 
 For **YOLO26 detection models** (e.g., `yolo26n.pt`) exported with `nms=False`, supported formats produce NMS-free output shaped like `(batch_size, max_detections, 6)` with `[x1, y1, x2, y2, confidence, class_id]` values. With the default `max_det=300`, this is commonly `(batch_size, 300, 6)`. Some constrained formats automatically fall back to the traditional output layout when end-to-end operators are unsupported.
 
-By default (`nms=None`), detection models including YOLO26 export raw one-to-many predictions: the output is typically a single tensor shaped like `(batch_size, 4 + num_classes, num_predictions)` where the channels represent box coordinates plus per-class scores, and `num_predictions` depends on the export input resolution (and can be dynamic). The [End-to-End Detection guide](../guides/end2end-detection.md) covers which formats keep the end-to-end output.
+By default (`nms=None`), detection models including YOLO26 export raw one-to-many predictions (YOLO26 keeps its NMS-free head on [Axelera](../integrations/axelera.md#supported-tasks)). The output is typically a single tensor shaped like `(batch_size, 4 + num_classes, num_predictions)` where the channels represent box coordinates plus per-class scores, and `num_predictions` depends on the export input resolution (and can be dynamic). The [End-to-End Detection guide](../guides/end2end-detection.md) covers which formats keep the end-to-end output.
 
 For **segmentation models** (e.g., `yolo26n-seg.pt`), you'll typically get two outputs: the first tensor shaped like `(batch_size, 4 + num_classes + mask_dim, num_predictions)` (boxes, class scores, and mask coefficients), and the second tensor shaped like `(batch_size, mask_dim, proto_h, proto_w)` containing mask prototypes used with the coefficients to generate instance masks. Sizes depend on the export input resolution (and can be dynamic).
 

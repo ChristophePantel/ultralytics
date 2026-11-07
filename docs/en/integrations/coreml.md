@@ -52,7 +52,7 @@ CoreML integrates directly with Apple's [Vision framework](https://developer.app
 ## Measured Performance
 
 End-to-end single-image inference for the standardized `v8.3.0` YOLO26n INT8 CoreML assets on an
-[iPhone 17 Pro](https://support.apple.com/en-us/125090) with 12 GB memory and iOS 26.5.2. Its A19 Pro has a 6-core CPU
+[iPhone 17 Pro](https://support.apple.com/en-us/125090) with 12 GB memory and iOS 27.0.1. Its A19 Pro has a 6-core CPU
 (2 Performance and 4 Efficiency cores), 6-core GPU with Neural Accelerators, and 16-core Neural Engine. Each cell
 shows the **total time** (preprocessing + inference + postprocessing, excluding
 annotation) with the per-stage split beneath it. On iOS, Vision performs input scaling inside the inference request,
@@ -60,15 +60,18 @@ so preprocessing is reported as 0 and its cost is included in inference.
 
 | Model         | Task     | size<br><sup>(pixels)</sup> | CPU<br><sup>Core ML `.cpuOnly`<br>(ms)</sup> | CPU + ANE preferred<br><sup>Core ML `.cpuAndNeuralEngine`<br>(ms)</sup> |
 | ------------- | -------- | --------------------------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| YOLO26n       | Detect   | 640                         | 9.2<br><sup>0.0 / 9.2 / 0.0</sup>            | **3.2**<br><sup>0.0 / 3.2 / 0.0</sup>                                   |
-| YOLO26n-seg   | Segment  | 640                         | 12.6<br><sup>0.0 / 12.0 / 0.5</sup>          | **4.8**<br><sup>0.0 / 4.2 / 0.6</sup>                                   |
-| YOLO26n-sem   | Semantic | 640                         | 9.7<br><sup>0.0 / 9.2 / 0.5</sup>            | **4.6**<br><sup>0.0 / 4.2 / 0.5</sup>                                   |
-| YOLO26n-depth | Depth    | 640                         | 25.0<br><sup>0.0 / 24.1 / 0.9</sup>          | **5.3**<br><sup>0.0 / 4.5 / 0.9</sup>                                   |
-| YOLO26n-cls   | Classify | 224                         | 2.2<br><sup>0.0 / 2.2 / 0.0</sup>            | **1.9**<br><sup>0.0 / 1.9 / 0.0</sup>                                   |
-| YOLO26n-pose  | Pose     | 640                         | 11.9<br><sup>0.0 / 11.9 / 0.0</sup>          | **3.9**<br><sup>0.0 / 3.9 / 0.0</sup>                                   |
-| YOLO26n-obb   | OBB      | 640                         | 10.6<br><sup>0.0 / 10.6 / 0.0</sup>          | **3.4**<br><sup>0.0 / 3.4 / 0.0</sup>                                   |
+| YOLO26n       | Detect   | 640                         | 8.8<br><sup>0.0 / 8.8 / 0.0</sup>            | **3.7**<br><sup>0.0 / 3.7 / 0.0</sup>                                   |
+| YOLO26n-seg   | Segment  | 640                         | 12.3<br><sup>0.0 / 11.7 / 0.6</sup>          | **4.9**<br><sup>0.0 / 4.3 / 0.6</sup>                                   |
+| YOLO26n-sem   | Semantic | 640                         | 9.3<br><sup>0.0 / 9.0 / 0.3</sup>            | **4.4**<br><sup>0.0 / 4.1 / 0.3</sup>                                   |
+| YOLO26n-depth | Depth    | 640                         | 26.0<br><sup>0.0 / 25.1 / 1.0</sup>          | **5.5**<br><sup>0.0 / 4.7 / 0.9</sup>                                   |
+| YOLO26n-cls   | Classify | 224                         | 4.1<br><sup>0.0 / 4.1 / 0.0</sup>            | **2.0**<br><sup>0.0 / 1.9 / 0.0</sup>                                   |
+| YOLO26n-pose  | Pose     | 640                         | 12.0<br><sup>0.0 / 12.0 / 0.0</sup>          | **4.0**<br><sup>0.0 / 4.0 / 0.0</sup>                                   |
+| YOLO26n-obb   | OBB      | 640                         | 10.7<br><sup>0.0 / 10.7 / 0.0</sup>          | **3.9**<br><sup>0.0 / 3.9 / 0.0</sup>                                   |
 
 - The exact `v8.3.0` release assets declare 224×224 inputs for classification and 640×640 for every other task.
+- On iOS 27.0.1, `.cpuOnly` inference of the `l` and `x` depth, pose, and OBB models crashes inside Core ML's CPU kernels
+  (`EXC_BAD_ACCESS` in `libBNNS`); the same models run with `.cpuAndNeuralEngine`, and every other task and size runs
+  on the CPU.
 - **Speed** values are **single-image burst latencies** — the mean of 15 runs after 3 warmup runs on `bus.jpg`, measured through the [iOS SDK's](https://github.com/ultralytics/yolo-ios-app) per-stage timing via the [Flutter plugin's](https://github.com/ultralytics/yolo-flutter-app) benchmark harness in profile mode (optimized native code). CPU/accelerator order alternated between tasks in one sequential sweep. CPU rows request Core ML `.cpuOnly`; CPU + ANE preferred rows request `.cpuAndNeuralEngine`, with final operation placement controlled by Core ML. Sustained real-time camera operation runs higher because it includes the capture and scaling pipeline plus thermal settling. A historical pre-standard camera sweep measured 11.3 ms/frame for YOLO26n detect and 16.5 ms/frame for YOLO26n Depth on the same device — see the [iOS SDK performance doc](https://github.com/ultralytics/yolo-ios-app/blob/main/docs/performance.md) for steady-state profiling.
 - Compare the Android CPU/GPU results in the [LiteRT integration](litert.md#measured-performance) and Snapdragon NPU results in the [Qualcomm QNN integration](qnn.md#measured-performance).
 
@@ -168,7 +171,7 @@ The CoreML format supports the [Export](../modes/export.md), [Predict](../modes/
 | ---------- | ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `format`   | `str`            | `'coreml'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                                                            |
 | `imgsz`    | `int` or `tuple` | `640`      | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                                                             |
-| `quantize` | `int` or `str`   | `None`     | Quantization precision (weight-only for CoreML): `16` (FP16), `8` (INT8), `"w8a16"` (INT8 weights with FP16 activations), or `32`/unset (FP32). NMS ML Programs use FP16 (for Xcode preview, and required by segment and pose); pass `32` to override on detect. Replaces the deprecated `half`/`int8` flags. |
+| `quantize` | `int` or `str`   | `None`     | Quantization precision: `16` (FP16), `8` or `"w8a16"` (identical: 8-bit k-means palettized weights with FP16 compute), or `32` or unset (FP32). NMS ML Programs use FP16 (for Xcode preview, and required by segment and pose); pass `32` to override on detect. Replaces the deprecated `half`/`int8` flags. |
 | `nms`      | `bool`, optional | `None`     | Select raw output (`None`, default), embedded NMS (`True`), or the NMS-free head (`False`). Embedded NMS supports detect, segment and pose with `dynamic=False`.                                                                                                                                              |
 | `dynamic`  | `bool`           | `False`    | Allows dynamic input sizes. Not supported for classification or RT-DETR models, and cannot be combined with `nms=True`.                                                                                                                                                                                       |
 | `batch`    | `int`            | `1`        | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode. Values above `1` require `dynamic=True`.                                                                                                                              |
@@ -180,7 +183,7 @@ For more details about the export process, visit the [Ultralytics documentation 
 
 CoreML chooses hardware via `MLModelConfiguration.computeUnits`. The Ultralytics iOS SDK defaults to `.cpuAndNeuralEngine` on iOS 16+ rather than `.all`: in a real-time camera app the GPU is already busy compositing the preview and overlays, so excluding it avoids contention and frame-time jitter while the ANE does the heavy lifting. Pin `.cpuOnly` only for compatibility testing — the table above shows what it costs.
 
-Running a CoreML model from Python on a **Mac host** (via Ultralytics or `coremltools`) follows the same rule: Ultralytics loads with `ComputeUnit.CPU_AND_NE` (macOS 13+, falling back to `CPU_ONLY` on older macOS), keeping inference on the Neural Engine (~3× faster than CPU). This also avoids a current macOS host limitation where the default `ComputeUnit.ALL` / `CPU_AND_GPU` — which add the GPU/MPSGraph compile path — **abort the process** with an `Error: MLIR pass manager failed` assertion on `coremltools` 9.x.
+Running a CoreML model from Python on a **Mac host** (via Ultralytics or `coremltools`) follows the same rule: Ultralytics loads with `ComputeUnit.CPU_AND_NE` (macOS 13+, falling back to `CPU_ONLY` on older macOS), keeping inference on the Neural Engine (~3× faster than CPU). This also avoids a current macOS host limitation where the default `ComputeUnit.ALL` / `CPU_AND_GPU` — which add the GPU/MPSGraph compile path — **abort the process** with an `Error: MLIR pass manager failed` assertion on `coremltools` 9.x. RT-DETR models are the exception: they load with `ComputeUnit.ALL`, because their FP16 accuracy drops on the Neural Engine alone.
 
 ## Deploying Exported YOLO26 CoreML Models
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,7 @@ from PIL import Image
 
 from ultralytics.cfg import QUANTIZE_ALIASES, TASK2DATA, _handle_deprecation, get_cfg, get_save_dir
 from ultralytics.engine.results import Results
+from ultralytics.nn.backends.base import BaseBackend
 from ultralytics.nn.tasks import BaseModel, guess_model_task, load_checkpoint, yaml_model_load
 from ultralytics.utils import (
     ARGV,
@@ -138,7 +140,7 @@ class Model(torch.nn.Module):
 
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
-        if str(model).endswith((".yaml", ".yml")):
+        if str(model).lower().endswith((".yaml", ".yml")):
             self._new(model, task=task, verbose=verbose, **kwargs) # (CP/IRIT): Add open configuration parameters
         else:
             self._load(model, task=task, **kwargs) # (CP/IRIT): Add open configuration parameters
@@ -262,7 +264,7 @@ class Model(torch.nn.Module):
             weights = checks.check_file(weights, download_dir=SETTINGS["weights_dir"])  # download and return local file
         weights = checks.check_model_file_from_stem(weights)  # add suffix, i.e. yolo26n -> yolo26n.pt
 
-        if str(weights).rpartition(".")[-1] == "pt":
+        if str(weights).rpartition(".")[-1].lower() == "pt":
             self.model, self.ckpt = load_checkpoint(weights)
             self.task = self.model.task
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
@@ -272,6 +274,8 @@ class Model(torch.nn.Module):
             self.model, self.ckpt = weights, None
             self.task = task or guess_model_task(weights)
             self.ckpt_path = weights
+            if imgsz := BaseBackend.read_metadata(weights).get("imgsz"):  # default to export imgsz like .pt train imgsz
+                self.overrides["imgsz"] = max(ast.literal_eval(str(imgsz)))
         self.overrides["model"] = model_uri if str(model_uri).startswith("ul://") else weights
         self.overrides["task"] = self.task
         self.model_name = weights
@@ -292,7 +296,7 @@ class Model(torch.nn.Module):
             >>> model = Model("yolo26n.onnx")
             >>> model._check_is_pytorch_model()  # Raises TypeError
         """
-        pt_str = isinstance(self.model, (str, Path)) and str(self.model).rpartition(".")[-1] == "pt"
+        pt_str = isinstance(self.model, (str, Path)) and str(self.model).rpartition(".")[-1].lower() == "pt"
         pt_module = isinstance(self.model, torch.nn.Module)
         if not (pt_module or pt_str):
             raise TypeError(
@@ -455,8 +459,7 @@ class Model(torch.nn.Module):
             >>> # Model is now fused and ready for optimized inference
         """
         self._check_is_pytorch_model()
-        # DistillationModel fuses to its student, so adopt the return
-        self.model = self.model.fuse(verbose=verbose, imgsz=imgsz)
+        self.model.fuse(verbose=verbose, imgsz=imgsz)
         self.predictor = None
         return self
 

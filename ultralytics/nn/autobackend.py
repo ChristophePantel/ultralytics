@@ -56,8 +56,8 @@ def check_class_names(names: list | dict) -> dict[int, str]:
     if isinstance(names, list):  # names is a list
         names = dict(enumerate(names))  # convert to dict
     if isinstance(names, dict):
-        # Convert 1) string keys to int, i.e. '0' to 0, and non-string values to strings, i.e. True to 'True'
-        names = {int(k): str(v) for k, v in names.items()}
+        # Convert string keys to int, i.e. '0' to 0, and non-string values to strings, i.e. True to 'True', in id order
+        names = dict(sorted({int(k): str(v) for k, v in names.items()}.items()))
         n = len(names)
         if not n:
             raise KeyError("0-class dataset, at least one class name is required in your dataset YAML.")
@@ -409,7 +409,7 @@ class AutoBackend(nn.Module):
         sf = export_formats()["Suffix"]
         if not is_url(p) and not isinstance(p, str):
             check_suffix(p, sf)
-        name = Path(p).name
+        name = Path(p).name.lower()
         # The suffix ending last wins, then the longest, i.e. 'best.pt.onnx' -> onnx, 'best_qnn.onnx' -> qnn
         matches = [
             (name.rfind(s) + len(s), len(s), f)
