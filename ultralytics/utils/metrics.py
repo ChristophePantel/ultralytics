@@ -435,7 +435,7 @@ class ConfusionMatrix(DataExportMixin):
         # format of batches {"bboxes": Tensor[M, 4] or Tensor[N, 5],"cls":    Tensor[M]}
         batch: dict[str, Any],
         conf: float = 0.25,
-        iou_thres: float = 0.45,
+        iou_thres: float = 0.5,
     ) -> None:
         """Update confusion matrix for object detection task.
          # TODO (CP/IRIT): Check that all TP are indeed TP with respect to pred/gt association...
@@ -447,8 +447,8 @@ class ConfusionMatrix(DataExportMixin):
             batch (dict[str, Any]): Batch dictionary containing ground truth data with 'bboxes' (Array[M, 4]| Array[M,
                 5]) and 'cls' (Array[M]) keys, where M is the number of ground truth objects.
             conf (float, optional): Confidence threshold for detections.
-            iou_thres (float, optional): IoU threshold for matching detections to ground truth. This is a matching
-                threshold, not the NMS `iou` argument, and the detection validator uses this 0.45 default.
+            iou_thres (float, optional): IoU threshold for matching detections to ground truth, the same criterion as
+                mAP50. This is a matching threshold, not the NMS `iou` argument.
 
         Notes:
             Matching is greedy and one-to-one: each detection claims its best unclaimed ground truth above

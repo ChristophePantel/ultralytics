@@ -140,15 +140,15 @@ class DetectionTrainer(BaseTrainer):
         """Set model attributes based on dataset information."""
         self.model.nc = self.data["nc"]  # attach number of classes to model
         self.model.names = self.data["names"]  # attach class names to model
-        
+        self.model.colors = self.data.get("colors")  # attach optional class colors to model
+        self.model.args = self.args  # attach hyperparameters to model
+
         # TODO (CP/IRIT): add the knowledge model relations
         self.model.refinement = self.data.get("refinement",{})
         self.model.composition = self.data.get("composition",{})
         self.model.variants = self.data.get("variants",{})
         variant_to_class_dictionnary = self.data.get("variant_to_class",{})
         self.model.variant_to_class = torch.tensor([variant_to_class_dictionnary[i] for i in range(len(variant_to_class_dictionnary))])
-        
-        self.model.args = self.args  # attach hyperparameters to model
 
     def set_model_names_for_load(self, model):
         """Set target dataset names before loading weights so cls heads can remap by name."""
@@ -253,6 +253,7 @@ class DetectionTrainer(BaseTrainer):
             paths=batch["im_file"],
             fname=self.save_dir / f"train_batch{ni}.jpg",
             names=self.data["names"] if "semantic_mask" in batch else None,  # World/YOLOE remap cls to prompt slots
+            class_colors=self.data.get("colors"),
             on_plot=self.on_plot,
         )
 

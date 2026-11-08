@@ -8,7 +8,7 @@ import torch.nn as nn
 
 import numpy as np
 
-from ultralytics.utils import LOGGER
+from ultralytics.utils import LOGGER, PREDICT_IOU
 from ultralytics.utils.metrics import batch_probiou, box_iou
 from ultralytics.utils.ops import xywh2xyxy
 
@@ -17,7 +17,7 @@ from ultralytics.utils.km import scores_fuzzy_equiv, scores_bce
 def non_max_suppression(
     prediction,
     conf_thres: float = 0.25,
-    iou_thres: float = 0.45,
+    iou_thres: float = PREDICT_IOU,
     classes=None,
     agnostic: bool = False,
     multi_label: bool = False,
@@ -53,8 +53,7 @@ def non_max_suppression(
             end2end: 4 (bounding box) + 1 (confidence score) + 1 (class label) + masks
             classic : 4 (bounding box) + nc (confidence scores) + masks (CP/IRIT adds nc class scores)
         conf_thres (float): Confidence threshold for filtering detections. Valid values are between 0.0 and 1.0.
-        iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0. The 0.45 default is
-            not the cfg `iou` default (0.7), which predictors and validators always pass explicitly.
+        iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0.
         classes (list[int], optional): List of class indices to consider. If None, all classes are considered.
         agnostic (bool): Whether to perform class-agnostic NMS.
         multi_label (bool): Whether each box can have multiple labels.
