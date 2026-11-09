@@ -55,6 +55,8 @@ datasets/
 
 Each label row contains class `0` followed by normalized polygon coordinates. Images are hard-linked when the filesystem supports it and copied otherwise.
 
+Explore [Scene Text on Ultralytics Platform](https://platform.ultralytics.com/ultralytics-yolo/datasets/scene-text-obb) to browse the images with oriented-box overlays and view class distributions and annotation heatmaps in the **Charts** tab.
+
 ## Dataset YAML
 
 The [`scene-text-obb.yaml`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/scene-text-obb.yaml) configuration references both converted datasets. On first use, it downloads COCO 2017 images, COCO-Text annotations, HierText annotations, and HierText images before converting them.
@@ -92,7 +94,7 @@ Train a YOLO26 OBB model at 640-pixel image size with the following commands. Ex
 
 ## Applications
 
-Use this dataset to train word-level text detectors for document processing, receipt understanding, sign translation, industrial inspection, and OCR pipelines. Detection is only one stage of OCR: pair the detector with a text recognizer when transcription is required.
+Use this dataset to train word-level text detectors for document processing, receipt understanding, sign translation, industrial inspection, and OCR pipelines. Detection is only one stage of OCR: pair the detector with a text recognizer when transcription is required, for example with the [Scene Text OCR solution](../../guides/ocr.md) and PaddleOCR.
 
 ## Licensing
 

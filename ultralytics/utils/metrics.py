@@ -14,6 +14,7 @@ import torch
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
 from ultralytics.utils.plotting import colors
+from ultralytics.utils.torch_utils import autocast
 
 OKS_SIGMA = (
     np.array(
@@ -189,7 +190,8 @@ def mask_iou(mask1: torch.Tensor, mask2: torch.Tensor, eps: float = 1e-7) -> tor
     """
     dtype = torch.promote_types(torch.promote_types(mask1.dtype, mask2.dtype), torch.float32)
     mask1, mask2 = mask1.to(dtype), mask2.to(dtype)  # avoid integer wrap and FP16 overflow
-    intersection = torch.matmul(mask1, mask2.T).clamp_(0)
+    with autocast(False, device=mask1.device.type):
+        intersection = torch.matmul(mask1, mask2.T).clamp_(0)
     union = (mask1.sum(1)[:, None] + mask2.sum(1)[None]) - intersection  # (area1 + area2) - intersection
     return intersection / (union + eps)
 
@@ -1740,7 +1742,7 @@ class SemanticMetrics(SimpleClass, DataExportMixin):
 
         present = torch.zeros((targets.shape[0], self.cm_nc), dtype=torch.bool, device=targets.device)
         batch_idx = torch.arange(targets.shape[0], device=targets.device).view(-1, 1, 1).expand_as(targets)
-        present[batch_idx[valid], targets[valid].long()] = True
+        present.view(-1).index_fill_(0, batch_idx[valid] * self.cm_nc + targets[valid].long(), True)
         if self.nc == 1:
             self.nt_per_image[0] += int(present[:, 1].sum())
         else:
