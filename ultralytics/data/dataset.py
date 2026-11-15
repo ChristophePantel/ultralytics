@@ -430,7 +430,7 @@ class YOLODataset(BaseDataset):
         hyp.copy_paste = 0.0
         hyp.mixup = 0.0
         hyp.cutmix = 0.0
-        self.transforms = self.build_transforms(hyp)
+        self.transforms = self.build_transforms(hyp, self) # DONE [CP/IRIT]: Add dataset parameter required to access configuration parameters
 
     def update_labels_info(self, label: dict) -> dict:
         """Update label format for different tasks.
