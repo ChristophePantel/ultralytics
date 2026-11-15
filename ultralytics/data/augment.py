@@ -42,10 +42,12 @@ class BaseTransform:
         __call__: Orchestrate the transformation pipeline.
     """
     
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
     def __init__(self, dataset = None):
         if (dataset != None):
             self.use_km = dataset.use_km
             self.use_scores = dataset.use_scores
+            self.use_km_scores = dataset.use_km_scores
         else:
             pass
 
@@ -150,6 +152,7 @@ class Compose:
         >>> compose.insert(0, RandomFlip())
     """
 
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
     def __init__(self, transforms, dataset=None):
         """Initialize the Compose object with a list of transforms.
 
@@ -159,6 +162,7 @@ class Compose:
         if dataset != None:
             self.use_km = dataset.use_km
             self.use_scores = dataset.use_scores
+            self.use_km_scores = dataset.use_km_scores
         self.transforms = transforms if isinstance(transforms, list) else [transforms]
 
     def __call__(self, data):
@@ -326,6 +330,7 @@ class BaseMixTransform(BaseTransform):
             pre_transform (Callable | None): Optional transform to apply before mixing.
             p (float): Probability of applying the mix transformation. Should be in the range [0.0, 1.0].
         """
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.dataset = dataset
         self.pre_transform = pre_transform
@@ -1160,6 +1165,7 @@ class RandomPerspective(BaseTransform):
             size (tuple[int, int] | None): Output size (width, height). If None, uses the input image size.
             preserve_obb (bool): Preserve oriented-box direction when transformed segments cross image boundaries.
         """
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.degrees = degrees
         self.translate = translate
@@ -1535,6 +1541,7 @@ class RandomHSV(BaseTransform):
             sgain (float): Maximum variation for saturation. Should be in the range [0, 1].
             vgain (float): Maximum variation for value. Should be in the range [0, 1].
         """
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.hgain = hgain
         self.sgain = sgain
@@ -1618,6 +1625,7 @@ class RandomFlip(BaseTransform):
         assert direction in {"horizontal", "vertical"}, f"Support direction `horizontal` or `vertical`, got {direction}"
         assert 0 <= p <= 1.0, f"The probability should be in range [0, 1], but got {p}."
 
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.p = p
         self.direction = direction
@@ -1780,6 +1788,7 @@ class LetterBox(BaseTransform):
             padding_value (int): Value for padding the image. Default is 114.
             interpolation (int): Interpolation method for resizing. Default is cv2.INTER_LINEAR.
         """
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.new_shape = new_shape
         self.auto = auto
@@ -2213,6 +2222,7 @@ class Albumentations(BaseTransform):
                 in checkpoints. If None, uses default transforms.
             flip_idx (list[int] | None): Keypoint index mapping for reflection transforms.
         """
+        # DONE (IRIT/CP): Pass configuration parameters.
         super().__init__(dataset)
         self.p = p
         self.flip_idx = flip_idx
@@ -2441,6 +2451,7 @@ class Format(BaseTransform):
         >>> masks = formatted_labels["masks"]
     """
 
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
     def __init__(
         self,
         bbox_format: str = "xywh",
@@ -2471,6 +2482,7 @@ class Format(BaseTransform):
             batch_idx (bool): If True, keeps batch indexes.
             bgr (float): Probability of returning BGR images instead of RGB.
         """
+        # DONE (IRIT/CP): Pass configuration parameters as dataset.
         super().__init__(dataset)
         self.bbox_format = bbox_format
         self.normalize = normalize
@@ -2669,6 +2681,11 @@ class SemanticFormat(Format):
     This transform converts the image to a CHW tensor and the semantic mask to an int32 tensor, and removes
     instance-level keys.
     """
+    
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
+    def __init__(self, dataset = None):
+        # DONE (IRIT/CP): Pass configuration parameters as dataset.
+        super().__init__(dataset)
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Format image and semantic mask for semantic segmentation.
@@ -2707,12 +2724,15 @@ class SemanticFormat(Format):
 class LoadVisualPrompt(BaseTransform):
     """Create visual prompts from bounding boxes or masks for model input."""
 
-    def __init__(self, scale_factor: float = 1 / 8) -> None:
+    # DONE (IRIT/CP): Pass configuration parameters.
+    def __init__(self, scale_factor: float = 1 / 8, dataset = None) -> None:
         """Initialize the LoadVisualPrompt with a scale factor.
 
         Args:
             scale_factor (float): Factor to scale the image dimensions to the visual prompt mask size.
         """
+        # DONE (IRIT/CP): Pass configuration parameters as dataset.
+        super().__init__(dataset)
         self.scale_factor = scale_factor
 
     @staticmethod
@@ -2845,7 +2865,7 @@ class RandomLoadText(BaseTransform):
         >>> print(len(updated_labels["texts"]))  # padded to max_samples
         5
     """
-
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
     def __init__(
         self,
         prompt_format: str = "{}",
@@ -2853,6 +2873,7 @@ class RandomLoadText(BaseTransform):
         max_samples: int = 80,
         padding: bool = False,
         padding_value: list[str] | None = None,
+        dataset = None,
     ) -> None:
         """Initialize the RandomLoadText class for randomly sampling positive and negative texts.
 
@@ -2869,6 +2890,8 @@ class RandomLoadText(BaseTransform):
                 max_samples.
             padding_value (list[str]): The padding text to use when padding is True.
         """
+        # DONE (IRIT/CP): Pass configuration parameters as dataset.
+        super().__init__(dataset)
         self.prompt_format = prompt_format
         self.neg_samples = neg_samples
         self.max_samples = max_samples
@@ -3022,6 +3045,7 @@ def v8_transforms(dataset, imgsz: int, hyp: IterableSimpleNamespace) -> Compose:
         elif flip_idx and (len(flip_idx) != kpt_shape[0]):
             raise ValueError(f"data.yaml flip_idx={flip_idx} length must be equal to kpt_shape[0]={kpt_shape[0]}")
 
+    # DONE (IRIT/CP): Pass configuration parameters through dataset.
     return Compose(
         [
             pre_transform,
@@ -3197,6 +3221,11 @@ class DepthFormat(Format):
     apply_depth hook (run after apply_image in BaseTransform.__call__) resizes the paired depth map to the letterboxed
     image size and emits it as a (1, H, W) float tensor.
     """
+
+    # DONE (IRIT/CP): Pass configuration parameters as dataset.
+    def __init__(self, dataset = None):
+        # DONE (IRIT/CP): Pass configuration parameters as dataset.
+        super().__init__(dataset)
 
     def apply_depth(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Resize depth to the formatted image size (nearest) and emit a (1, H, W) float tensor.
