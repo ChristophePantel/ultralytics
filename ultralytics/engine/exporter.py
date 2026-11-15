@@ -92,6 +92,7 @@ from ultralytics.nn.autobackend import AutoBackend, check_class_names, default_c
 from ultralytics.nn.modules import (
     OBB,
     OBB26,
+    SPPF,
     Attention,
     C2f,
     Classify,
@@ -130,6 +131,7 @@ from ultralytics.utils.checks import (
     IS_PYTHON_MINIMUM_3_10,
     IS_PYTHON_MINIMUM_3_13,
     ONNXRUNTIME_BUILDS,
+    ONNXRUNTIME_CUDA,
     check_data_portable,
     check_imgsz,
     check_python,
@@ -241,7 +243,15 @@ def export_formats():
             ["batch", "name", "quantize", "opset", "simplify", "data", "fraction"],
             "isolated-rknn",
         ],
-        ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"], "executorch"],
+        [
+            "ExecuTorch",
+            "executorch",
+            "_executorch_model",
+            True,
+            False,
+            ["batch", "quantize", "data", "fraction"],
+            "executorch",
+        ],
         [
             "Axelera AI",
             "axelera",
@@ -484,6 +494,7 @@ INT8_FORMATS = frozenset(
         "deepx",
         "hailo",
         "xilinx",
+        "executorch",
     }
 )
 W8A16_FORMATS = frozenset({"coreml", "litert", "qnn"})  # INT8 weights + 16-bit activations (FP16; INT16 on LiteRT)
@@ -691,10 +702,9 @@ class Exporter:
         if fmt == "imx" and self.args.device is None and torch.cuda.is_available():
             LOGGER.warning("Exporting on CPU while CUDA is available, setting device=0 for faster export on GPU.")
             self.args.device = "0"  # update device to "0"
-        intel = str(self.args.device).startswith("intel")  # OpenVINO inference devices; the model traces on CPU
         self.device = select_device(
             "cpu"
-            if self.args.device is None or intel or fmt in {"coreai", "executorch", "litert", "nxp"}
+            if self.args.device is None or fmt in {"coreai", "executorch", "litert", "nxp", "openvino"}
             else self.args.device
         )
 
@@ -972,6 +982,8 @@ class Exporter:
 
             model = executorch_wrapper(model)
         for m in model.modules():
+            if isinstance(m, SPPF):
+                m.export = True
             if isinstance(m, Attention) and fmt == "coreml" and self.args.format != "mlmodel":
                 m.format = fmt
             if isinstance(m, (Classify, SemanticSegment, Depth)):
@@ -1174,7 +1186,7 @@ class Exporter:
             # Pass onnxruntime variants as interchangeable candidates so AutoUpdate keeps an installed build
             # (e.g. onnxruntime-qnn for QNN export) instead of reinstalling stable onnxruntime and breaking its ABI.
             # ROCm gets stock onnxruntime, the base the MIGraphX EP plugin installs onto at inference.
-            ort = "onnxruntime-gpu[cuda]" if "cuda" in self.device.type and not rocm_is_available() else "onnxruntime"
+            ort = ONNXRUNTIME_CUDA if "cuda" in self.device.type and not rocm_is_available() else "onnxruntime"
             requirements += [(ort, *ONNXRUNTIME_BUILDS)]
         if self.args.simplify:
             requirements += ["onnxslim>=0.1.82"]
@@ -1350,7 +1362,8 @@ class Exporter:
     def export_litert(self, prefix=colorstr("LiteRT:")):  # noqa: B008
         """Export YOLO model to LiteRT format using litert_torch with optional INT8 quantization.
 
-        Supports ``quantize=8`` (static INT8, int8 weights + int8 activations, requires calibration ``data``),
+        Supports ``quantize=8`` (static INT8, int8 weights + int8 activations, FP32 head outputs on Detect models,
+        requires calibration ``data``),
         ``quantize='w8a16'`` (static, int8 weights + int16 activations, requires calibration ``data``) and
         ``quantize='w8a32'`` (dynamic/weight-only INT8, int8 weights + FP32 activations, no calibration needed).
         """
@@ -1572,7 +1585,7 @@ class Exporter:
 
     @try_export
     def export_executorch(self, prefix=colorstr("ExecuTorch:")):  # noqa: B008
-        """Export YOLO model to ExecuTorch *.pte format."""
+        """Export YOLO model to ExecuTorch *.pte format, with optional static INT8 (requires calibration ``data``)."""
         assert TORCH_2_9, f"ExecuTorch requires torch>=2.9.0 but torch=={TORCH_VERSION} is installed"
         from ultralytics.utils.export.executorch import torch2executorch
 
@@ -1582,6 +1595,7 @@ class Exporter:
             output_dir=str(self.file).replace(self.file.suffix, "_executorch_model/"),
             metadata=self.metadata,
             prefix=prefix,
+            calibration_dataset=self.get_int8_calibration_dataloader(prefix) if self.args.quantize == 8 else None,
         )
 
     @try_export
