@@ -223,6 +223,7 @@ class YOLODataset(BaseDataset):
             (tuple): (verify function, zipped argument iterable) for ThreadPool.imap.
         """
         nkpt, ndim = self.data.get("kpt_shape", (0, 0))
+        # DONE [CP/IRIT]: configuration parameter transmission.
         zipped = zip(
             self.im_files,
             self.label_files,
@@ -386,7 +387,7 @@ class YOLODataset(BaseDataset):
                 mask_ratio=hyp.mask_ratio,
                 mask_overlap=hyp.overlap_mask,
                 bgr=hyp.bgr if self.augment else 0.0,  # only affect training.
-                dataset=dataset
+                dataset=dataset # DONE [CP/IRIT]: Transmit configuration parameters as dataset.
             )
         )
         return transforms
@@ -851,6 +852,7 @@ class GroundingDataset(YOLODataset):
             else:
                 segments = []  # no annotation carried a segmentation, so store no masks
 
+            # TODO [CP/IRIT]: Add scores and variants ?
             x["labels"].append(
                 {
                     "im_file": im_file,

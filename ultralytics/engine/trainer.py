@@ -994,6 +994,7 @@ class BaseTrainer:
         """Raise NotImplementedError (must be implemented by subclasses)."""
         raise NotImplementedError("get_validator function not implemented in trainer")
 
+    # DONE (CP/IRIT): transmit configuration parameters as model.
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train", model=None):
         """Raise NotImplementedError (must return a `torch.utils.data.DataLoader` in subclasses)."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")

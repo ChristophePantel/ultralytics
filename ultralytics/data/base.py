@@ -215,9 +215,10 @@ class BaseDataset(Dataset):
         elif self.cache == "disk" and self.check_cache_disk():
             self.cache_images()
 
+        # DONE [CP/IRIT]: transfer configuration parameters as dataset.
         # Transforms
         self.transforms = self.build_transforms(hyp=copy(hyp), dataset=self)  # subclasses zero unsupported keys, never the caller's
-        
+
     def get_img_files(self, img_path: str | list[str]) -> list[str]:
         """Read image files from the specified path.
 

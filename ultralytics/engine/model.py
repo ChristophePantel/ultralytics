@@ -225,10 +225,10 @@ class Model(torch.nn.Module):
         cfg_dict = yaml_model_load(cfg)
         if "use_scores" in kwargs:
             cfg_dict["use_scores"] = kwargs["use_scores"]
-        if "use_km" in kwargs:
-            cfg_dict["use_km"] = kwargs["use_km"]
-        if "use_km_scores" in kwargs:
-            cfg_dict["use_km_scores"] = kwargs["use_km_scores"]
+            if "use_km" in kwargs:
+                cfg_dict["use_km"] = kwargs["use_km"]
+                if "use_km_scores" in kwargs:
+                    cfg_dict["use_km_scores"] = kwargs["use_km_scores"]
         self.cfg = cfg
         self.task = task or guess_model_task(cfg_dict)
         self.model = self._smart_load("model")(cfg_dict, verbose=verbose and RANK == -1, **kwargs)  # build model # (CP/IRIT): Add open configuration parameters
