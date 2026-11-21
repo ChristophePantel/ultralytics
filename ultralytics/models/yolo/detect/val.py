@@ -119,7 +119,7 @@ class DetectionValidator(BaseValidator):
                 if LOCAL_RANK in {-1, 0}:
                     for f in (self.save_dir / "labels").glob("*.txt"):
                         f.unlink(missing_ok=True)
-            self.label_root = os.path.commonpath([os.path.dirname(f) for f in self.dataloader.dataset.im_files])
+        self.label_root = os.path.commonpath([Path(f).absolute().parent for f in self.dataloader.dataset.im_files])
         if not self.training:
             self._check_max_det(self.args, {self.args.split or "val": self.dataloader.dataset})
         val = self.data.get(self.args.split, "")  # validation path
@@ -264,7 +264,7 @@ class DetectionValidator(BaseValidator):
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
                     "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "im_name": Path(pbatch["im_file"]).name,
+                    "im_name": Path(pbatch["im_file"]).absolute().relative_to(self.label_root).as_posix(),
                 }
             )
             if self.args.plots:
@@ -286,7 +286,7 @@ class DetectionValidator(BaseValidator):
             if self.args.save_json:
                 self.pred_to_json(predn_scaled, pbatch)
             if self.args.save_txt:  # flatten the split-relative path so a/1.jpg and b/1.jpg write a_1.txt and b_1.txt
-                name = "_".join(Path(pbatch["im_file"]).relative_to(self.label_root).with_suffix("").parts)
+                name = "_".join(Path(pbatch["im_file"]).absolute().relative_to(self.label_root).with_suffix("").parts)
                 self.save_one_txt(
                     predn_scaled, self.args.save_conf, pbatch["ori_shape"], self.save_dir / "labels" / f"{name}.txt"
                 )
@@ -424,7 +424,8 @@ class DetectionValidator(BaseValidator):
             (torch.utils.data.DataLoader): DataLoader for validation.
         """
         dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
-        if self.names and len(self.names) < self.data["nc"]:  # standalone val of a model with fewer classes
+        # standalone val of a model with fewer classes; single_cls already maps every label to class 0
+        if self.names and len(self.names) < self.data["nc"] and not self.args.single_cls:
             LOGGER.warning(f"Skipping labels of classes the model (nc={len(self.names)}) cannot predict.")
             dataset.update_labels(list(range(len(self.names))))
         return build_dataloader(
@@ -613,6 +614,8 @@ class DetectionValidator(BaseValidator):
                         if self.gdict
                         else [int(Path(x).stem) for x in self.dataloader.dataset.im_files]
                     )
+                    if not self.gdict and self.args.classes is not None and not self.args.single_cls:
+                        val.params.catIds = [self.class_map[c] for c in np.atleast_1d(self.args.classes)]
                     val.evaluate()
                     val.accumulate()
                     val.summarize()

@@ -904,7 +904,7 @@ class Metric(SimpleClass):
         all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 10).
         ap_class_index (list): Index of class for each AP score. Shape: (nc,).
         nc (int): Number of classes.
-        image_metrics (dict[str, dict]): Per-image precision, recall, F1, TP, FP, and FN keyed by image name.
+        image_metrics (dict[str, dict]): Per-image precision, recall, F1, TP, FP, and FN keyed by image path.
 
     Methods:
         ap50: AP at IoU threshold of 0.5 for all classes.
@@ -1073,7 +1073,7 @@ class Metric(SimpleClass):
                 >= 0.5) is used.
             target_cls (np.ndarray): Ground truth class labels for the image.
             pred_cls (np.ndarray): Predicted class labels for the image.
-            im_name (str): The image filename used as the per-image key.
+            im_name (str): Image path relative to the common image directory.
         """
         # Use the default IoU=0.5 column to match the validator's image-level matching policy.
         tp = int(tp[:, 0].sum())
@@ -1266,12 +1266,12 @@ class DetMetrics(SimpleClass, DataExportMixin):
         return [
             {
                 "Class": self.names[self.ap_class_index[i]],
-                "Images": self.nt_per_image[self.ap_class_index[i]],
-                "Instances": self.nt_per_class[self.ap_class_index[i]],
-                **{k: round(v[i], decimals) for k, v in per_class.items()},
-                "mAP50": round(self.class_result(i)[2], decimals),
-                "mAP75": round(self.box.all_ap[i, 5], decimals),
-                "mAP50-95": round(self.class_result(i)[3], decimals),
+                "Images": int(self.nt_per_image[self.ap_class_index[i]]),
+                "Instances": int(self.nt_per_class[self.ap_class_index[i]]),
+                **{k: float(round(v[i], decimals)) for k, v in per_class.items()},
+                "mAP50": float(round(self.class_result(i)[2], decimals)),
+                "mAP75": float(round(self.box.all_ap[i, 5], decimals)),
+                "mAP50-95": float(round(self.class_result(i)[3], decimals)),
             }
             for i in range(len(per_class["Box-P"]))
         ]
@@ -1293,7 +1293,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
         for i, s in enumerate(summary):
             ap = metric.all_ap[i]
             values = (metric.p[i], metric.r[i], metric.f1[i], ap[0], ap[5], ap.mean())
-            s.update({f"{prefix}-{k}": round(v, decimals) for k, v in zip(keys, values)})
+            s.update({f"{prefix}-{k}": float(round(v, decimals)) for k, v in zip(keys, values)})
         return summary
 
 

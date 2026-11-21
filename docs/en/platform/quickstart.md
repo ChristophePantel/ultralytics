@@ -36,7 +36,10 @@ flowchart TD
 
 ## Get Started
 
-You can sign up and log in with a Google or GitHub account, or with your email address.
+You can sign up and log in with a Google or GitHub account, or with your email address. An email sign-up asks for a code
+sent to that address. A Google or GitHub sign-up needs an email address the provider has already verified. If it
+reports yours as unverified, Platform creates no account and asks you to verify the email with that provider, for
+example in your GitHub email settings, then try again.
 
 ![Ultralytics Platform Signup](https://cdn.ul.run/i/1683ea5d0337eeb6e9099ac434afaedb.avif)<!-- screenshot -->
 
@@ -146,7 +149,7 @@ Press `Cmd+K` (Mac) or `Ctrl+K` (Windows/Linux) to open the search bar. Search a
 
 ### AI Chat Assistant
 
-Click **Ask AI** to work with an AI agent that automates tasks across Ultralytics Platform. It works directly with your datasets and models to annotate images, run training experiments, compare results, and export or deploy models. See [AutoTrain with Ask AI](train/autotrain.md) for example prompts and setup for your own coding agent.
+Click **Ask AI** to work with an AI agent that automates tasks across Ultralytics Platform. It works directly with your datasets and models to annotate images, run training experiments, compare results, and export or deploy models. See [AutoTrain with Ask AI](train/autotrain.md) for example prompts and setup for your own coding agent. To show it a screenshot or a training log, attach up to 3 files (3 MB in total): click `+` and choose **Add Photos & Files**, drag them into the chat, or paste an image with `Cmd/Ctrl+V`.
 
 ### Onboarding Tours
 
