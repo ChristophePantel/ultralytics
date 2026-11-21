@@ -408,14 +408,14 @@ Images can be sorted and filtered for efficient browsing:
 Click any image to open the fullscreen viewer with:
 
 - **Navigation**: Arrow keys or thumbnail previews to browse
-- **Image information**: Review Platform-generated properties, custom metadata, and embedded file metadata such as EXIF
+- **Image information**: Review Platform-generated properties, custom metadata, and embedded file metadata such as EXIF. An image added from another dataset (with [Find Similar](#find-similar-images), [Copy or Move](#copy-and-move-images), or [Clone](#clone-dataset)) or from [Generate Similar](#generate-similar-images) also shows where it came from: **Source method**, **Source dataset** (**Unavailable** when that dataset is deleted or not visible to you), **Source model** for generated images, **Source license** at import, and **Imported by** for members of the dataset's workspace. Platform records only the latest import, and plain uploads and images added before it began recording sources in November 2026 show none
 - **Custom metadata**: Owners and editors can add or replace a JSON object, including nested values up to 500,000 serialized characters and top-level keys up to 128 characters
 - **Annotations**: Toggle annotation overlay visibility
 - **Class Breakdown**: Per-class label counts with color indicators
 - **Annotate**: When you have edit access, annotation controls are active immediately when the fullscreen viewer opens on desktop
 - **Blur faces**: Right-click the image or an annotation to [preview and apply face blurring](#blur-faces) to the image when available
 - **Rotate**: With edit access, press `R` or use the rotate button to turn the image and its annotations 90° clockwise. Platform keeps the image as first stored and renders each turn from it, so repeated turns do not degrade the image and turning back to upright restores the original. Rotation is not available for depth datasets, multispectral datasets, images stored as TIFF, or cloud storage and On Premise datasets
-- **Download**: Download the original image file
+- **Download**: Download the full-size image file, turned as displayed if you rotated it
 - **Delete**: Permanently delete the image from the dataset after you confirm
 - **Zoom**: `Cmd/Ctrl+Scroll`, `Cmd/Ctrl++`, or `Cmd/Ctrl+=` to zoom in, and `Cmd/Ctrl+-` to zoom out
 - **Reset view**: `Cmd/Ctrl + 0` or the reset button to fit the image to the viewer
@@ -423,7 +423,7 @@ Click any image to open the fullscreen viewer with:
 - **Pixel view**: Toggle pixelated rendering for close inspection
 - **Depth curtain**: On depth datasets, a draggable divider wipes between the RGB image and its colorized depth map
 
-![Ultralytics Platform Datasets Fullscreen Viewer With Metadata Panel](https://cdn.ul.run/i/fdda4f9080025d94e4fe07f1e45590bf.avif)<!-- screenshot -->
+![Ultralytics Platform Datasets Fullscreen Viewer With Metadata Panel](https://cdn.ul.run/i/e468cbb1faf97aa8518846788e435894.avif)<!-- screenshot -->
 
 ### Filter by Split
 
@@ -768,7 +768,7 @@ Right-click an image in **Grid** or **Compact** view, or a single selected row i
 | **Blur Faces**              | Blur the faces detected in the image (see [Blur Faces](#blur-faces))                                                 |
 | **Copy** / **Cut**          | Copy or cut the image to paste it into another dataset (see [Copy and Move Images](#copy-and-move-images))           |
 | **Paste**                   | Paste copied or cut images into this dataset; shown when the clipboard holds images from another dataset             |
-| **Download**                | Download the original image file                                                                                     |
+| **Download**                | Download the full-size image file, turned as displayed if you rotated it                                             |
 | **Delete**                  | Permanently delete the image after you confirm; images don't go to [Trash](../account/trash.md)                      |
 
 ![Ultralytics Platform Datasets Image Card Context Menu](https://cdn.ul.run/i/cfd31e07fad45487f91d1ba876f5fca3.avif)<!-- screenshot -->

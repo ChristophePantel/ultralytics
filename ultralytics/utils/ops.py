@@ -84,10 +84,8 @@ def merge_tiles(
     alternatively it contains one semantic_mask, depth or probs tensor. Masks match their window size or a whole-pixel
     stride of it, inferred from the larger side; dense maps match their window size. Boxes cut by an interior window
     edge are dropped when another window sees them clear of its edges and a kept box covers them, then NMS removes
-    duplicates. Only masks surviving box suppression are expanded to the full image.
+    duplicates. Masks, dense or box-local `(rois, masks, shape)`, return box-local in the full image frame.
     """
-    from bisect import bisect_right
-
     from ultralytics.utils.nms import nms_boxes
 
     first = predictions[0]
@@ -149,23 +147,19 @@ def merge_tiles(
         keypoints = torch.cat([p["keypoints"] for p in predictions])[keep].clone()
         keypoints[..., :2] += offsets[keep, None]
         output["keypoints"] = keypoints
-    if any("masks" in p for p in predictions):
-        i = next(i for i, p in enumerate(predictions) if "masks" in p)
-        template = predictions[i]["masks"]
-        x1, y1, x2, y2 = windows[i]
-        r = round(max(x2 - x1, y2 - y1) / max(template.shape[-2:]))  # mask stride, 1 at source resolution
-        output["masks"] = template.new_zeros((len(keep), -(-shape[0] // r), -(-shape[1] // r)))
-        ends, count = [], 0
-        for p in predictions:
-            count += len(p["bboxes"])
-            ends.append(count)
-        for j, k in enumerate(keep.tolist()):
-            source = bisect_right(ends, k)
-            local = k - (ends[source - 1] if source else 0)
-            x1, y1 = ((v - r // 2 + r - 1) // r for v in windows[source][:2])  # first sampled pixel, x1 when r=1
-            mask = predictions[source]["masks"][local]
-            target = output["masks"][j, y1 : y1 + mask.shape[0], x1 : x1 + mask.shape[1]]
-            target[:] = mask[: target.shape[0], : target.shape[1]]
+    if tiles := [(p["masks"], window) for p, window in zip(predictions, windows) if "masks" in p]:
+        template, (x1, y1, x2, y2) = tiles[0]
+        r = round(max(x2 - x1, y2 - y1) / max(template[2] if isinstance(template, tuple) else template.shape[-2:]))
+        h, w = -(-shape[0] // r), -(-shape[1] // r)
+        rois, masks = [], []
+        for m, window in tiles:
+            if not isinstance(m, tuple):  # a dense stack is box-local with every box spanning its window
+                rows = [[0, 0, m.shape[2], m.shape[1], 0, j] for j in range(len(m))]
+                m = torch.tensor(rows, dtype=torch.long, device=m.device).view(-1, 6), [m]
+            x1, y1 = ((v - r // 2 + r - 1) // r for v in window[:2])  # first sampled pixel, x1 when r=1
+            rois.append(m[0] + m[0].new_tensor([x1, y1, x1, y1, len(masks), 0]))
+            masks += m[1]
+        output["masks"] = clip_boxes(torch.cat(rois)[keep], (h, w)), masks, (h, w)
     return output
 
 
@@ -619,6 +613,21 @@ def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     return masks
 
 
+def letterbox_span(shape1: tuple[int, int], shape0: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Return the (top, left, height, width) that an image of `shape0` spans once letterboxed into `shape1`.
+
+    Args:
+        shape1 (tuple[int, int]): Letterboxed (height, width).
+        shape0 (tuple[int, int]): Original image (height, width).
+
+    Returns:
+        (tuple[int, int, int, int]): Top and left padding, then the height and width of the image content.
+    """
+    gain = min(shape1[0] / shape0[0], shape1[1] / shape0[1])
+    h, w = max(round(shape0[0] * gain), 1), max(round(shape0[1] * gain), 1)
+    return round((shape1[0] - h) / 2 - 0.1), round((shape1[1] - w) / 2 - 0.1), h, w
+
+
 def process_mask(protos, masks_in, bboxes, shape, upsample: bool = False):
     """Generate binary instance masks from mask prototypes and coefficients, cropped to their bounding boxes.
 
@@ -695,16 +704,14 @@ def process_mask_local(protos, masks_in, bboxes, shape):
     Returns:
         rois (torch.Tensor): Int64 (N, 6) rows of x1, y1, x2, y2 box pixels in `shape`, then the mask's batch and row in
             `masks`.
-        masks (list[torch.Tensor]): Bool batches of shape (n, h, w), each row holding one box's mask in its top-left (y2
-            - y1, x2 - x1) corner.
+        masks (list[torch.Tensor]): Uint8 batches of shape (n, h, w), each row holding one box's mask in its top-left
+            (y2 - y1, x2 - x1) corner.
         keep (torch.Tensor): Bool (N,) flags, False for masks with no pixels.
     """
     c, mh, mw = protos.shape  # CHW
     h, w = shape
     dev = bboxes.device
-    gain = min(4 * mh / h, 4 * mw / w)  # letterbox placement of the frame inside the model input
-    cw, ch = max(round(w * gain), 1), max(round(h * gain), 1)
-    left, top = round((4 * mw - cw) / 2 - 0.1), round((4 * mh - ch) / 2 - 0.1)
+    top, left, ch, cw = letterbox_span((4 * mh, 4 * mw), shape)  # the frame inside the model input
     # Prototype coordinate of every frame column and row, as bilinear interpolation with align_corners=False samples
     # it, clamped to the prototypes centered on the frame so that letterbox padding never bleeds into a mask edge
     fx = ((torch.arange(w, device=dev) + 0.5) * (cw / w) + left).clamp_(left + 2, left + cw - 2) / 4 - 0.5
@@ -739,7 +746,7 @@ def process_mask_local(protos, masks_in, bboxes, shape):
         m &= (torch.arange(m.shape[1], device=dev) < bh[k, None])[:, :, None]
         keep[k] = m.flatten(1).any(1)
         batch[k], row[k] = len(masks), n[:, 0]
-        masks.append(m)
+        masks.append(m.byte())
         i = j
     return torch.stack((x1, y1, x1 + bw, y1 + bh, batch, row), 1), masks, keep
 
@@ -773,12 +780,14 @@ def scale_masks(
         return masks.new_zeros((*masks.shape[:2], im0_h, im0_w), dtype=torch.float32)
 
     if ratio_pad is None:  # calculate from im0_shape
-        gain_h = gain_w = min(im1_h / im0_h, im1_w / im0_w)  # gain  = old / new
-        pad_w, pad_h = (im1_w - max(round(im0_w * gain_w), 1)) / 2, (im1_h - max(round(im0_h * gain_h), 1)) / 2
+        top, left, ch, cw = letterbox_span((im1_h, im1_w), (im0_h, im0_w))
     else:
         (gain_h, gain_w), (pad_w, pad_h) = ratio_pad
-    top, left = (round(pad_h - 0.1), round(pad_w - 0.1)) if padding else (0, 0)
-    bottom, right = top + max(round(im0_h * gain_h), 1), left + max(round(im0_w * gain_w), 1)  # content end
+        top, left = round(pad_h - 0.1), round(pad_w - 0.1)
+        ch, cw = max(round(im0_h * gain_h), 1), max(round(im0_w * gain_w), 1)
+    if not padding:
+        top = left = 0
+    bottom, right = top + ch, left + cw  # content end
     if ratio_pad and not padding and abs(im0_h * gain_h - bottom) + abs(im0_w * gain_w - right) > 1e-3:  # mid-pixel
         sh, sw = im0_h * gain_h / im1_h, im0_w * gain_w / im1_w  # sample the exact content span instead of cropping
         masks = masks.float()

@@ -38,6 +38,7 @@ Usage - formats:
                          yolo26n_hailo_model        # Hailo
                          yolo26n_ascend_model       # Huawei Ascend
                          yolo26n_xilinx_model       # AMD Xilinx
+                         yolo26n_stedgeai.onnx      # ST Edge AI
 """
 
 from __future__ import annotations
@@ -350,7 +351,7 @@ class BasePredictor:
             return
         size = self.imgsz if self.args.tile is True else self.args.tile
         paths, images, info = batch
-        for crops, windows, last in tile_batches(images, size, self.args.batch):
+        for crops, windows, last in tile_batches(images, size, self.args.batch, self.args.tile_overlap):
             yield (
                 ([paths[i] for i, _ in windows], crops, [info[i] for i, _ in windows]),
                 dataset,
@@ -402,7 +403,7 @@ class BasePredictor:
             self.setup_source(source if source is not None else self.args.source)
 
             # Check if save_dir/ label file exists
-            if self.args.save or self.args.save_txt:
+            if self.args.save or self.args.save_txt or self.args.save_frames:
                 (self.save_dir / "labels" if self.args.save_txt else self.save_dir).mkdir(parents=True, exist_ok=True)
 
             self.seen, self.speed, self.pixels, self.windows, self.batch, self._bases = 0, None, None, [], None, set()
@@ -493,6 +494,7 @@ class BasePredictor:
                                 or self.args.save
                                 or self.args.save_txt
                                 or self.args.save_crop
+                                or self.args.save_frames
                                 or self.args.show
                             ):
                                 s[i] += self.write_results(i, Path(paths[i]), im, s)
@@ -528,7 +530,7 @@ class BasePredictor:
             if self.args.show:
                 cv2.destroyAllWindows()  # close any open windows
 
-            if self.args.save or self.args.save_txt or self.args.save_crop:
+            if self.args.save or self.args.save_txt or self.args.save_crop or self.args.save_frames:
                 nl = len(list(self.save_dir.glob("labels/*.txt")))  # number of labels
                 s = f"\n{nl} label{'s' * (nl > 1)} saved to {self.save_dir / 'labels'}" if self.args.save_txt else ""
                 LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}{s}")
@@ -628,7 +630,7 @@ class BasePredictor:
         string += f"{result.verbose()}{result.speed['inference']:.1f}ms"
 
         # Add predictions to image
-        if self.args.save or self.args.show:
+        if self.args.save or self.args.save_frames or self.args.show:
             self.plotted_img = result.plot(
                 line_width=self.args.line_width,
                 boxes=self.args.show_boxes,
@@ -644,13 +646,13 @@ class BasePredictor:
             result.save_crop(save_dir=self.save_dir / "crops", file_name=f"{self.txt_path.name}.jpg")
         if self.args.show:
             self.show(str(p))
-        if self.args.save:
+        if self.args.save or self.args.save_frames:
             self.save_predicted_images(self.save_dir / (base + p.suffix), frame, i)
 
         return string
 
     def save_predicted_images(self, save_path: Path, frame: int | None = 0, i: int = 0):
-        """Save video predictions as mp4/avi or images as jpg at specified path.
+        """Save video predictions as mp4/avi, video frames as jpg with `save_frames`, or images as jpg.
 
         Args:
             save_path (Path): Path to save the results.
@@ -662,11 +664,12 @@ class BasePredictor:
         # Save videos and streams
         if self.dataset.mode in {"stream", "video"}:
             fps = self.dataset.fps[i] if self.source_type.stream else self.dataset.fps
-            fps = max(1, fps / self.args.vid_stride)  # skipped frames must not shorten the saved video
-            frames_path = self.save_dir / f"{save_path.stem}_frames"  # save frames to a separate directory
-            if save_path not in self.vid_writer:  # new video
-                if self.args.save_frames:
-                    Path(frames_path).mkdir(parents=True, exist_ok=True)
+            fps = fps / self.args.vid_stride if fps > 0 else 1  # preserve positive rates, including below 1 FPS
+            if self.args.save_frames:  # independent of save, which controls the video file
+                frames_path = self.save_dir / f"{save_path.stem}_frames"  # save frames to a separate directory
+                frames_path.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(frames_path / f"{save_path.stem}_{frame}.jpg"), im)
+            if self.args.save and save_path not in self.vid_writer:  # new video
                 suffix, fourcc = (".mp4", "avc1") if MACOS else (".avi", "WMV2") if WINDOWS else (".avi", "MJPG")
                 self.vid_writer[save_path] = cv2.VideoWriter(
                     filename=str(Path(save_path).with_suffix(suffix)),
@@ -675,10 +678,8 @@ class BasePredictor:
                     frameSize=(im.shape[1], im.shape[0]),  # (width, height)
                 )
 
-            # Save video
-            self.vid_writer[save_path].write(im)
-            if self.args.save_frames:
-                cv2.imwrite(f"{frames_path}/{save_path.stem}_{frame}.jpg", im)
+            if self.args.save:  # save video
+                self.vid_writer[save_path].write(im)
 
         # Save images
         else:
