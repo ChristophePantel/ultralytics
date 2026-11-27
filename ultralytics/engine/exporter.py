@@ -217,7 +217,7 @@ def export_formats():
             "_saved_model",
             True,
             True,
-            ["batch", "data", "fraction", "quantize", "opset", "nms"],
+            ["batch", "opset", "nms"],
             "tensorflow",
         ],
         ["TensorFlow GraphDef", "pb", ".pb", True, True, ["batch", "opset"], "tensorflow"],
@@ -494,7 +494,6 @@ INT8_FORMATS = frozenset(
         "openvino",
         "engine",
         "coreml",
-        "saved_model",
         "edgetpu",
         "litert",
         "nxp",
@@ -724,6 +723,9 @@ class Exporter:
         # Argument compatibility checks
         fmt_keys = dict(zip(fmts_dict["Argument"], fmts_dict["Arguments"]))[fmt]
         validate_args(fmt, self.args, fmt_keys)
+        if self.args.nms and "nms" not in fmt_keys:
+            LOGGER.warning(f"format={fmt} does not support embedded NMS; using nms=None.")
+            self.args.nms = None
         if fmt in {
             "deepx",
             "axelera",
@@ -794,7 +796,7 @@ class Exporter:
         model.names = check_class_names(model.names)
         if hasattr(model, "end2end"):  # the Axelera runtime decodes the NMS-free head, so nms=None keeps it there
             model.end2end = self.args.nms is False or (
-                fmt == "axelera" and self.args.nms is None and getattr(head, "one2one_cv2", None) is not None
+                fmt == "axelera" and getattr(head, "one2one_cv2", None) is not None
             )
         if getattr(model, "end2end", False):
             if fmt in {"rknn", "ncnn", "executorch", "paddle", "imx", "edgetpu", "qnn", "nxp", "stedgeai"}:
@@ -863,9 +865,6 @@ class Exporter:
             assert self.args.name in XILINX_TARGETS, (
                 f"Invalid AMD Xilinx device '{self.args.name}'. Valid devices are {XILINX_TARGETS}."
             )
-        if self.args.nms and "nms" not in fmt_keys:
-            LOGGER.warning(f"format={fmt} does not support embedded NMS; exporting native outputs for external NMS.")
-            self.args.nms = None
         if self.args.nms and model.task in {"semantic", "depth"}:
             LOGGER.warning(f"'nms=True' is not valid for {model.task} models. Forcing 'nms=None'.")
             self.args.nms = None
@@ -1330,9 +1329,15 @@ class Exporter:
 
         assert TORCH_2_1, f"OpenVINO export requires torch>=2.1 but torch=={TORCH_VERSION} is installed"
 
+        head = getattr(self.model, "model", [None])[-1]
+
         def serialize(ov_model, file):
             """Set RT info, serialize, and save metadata YAML."""
-            ov_model.set_rt_info("YOLO", ["model_info", "model_type"])
+            # Raw (no NMS, not end2end) Detect/Segment/OBB outputs have the YOLOv8 layout that DL Streamer decodes
+            # without metadata.yaml (Model API: Detect only)
+            raw = isinstance(head, Detect) and not (self.args.nms or self.metadata["end2end"])
+            model_type = raw and {"detect": "YOLOv8", "segment": "YOLOv8-SEG", "obb": "YOLOv8-OBB"}.get(self.model.task)
+            ov_model.set_rt_info(model_type or "YOLO", ["model_info", "model_type"])
             ov_model.set_rt_info(True, ["model_info", "reverse_input_channels"])
             ov_model.set_rt_info(114, ["model_info", "pad_value"])
             ov_model.set_rt_info([255.0], ["model_info", "scale_values"])
@@ -1358,7 +1363,7 @@ class Exporter:
             dynamic=self.args.dynamic,
             quantize=self.args.quantize,
             calibration_dataset=calibration_dataset,
-            int8_detect=isinstance(getattr(self.model, "model", [None])[-1], (Detect, RTDETRDecoder)),
+            int8_detect=isinstance(head, (Detect, RTDETRDecoder)),
             device=self.args.device,
             prefix=prefix,
         )
@@ -1563,16 +1568,21 @@ class Exporter:
             assert self.args.opset <= 19, "RTDETR TensorFlow export requires opset<=19"
         self.args.simplify = True
         f_onnx = self.export_onnx()  # ensure ONNX is available
-        keras_model = onnx2saved_model(
-            f_onnx,
-            f,
-            quantize=self.args.quantize,
-            # built inline as a temporary so onnx2saved_model's `del images` frees it before the conversion phase
-            images=self._int8_calibration_images(prefix) if self.args.quantize == 8 and self.args.data else None,
-            disable_group_convolution=self.args.format == "edgetpu",
-            cuda=self.device.type == "cuda" and not rocm_is_available(),  # TensorFlow and onnxruntime-gpu are CUDA-only
-            prefix=prefix,
-        )
+        try:
+            keras_model = onnx2saved_model(
+                f_onnx,
+                f,
+                quantize=self.args.quantize,
+                # built inline as a temporary so onnx2saved_model's `del images` frees it before the conversion phase
+                images=self._int8_calibration_images(prefix) if self.args.quantize == 8 and self.args.data else None,
+                disable_group_convolution=self.args.format == "edgetpu",
+                # TensorFlow and onnxruntime-gpu are CUDA-only
+                cuda=self.device.type == "cuda" and not rocm_is_available(),
+                prefix=prefix,
+            )
+        finally:
+            if self.args.format == "edgetpu":
+                Path(f_onnx).unlink()  # the tf_wrapper ONNX outputs normalized boxes, never leave it as <stem>.onnx
         YAML.save(f / "metadata.yaml", self.metadata)  # add metadata.yaml
         # Add TFLite metadata
         for file in f.rglob("*.tflite"):
@@ -1743,6 +1753,7 @@ class Exporter:
         return onnx2deepx(
             onnx_file=f,
             imgsz=self.imgsz,
+            channels=self.im.shape[1],
             dataset=self.get_int8_calibration_dataloader(prefix),
             metadata=self.metadata,
             optimize=self.args.optimize,

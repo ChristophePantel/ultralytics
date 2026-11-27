@@ -106,7 +106,7 @@ Below it, **Training Configuration** lists every hyperparameter used and **Perfo
 
 ### Train Tab
 
-The Train tab has **Metrics**, **Console**, and **System** subtabs, plus **Validation** when validation results are available:
+The Train tab has **Metrics**, **Console**, and **System** subtabs, plus **Validation** when validation results are available. For signed-in viewers, a button at the right of the subtab row asks [Ask AI](autotrain.md) about the open subtab: **Explain with AI** on **Metrics** explains the per-epoch results in plain words, whether more training would help, and the best next step; **Improve with AI** on **Validation**, once [per-image diagnostics](#per-image-diagnostics) have loaded, names the objects and kinds of images the model gets wrong and the simplest fixes with **Find similar**, [Batch Annotation](../data/annotation.md#batch-annotation), or a new model. **Console** and **System** have no button.
 
 #### Metrics Subtab
 
@@ -122,7 +122,7 @@ Each group collapses, its menu hides or shows individual charts (and, for losses
 
 Above the charts, a **Visuals** group shows the run's first three training batches as images with their labels and [augmentations](../../guides/yolo-data-augmentation.md#preview-augmentations-on-your-own-images) applied, when the run uploaded them. They are AVIF copies of the `train_batch0.jpg` to `train_batch2.jpg` files a local run saves. Click one to open it full size and check that boxes line up with objects and that augmented images still look like your deployment scene.
 
-![Ultralytics Platform Model Train Metrics Subtab](https://cdn.ul.run/i/83338b5e71c1c107b68ad69cb0873a2a.avif)<!-- screenshot -->
+![Ultralytics Platform Model Train Metrics Subtab](https://cdn.ul.run/i/597a5e7c01ca5da7251610aeae8909c3.avif)<!-- screenshot -->
 
 #### Console Subtab
 
@@ -357,6 +357,7 @@ Some export formats have architecture or task restrictions:
 !!! note "Additional Export Rules"
 
     - Classification, semantic segmentation, and depth exports do not include NMS. CoreML embeds NMS only for detect, segment, and pose, and MNN only for detect and pose.
+    - TF SavedModel, TF GraphDef, PaddlePaddle, and ExecuTorch export at FP32 only. For an INT8 `.tflite` model, export LiteRT.
     - CoreML exports with batch sizes greater than `1` use `dynamic=true`.
     - Unsupported format/model combinations are disabled in the export dialog before you launch.
     - Only one export per format can run at a time for a given model.
@@ -370,7 +371,7 @@ Move models you can edit into another project of the same workspace without copy
 2. Right-click and choose **Cut** (`Cmd/Ctrl+X`)
 3. Open the destination project, right-click the model list, and choose **Paste** (`Cmd/Ctrl+V`), or drag the selected models onto the destination project in the sidebar
 
-![Ultralytics Platform Project Models Cut Context Menu](https://cdn.ul.run/i/271ee20993520c38d6a79ffaae6f0e02.avif)<!-- screenshot -->
+![Ultralytics Platform Project Models Cut Context Menu](https://cdn.ul.run/i/ed57e07a107814e144aab5b3e999f7c4.avif)<!-- screenshot -->
 
 Moved models keep their weights, metrics, exports, and deployments and take the destination project's URL. A model whose URL name is already used in the destination is renamed on arrival, models that are still training cannot be moved, and `Esc` cancels a pending cut. To copy a model you do not own into one of your projects, use **Clone Model**.
 

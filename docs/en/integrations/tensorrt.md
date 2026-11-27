@@ -142,7 +142,7 @@ The `quantize` and `data` arguments are the same on every TensorRT version, but 
 |                                  | TensorRT 7-10                                                | TensorRT 11                                                                                                                |
 | -------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | INT8 method                      | Implicit quantization with the `IInt8Calibrator` interface   | Explicit quantization: [NVIDIA ModelOpt](https://github.com/NVIDIA/Model-Optimizer) inserts Q/DQ nodes into the ONNX graph |
-| Calibration algorithm            | `MINMAX_CALIBRATION` on GPU, `ENTROPY_CALIBRATION_2` for DLA | ModelOpt `max`, run on the CPU                                                                                             |
+| Calibration algorithm            | `MINMAX_CALIBRATION` on GPU, `ENTROPY_CALIBRATION_2` for DLA | ModelOpt `entropy`, run on the CPU                                                                                         |
 | Calibration images used          | Every full batch of the split                                | About 512 images in shuffled order, or every full batch of a smaller split                                                 |
 | `dynamic=True` with `quantize=8` | Not covered by tests; export without `dynamic=True`          | Supported                                                                                                                  |
 | FP16 (`quantize=16`)             | TensorRT builder flag                                        | ModelOpt AutoCast [mixed-precision](https://www.ultralytics.com/glossary/mixed-precision) conversion                       |
@@ -302,7 +302,7 @@ The tables below compare PyTorch with FP32, FP16, and INT8 TensorRT 11.4 engines
 
 For NVIDIA Jetson and DGX Spark, see the [Jetson benchmarks](../guides/nvidia-jetson.md#nvidia-jetson-yolo26-benchmarks) and the [DGX Spark guide](../guides/nvidia-dgx-spark.md).
 
-Measured with `ultralytics` 8.4.211, TensorRT 11.4.0, PyTorch 2.15.0, and CUDA 13.2 at `batch=1` on November 13, 2026. Latency is the inference stage that `val` reports and does not include preprocessing or postprocessing.
+Measured with `ultralytics` 8.4.211, TensorRT 11.4.0, PyTorch 2.15.0, and CUDA 13.2 at `batch=1`. Latency is the inference stage that `val` reports and does not include preprocessing or postprocessing.
 
 ## About TensorRT
 

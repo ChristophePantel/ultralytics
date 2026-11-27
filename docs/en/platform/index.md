@@ -9,7 +9,7 @@ keywords: Ultralytics Platform, YOLO, computer vision, model training, cloud dep
 
 [Ultralytics Platform](https://platform.ultralytics.com) is an end-to-end [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) platform that covers the full machine learning workflow, from data preparation to model deployment. It is built for teams and individuals who want to train and deploy production vision models without managing their own infrastructure.
 
-![Ultralytics Platform Dataset Screenshot](https://cdn.ul.run/i/2141b069efb0284ebee4bc23847f999c.avif)<!-- screenshot -->
+![Ultralytics Platform Dataset Screenshot](https://cdn.ul.run/i/e1ee0ccc1b65ad62c48fb3f871880a34.avif)<!-- screenshot -->
 
 ## What is Ultralytics Platform?
 
@@ -103,7 +103,7 @@ flowchart TD
 - **Project Organization**: Group related models, compare experiments, track activity
 - **24 Export Formats**: ONNX, TensorRT, CoreML, LiteRT, Hailo, Ascend, and more (see [supported formats](train/models.md#supported-formats))
 
-![Ultralytics Platform Project Screenshot](https://cdn.ul.run/i/78d6e38a07e3885956acdce96a7fc061.avif)<!-- screenshot -->
+![Ultralytics Platform Project Screenshot](https://cdn.ul.run/i/2b7c23210ca96498de93671f3b8e71e8.avif)<!-- screenshot -->
 
 You can train models either through the web UI (cloud training) or from your own machine (remote training):
 
@@ -120,8 +120,8 @@ You can train models either through the web UI (cloud training) or from your own
     # Install ultralytics
     pip install "ultralytics>=8.4.120"
 
-    # Set your API key
-    export ULTRALYTICS_API_KEY="YOUR_API_KEY"
+    # Save your API key once (works on Linux, macOS, and Windows)
+    yolo login YOUR_API_KEY
 
     # Train and stream metrics to the platform
     yolo train model=yolo26n.pt data=coco.yaml epochs=100 project=username/my-project name=exp1
@@ -376,8 +376,8 @@ You can train models on your own hardware and stream real-time metrics to Ultral
 === "CLI"
 
     ```bash
-    # Set your API key
-    export ULTRALYTICS_API_KEY="YOUR_API_KEY"
+    # Save your API key once (works on Linux, macOS, and Windows)
+    yolo login YOUR_API_KEY
 
     # Train with project/name to stream metrics
     yolo train model=yolo26n.pt data=coco.yaml epochs=100 project=username/my-project name=exp1
@@ -404,9 +404,7 @@ You can train models on your own hardware and stream real-time metrics to Ultral
 === "Platform Dataset (ul:// URI)"
 
     ```bash
-    # Train using a Platform dataset directly
-    export ULTRALYTICS_API_KEY="YOUR_API_KEY"
-
+    # Train using a Platform dataset directly (after yolo login YOUR_API_KEY)
     yolo train model=yolo26n.pt data=ul://username/datasets/my-dataset epochs=100 project=username/my-project name=exp1
     ```
 
